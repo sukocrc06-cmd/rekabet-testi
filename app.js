@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Canvas elements
         canvasEquity:      $('#canvas-equity'),
         canvasDrawdown:    $('#canvas-drawdown'),
-        canvasCandlestick: $('#canvas-candlestick'),
+        canvasCandlestick: $('#tv-price-chart'),
 
         // Tooltip
         chartTooltip: $('#chart-tooltip'),
@@ -793,14 +793,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 indicatorVisibility: getIndicatorVisibility(),
                 oosSplitIndex: _chartData ? _chartData.oosSplitIndex : null
             });
-
-            // Attach crosshair tooltip
-            if (state.crosshairDetach) state.crosshairDetach();
-            state.crosshairDetach = CR.attachCrosshair(
-                el.canvasCandlestick,
-                candles,
-                el.chartTooltip
-            );
         }
 
         // 2. Equity curve

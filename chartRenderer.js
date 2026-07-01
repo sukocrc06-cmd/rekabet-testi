@@ -118,185 +118,154 @@ const ChartRenderer = (() => {
      * @param {Array}            data.smaSlow   — SMA slow line values (or null entries)
      * @param {Object}           [opts]         — rendering options
      */
-    function renderCandlestickChart(canvas, data, opts = {}) {
-        const { ctx, w, h } = setupCanvas(canvas);
-        const { candles, signals = [], smaFast = [], smaSlow = [],
-                indicators = {}, indicatorVisibility = {}, oosSplitIndex = null } = data;
+    function renderCandlestickChart(container, data, opts = {}) {
+        const { candles, signals = [], indicators = {}, indicatorVisibility = {} } = data;
 
         if (!candles || candles.length === 0) {
-            drawEmptyState(ctx, w, h, 'No OHLCV data available');
+            container.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:40px; font-family:var(--font-sans);">No OHLCV data available</div>`;
             return;
         }
 
-        // Layout regions
-        const pad = { top: 16, right: 64, bottom: 40, left: 12 };
-        const volumeHeight = h * 0.18;
-        const chartTop = pad.top;
-        const chartHeight = h - pad.top - pad.bottom - volumeHeight - 8;
-        const volTop = chartTop + chartHeight + 8;
-        const chartRight = w - pad.right;
-        const chartWidth = chartRight - pad.left;
+        // Clear container first
+        container.innerHTML = '';
 
-        // Clear
-        ctx.fillStyle = THEME.bg;
-        ctx.fillRect(0, 0, w, h);
+        // Configure Chart Options to match dark theme aesthetics
+        const chartOptions = {
+            width: container.clientWidth || 800,
+            height: 380,
+            layout: {
+                background: { type: 'solid', color: '#1E1E1E' },
+                textColor: '#F0F0F0',
+                fontFamily: THEME.fontSans || 'Outfit, sans-serif'
+            },
+            grid: {
+                vertLines: { color: '#262626' },
+                horzLines: { color: '#262626' }
+            },
+            crosshair: {
+                mode: 0 // Normal crosshair mode
+            },
+            rightPriceScale: {
+                borderColor: '#333333',
+                visible: true
+            },
+            timeScale: {
+                borderColor: '#333333',
+                timeVisible: true,
+                secondsVisible: false
+            }
+        };
 
-        // Compute price range
-        const allHighs = candles.map(c => c.high);
-        const allLows  = candles.map(c => c.low);
-        let minP = Math.min(...allLows);
-        let maxP = Math.max(...allHighs);
-        // Add 3% padding
-        const pRange = maxP - minP || 1;
-        minP -= pRange * 0.03;
-        maxP += pRange * 0.03;
+        const chart = window.LightweightCharts.createChart(container, chartOptions);
 
-        // Volume range
-        const maxVol = Math.max(...candles.map(c => c.volume)) || 1;
-
-        // Candle geometry
-        const gap = chartWidth / candles.length;
-        const candleW = Math.max(2, gap * 0.55);
-
-        const toY = (price) => priceToY(price, minP, maxP, chartTop, chartHeight);
-        const toX = (i) => pad.left + i * gap + gap / 2;
-
-        // ── Grid lines & price axis ──
-        drawGrid(ctx, minP, maxP, chartTop, chartHeight, pad.left, chartRight, w);
-
-        // ── Compliance Watermark ──
-        drawSandboxWatermark(ctx, pad.left + chartWidth / 2, chartTop + chartHeight / 2);
-
-        // ── Out-of-Sample (OOS) Split Line ──
-        if (oosSplitIndex !== null && oosSplitIndex > 0 && oosSplitIndex < candles.length) {
-            const splitX = toX(oosSplitIndex);
-            ctx.save();
-            ctx.strokeStyle = THEME.gold;
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([5, 4]);
-            ctx.beginPath();
-            ctx.moveTo(splitX, chartTop);
-            ctx.lineTo(splitX, chartTop + chartHeight);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Draw labels
-            ctx.fillStyle = THEME.gold;
-            ctx.font = `bold 9px ${THEME.fontSans}`;
-            ctx.textAlign = 'right';
-            ctx.fillText('TRAINING (IN-SAMPLE) ◄', splitX - 8, chartTop + 14);
-            ctx.textAlign = 'left';
-            ctx.fillText('► VALIDATION (OOS)', splitX + 8, chartTop + 14);
-            ctx.restore();
-        }
-
-        // ── Date axis ──
-        drawDateAxis(ctx, candles, toX, h - pad.bottom + 4, h);
-
-        // ── Volume bars ──
-        candles.forEach((c, i) => {
-            const x = toX(i);
-            const isUp = c.close >= c.open;
-            const volH = (c.volume / maxVol) * volumeHeight;
-            ctx.fillStyle = isUp ? THEME.volumeUp : THEME.volumeDown;
-            ctx.fillRect(x - candleW / 2, volTop + volumeHeight - volH, candleW, volH);
+        // Add Candlestick Series with vibrant color palette matching dark theme
+        const candlestickSeries = chart.addCandlestickSeries({
+            upColor: '#4CAF50',
+            downColor: '#F44336',
+            borderVisible: false,
+            wickUpColor: '#4CAF50',
+            wickDownColor: '#F44336'
         });
 
-        // Volume label
-        ctx.fillStyle = THEME.gridLabel;
-        ctx.font = `9px ${THEME.fontMono}`;
-        ctx.textAlign = 'right';
-        ctx.fillText('VOL', chartRight + 50, volTop + 10);
+        // Add Volume Histogram Series overlay
+        const volumeSeries = chart.addHistogramSeries({
+            color: 'rgba(212, 175, 55, 0.25)',
+            priceFormat: { type: 'volume' },
+            priceScaleId: '' // Set as overlay pane
+        });
 
-        // ── Indicator overlays (below candles for layering) ──
-        renderIndicatorOverlays(ctx, indicators, indicatorVisibility, toX, toY, pad.left, chartRight, chartTop, chartHeight);
-
-        // ── Strategy SMA lines (5/13 — always shown) ──
-        drawSmaLine(ctx, smaSlow, toX, toY, THEME.smaSlow, 1.5);
-        drawSmaLine(ctx, smaFast, toX, toY, THEME.smaFast, 1.5);
-
-        // ── Candlesticks ──
-        candles.forEach((c, i) => {
-            const x = toX(i);
-            const isUp = c.close >= c.open;
-
-            const yHigh  = toY(c.high);
-            const yLow   = toY(c.low);
-            const yOpen  = toY(c.open);
-            const yClose = toY(c.close);
-            const bodyTop = Math.min(yOpen, yClose);
-            const bodyH   = Math.max(1, Math.abs(yOpen - yClose));
-
-            // Wick
-            ctx.strokeStyle = THEME.wickColor;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(x, yHigh);
-            ctx.lineTo(x, yLow);
-            ctx.stroke();
-
-            // Body
-            if (isUp) {
-                ctx.fillStyle = THEME.candleUp;
-                ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
-            } else {
-                ctx.strokeStyle = THEME.candleDown;
-                ctx.lineWidth = 1.5;
-                ctx.strokeRect(x - candleW / 2, bodyTop, candleW, bodyH);
-                ctx.fillStyle = 'rgba(85, 85, 85, 0.3)';
-                ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+        volumeSeries.priceScale().applyOptions({
+            scaleMargins: {
+                top: 0.8, // Place volume at the bottom 20%
+                bottom: 0
             }
         });
 
-        // ── Signal markers ──
+        // Format dates and prices
+        const cData = candles.map(c => ({
+            time: c.date,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close
+        }));
+
+        const vData = candles.map(c => ({
+            time: c.date,
+            value: c.volume,
+            color: c.close >= c.open ? 'rgba(76, 175, 80, 0.25)' : 'rgba(244, 67, 54, 0.25)'
+        }));
+
+        candlestickSeries.setData(cData);
+        volumeSeries.setData(vData);
+
+        // Overlay Tech Indicators
+        // 1. SMA 20 (Blue)
+        if (indicatorVisibility.sma20 && indicators.sma20) {
+            const sma20Series = chart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, title: 'SMA 20' });
+            const sma20Data = indicators.sma20.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null && d.value !== undefined);
+            sma20Series.setData(sma20Data);
+        }
+
+        // 2. SMA 50 (Purple)
+        if (indicatorVisibility.sma50 && indicators.sma50) {
+            const sma50Series = chart.addLineSeries({ color: '#AB47BC', lineWidth: 1.5, title: 'SMA 50' });
+            const sma50Data = indicators.sma50.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null && d.value !== undefined);
+            sma50Series.setData(sma50Data);
+        }
+
+        // 3. SMA 200 (Red)
+        if (indicatorVisibility.sma200 && indicators.sma200) {
+            const sma200Series = chart.addLineSeries({ color: '#EF5350', lineWidth: 1.5, title: 'SMA 200' });
+            const sma20Data = indicators.sma200.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null && d.value !== undefined);
+            sma200Series.setData(sma20Data);
+        }
+
+        // 4. Bollinger Bands (Upper + Lower)
+        if (indicatorVisibility.bollinger && indicators.bollingerUpper && indicators.bollingerLower) {
+            const upperSeries = chart.addLineSeries({ color: 'rgba(66, 165, 245, 0.4)', lineWidth: 1.2, lineStyle: 2, title: 'BB Upper' });
+            const lowerSeries = chart.addLineSeries({ color: 'rgba(66, 165, 245, 0.4)', lineWidth: 1.2, lineStyle: 2, title: 'BB Lower' });
+
+            const upperData = indicators.bollingerUpper.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null);
+            const lowerData = indicators.bollingerLower.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null);
+
+            upperSeries.setData(upperData);
+            lowerSeries.setData(lowerData);
+        }
+
+        // 5. VWAP (Teal)
+        if (indicatorVisibility.vwap && indicators.vwap) {
+            const vwapSeries = chart.addLineSeries({ color: '#26A69A', lineWidth: 1.5, title: 'VWAP' });
+            const vwapData = indicators.vwap.map((val, idx) => ({ time: candles[idx].date, value: val })).filter(d => d.value !== null);
+            vwapSeries.setData(vwapData);
+        }
+
+        // ── Strategy BUY/SELL Signal Badges/Markers ──
+        const markers = [];
         signals.forEach(sig => {
-            const x = toX(sig.index);
             const candle = candles[sig.index];
-            if (!candle) return;
-
-            switch (sig.type) {
-                case SIGNAL.BUY:
-                    drawBuyArrow(ctx, x, toY(candle.low) + 14, sig.label);
-                    break;
-                case SIGNAL.SELL:
-                    drawSellArrow(ctx, x, toY(candle.high) - 14, sig.label);
-                    break;
-                case SIGNAL.HOLD:
-                    drawHoldBadge(ctx, x, toY(candle.high) - 16, sig.label);
-                    break;
-                case SIGNAL.ERROR:
-                    drawErrorBadge(ctx, x, toY(candle.high) - 16, sig.label);
-                    break;
+            if (candle) {
+                markers.push({
+                    time: candle.date,
+                    position: sig.type === 'BUY' ? 'belowBar' : 'aboveBar',
+                    color: sig.type === 'BUY' ? '#4CAF50' : '#F44336',
+                    shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+                    text: sig.type
+                });
             }
         });
+        candlestickSeries.setMarkers(markers);
 
-        // ── Dynamic Legend (strategy SMAs + active indicators) ──
-        drawDynamicLegend(ctx, pad.left + 6, chartTop + 6, indicatorVisibility);
+        // Responsive Resizing listener support
+        const resizeObserver = new ResizeObserver(entries => {
+            if (entries.length === 0) return;
+            const newWidth = entries[0].contentRect.width;
+            chart.resize(newWidth, 380);
+        });
+        resizeObserver.observe(container);
 
-        // ── Last price line ──
-        const lastCandle = candles[candles.length - 1];
-        if (lastCandle) {
-            const lastY = toY(lastCandle.close);
-            ctx.strokeStyle = THEME.goldBorder;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([3, 3]);
-            ctx.beginPath();
-            ctx.moveTo(pad.left, lastY);
-            ctx.lineTo(chartRight, lastY);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Price label on right axis
-            const labelW = 56;
-            const labelH = 18;
-            ctx.fillStyle = THEME.gold;
-            roundRect(ctx, chartRight + 2, lastY - labelH / 2, labelW, labelH, 3);
-            ctx.fill();
-            ctx.fillStyle = '#121212';
-            ctx.font = `bold 10px ${THEME.fontMono}`;
-            ctx.textAlign = 'center';
-            ctx.fillText('₺' + formatAxisPrice(lastCandle.close), chartRight + 2 + labelW / 2, lastY + 4);
-        }
+        // Keep chart instance in element ref to allow future cleanup/disposal if needed
+        container.chartInstance = chart;
     }
 
     /* ── Grid helpers ── */
