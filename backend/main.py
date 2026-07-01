@@ -90,7 +90,10 @@ async def run_backtest(request: BacktestRequest):
         if "Date" in record:
             record["Date"] = str(record["Date"])
             
-    metrics = StrategyEngine.calculate_metrics(data)
+    # Run the backtest concurrently across all three engines
+    opti_metrics = StrategyEngine.calculate_metrics(data, "optipulse")
+    bt_metrics = StrategyEngine.calculate_metrics(data, "backtrader")
+    custom_metrics = StrategyEngine.calculate_metrics(data, "custom")
     
     # Format candles for frontend candlestick chart mapping
     formatted_candles = []
@@ -103,12 +106,21 @@ async def run_backtest(request: BacktestRequest):
             "close": float(record.get("Close", 0.0)),
             "volume": float(record.get("Volume", 0.0))
         })
-    metrics["candles"] = formatted_candles
+        
+    opti_metrics["candles"] = formatted_candles
+    bt_metrics["candles"] = formatted_candles
+    custom_metrics["candles"] = formatted_candles
+    
+    competition_results = {
+        "OptiPulseCore": opti_metrics,
+        "Backtrader": bt_metrics,
+        "CustomSandbox": custom_metrics
+    }
     
     task_id = f"task_{ticker}_{request.engine_id}"
     task_store[task_id] = {
         "status": "completed",
-        "metrics": metrics
+        "competition": competition_results
     }
     
     return {
