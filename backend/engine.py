@@ -1,35 +1,19 @@
 class StrategyEngine:
     @staticmethod
-    def calculate_metrics(data: list, engine: str = 'optipulse') -> dict:
+    def calculate_metrics(data: list) -> dict:
         """
         Calculates moving average crossover strategy metrics on historical BIST OHLCV data.
-        Adjusts periods and commissions dynamically based on the execution engine.
-        Calculates authentic Sharpe ratio, max drawdown, and profit factor.
+        
+        Expected fields in data dictionary:
+        - Date: string/date
+        - Open, High, Low, Close: float
+        - Volume: float
         """
-        import math
-
-        # Determine strategy parameters by engine
-        if engine == 'backtrader':
-            fast_period = 7
-            slow_period = 25
-            comm_rate = 0.0007 # 0.07%
-        elif engine == 'custom':
-            fast_period = 10
-            slow_period = 30
-            comm_rate = 0.0010 # 0.10%
-        else:
-            fast_period = 5
-            slow_period = 20
-            comm_rate = 0.0005 # 0.05%
-
-        if len(data) < slow_period:
+        if len(data) < 20:
             return {
                 "total_profit": 0.0,
                 "win_rate": 0.0,
                 "trade_count": 0,
-                "sharpe": 0.0,
-                "max_dd": 0.0,
-                "profit_factor": 1.0,
                 "equity_curve": [100000.0] * max(1, len(data)),
                 "drawdown_curve": [0.0] * max(1, len(data)),
                 "dates": [d.get("Date", "") for d in data],
@@ -39,26 +23,25 @@ class StrategyEngine:
         closes = [d.get("Close", 0.0) for d in data]
         dates = [str(d.get("Date", ""))[:10] for d in data]
         
-        # Calculate fast and slow moving averages
-        sma_fast = []
-        sma_slow = []
+        # Calculate SMA 5 (fast) and SMA 20 (slow)
+        sma5 = []
+        sma20 = []
         for i in range(len(closes)):
-            if i >= fast_period - 1:
-                sma_fast.append(sum(closes[i - (fast_period - 1):i + 1]) / fast_period)
+            if i >= 4:
+                sma5.append(sum(closes[i-4:i+1]) / 5)
             else:
-                sma_fast.append(None)
+                sma5.append(None)
                 
-            if i >= slow_period - 1:
-                sma_slow.append(sum(closes[i - (slow_period - 1):i + 1]) / slow_period)
+            if i >= 19:
+                sma20.append(sum(closes[i-19:i+1]) / 20)
             else:
-                sma_slow.append(None)
+                sma20.append(None)
         
         # Simulate trades
         position = False
         entry_price = 0.0
         entry_date = ""
         entry_idx = 0
-        shares = 0
         trades = []
         initial_capital = 100000.0
         cash = initial_capital
@@ -73,10 +56,10 @@ class StrategyEngine:
             buy_signal = False
             sell_signal = False
             
-            if (sma_fast[i] is not None and sma_slow[i] is not None and 
-                sma_fast[i-1] is not None and sma_slow[i-1] is not None):
-                buy_signal = sma_fast[i] > sma_slow[i] and sma_fast[i-1] <= sma_slow[i-1]
-                sell_signal = sma_fast[i] < sma_slow[i] and sma_fast[i-1] >= sma_slow[i-1]
+            if (sma5[i] is not None and sma20[i] is not None and 
+                sma5[i-1] is not None and sma20[i-1] is not None):
+                buy_signal = sma5[i] > sma20[i] and sma5[i-1] <= sma20[i-1]
+                sell_signal = sma5[i] < sma20[i] and sma5[i-1] >= sma20[i-1]
             
             current_price = closes[i]
             
@@ -85,33 +68,25 @@ class StrategyEngine:
                 entry_price = current_price
                 entry_date = dates[i]
                 entry_idx = i
-                # Subtract commission on entry
-                cost_per_share = entry_price * (1 + comm_rate)
-                shares = int(cash / cost_per_share) if cost_per_share > 0 else 0
-                cash -= shares * cost_per_share
-                
             elif sell_signal and position:
                 position = False
-                # Subtract commission on exit
-                revenue = shares * current_price * (1 - comm_rate)
-                pnl = revenue - (shares * entry_price * (1 + comm_rate))
-                cash += revenue
-                
+                profit_pct = (current_price - entry_price) / entry_price * 100
+                pnl = (cash * (profit_pct / 100))
+                cash *= (1 + profit_pct / 100)
                 trades.append({
                     "entryDate": entry_date,
                     "exitDate": dates[i],
                     "type": "BUY",
-                    "shares": shares,
+                    "shares": int(cash / entry_price) if entry_price > 0 else 0,
                     "entryPrice": round(entry_price, 2),
                     "exitPrice": round(current_price, 2),
                     "pnl": round(pnl, 2),
                     "holdingDays": i - entry_idx
                 })
-                shares = 0
             
             # Record equity
             if position:
-                current_value = cash + (shares * current_price)
+                current_value = cash * (current_price / entry_price)
                 equity_curve.append(current_value)
             else:
                 equity_curve.append(cash)
@@ -119,16 +94,15 @@ class StrategyEngine:
         # Force close open position at the last candle
         if position:
             current_price = closes[-1]
-            revenue = shares * current_price * (1 - comm_rate)
-            pnl = revenue - (shares * entry_price * (1 + comm_rate))
-            cash += revenue
+            profit_pct = (current_price - entry_price) / entry_price * 100
+            pnl = (cash * (profit_pct / 100))
+            cash *= (1 + profit_pct / 100)
             equity_curve[-1] = cash
-            
             trades.append({
                 "entryDate": entry_date,
                 "exitDate": dates[-1],
                 "type": "BUY",
-                "shares": shares,
+                "shares": int(cash / entry_price) if entry_price > 0 else 0,
                 "entryPrice": round(entry_price, 2),
                 "exitPrice": round(current_price, 2),
                 "pnl": round(pnl, 2),
@@ -136,7 +110,6 @@ class StrategyEngine:
                 "forceExit": True
             })
             position = False
-            shares = 0
             
         # Calculate summary metrics
         trade_count = len(trades)
@@ -153,39 +126,10 @@ class StrategyEngine:
             dd = ((peak - eq) / peak * 100) if peak > 0 else 0.0
             drawdown_curve.append(dd)
             
-        max_dd = max(drawdown_curve) if drawdown_curve else 0.0
-
-        # Calculate Profit Factor
-        gross_profits = sum(t["pnl"] for t in trades if t["pnl"] > 0)
-        gross_losses = abs(sum(t["pnl"] for t in trades if t["pnl"] < 0))
-        profit_factor = gross_profits / gross_losses if gross_losses > 0 else (99.9 if gross_profits > 0 else 1.0)
-
-        # Calculate Sharpe Ratio from daily returns
-        returns = []
-        for i in range(1, len(equity_curve)):
-            prev = equity_curve[i-1]
-            if prev > 0:
-                returns.append((equity_curve[i] - prev) / prev)
-                
-        if len(returns) > 1:
-            mean_ret = sum(returns) / len(returns)
-            var_ret = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
-            std_ret = math.sqrt(var_ret)
-            if std_ret > 0:
-                # Annualized Sharpe (assuming daily returns, risk free rate = 0)
-                sharpe = (mean_ret / std_ret) * math.sqrt(252)
-            else:
-                sharpe = 0.0
-        else:
-            sharpe = 0.0
-            
         return {
             "total_profit": round(total_profit, 2),
             "win_rate": round(win_rate, 2),
             "trade_count": trade_count,
-            "sharpe": round(sharpe, 2),
-            "max_dd": round(max_dd, 2),
-            "profit_factor": round(profit_factor, 2),
             "equity_curve": [round(eq, 2) for eq in equity_curve],
             "drawdown_curve": [round(dd, 2) for dd in drawdown_curve],
             "dates": dates,

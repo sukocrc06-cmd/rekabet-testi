@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Canvas elements
         canvasEquity:      $('#canvas-equity'),
         canvasDrawdown:    $('#canvas-drawdown'),
-        canvasCandlestick: $('#tv-price-chart'),
+        canvasCandlestick: $('#canvas-candlestick'),
 
         // Tooltip
         chartTooltip: $('#chart-tooltip'),
@@ -425,7 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /* ────────────── Helper: Process Pipeline Output ────────────── */
-    function processPipelineResult(result, elapsed, capital, commission, backendCompetition = null) {
+    function processPipelineResult(result, elapsed, capital, commission) {
         state.lastResult = result;
 
         // ── Populate UI ──
@@ -433,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderAllCharts(result);
         populateTradeLog(result);
         populateOverlays(result);
-        updateCompetitionPanel(capital, commission, backendCompetition);
+        updateCompetitionPanel(capital, commission);
         updateRiskMonitor(result.metrics);
 
         // ── Restore button ──
@@ -551,60 +551,6 @@ document.addEventListener('DOMContentLoaded', () => {
        CORE: Pipeline Execution + Rendering
        ════════════════════════════════════════════════ */
 
-    function updateDashboardMetrics(comp, t0) {
-        // 1. Extract selected engine's results
-        let m = comp.OptiPulseCore;
-        if (state.engine === 'backtrader') {
-            m = comp.Backtrader;
-        } else if (state.engine === 'custom') {
-            m = comp.CustomSandbox;
-        }
-
-        const capital = parseFloat(el.capitalInput.value) || 100_000;
-        const commission = parseFloat(el.commissionInput.value) || 0.05;
-
-        // Construct pipeline result object
-        const result = {
-            ticker: state.selectedAsset,
-            candles: m.candles,
-            equityCurve: m.equity_curve,
-            metrics: {
-                netProfitPct: m.total_profit,
-                netProfit: +((m.total_profit / 100) * capital).toFixed(2),
-                maxDrawdownPct: m.max_dd !== undefined ? m.max_dd : (m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0),
-                sharpeRatio: m.sharpe !== undefined ? m.sharpe : (m.total_profit > 0 ? 1.85 : 0.45), 
-                winRate: m.win_rate,
-                wins: Math.round(m.win_rate / 100 * m.trade_count),
-                losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
-                totalTrades: m.trade_count,
-                profitFactor: m.profit_factor !== undefined ? m.profit_factor : (m.total_profit > 0 ? 1.95 : 0.85),
-                drawdownCurve: m.drawdown_curve,
-                maxMae: m.total_profit > 0 ? 2.15 : 4.85
-            },
-            trades: m.trades,
-            summary: {
-                peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
-                currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
-                lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
-                totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
-            }
-        };
-
-        // Compute indicators and signals locally based on real backend data
-        const indicators = DC.calculateIndicators(result.candles);
-        const closes = result.candles.map(c => c.close);
-        const smaFast = DC.computeSMA(closes, 5);
-        const smaSlow = DC.computeSMA(closes, 13);
-        const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
-
-        result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
-        result._indicators = indicators;
-        result.isOosActive = false;
-
-        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-        processPipelineResult(result, elapsed, capital, commission, comp);
-    }
-
     function executePipeline() {
         state.isSimulating = true;
 
@@ -613,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.btnRun.innerHTML = `
             <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2.5">
-                 <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
             </svg>
             Running...
         `;
@@ -631,36 +577,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const commission = parseFloat(el.commissionInput.value) || 0.05;
 
         const t0 = performance.now();
-        let pollId = null;
-
-        // Setup 15-second timeout
-        const timeoutId = setTimeout(() => {
-            if (state.isSimulating) {
-                console.warn("[Frontend] Backtest execution timed out (15s limit reached). Aborting...");
-                state.isSimulating = false;
-                if (pollId) clearInterval(pollId);
-
-                // Restore button state
-                el.btnRun.disabled = false;
-                el.btnRun.innerHTML = `
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                    Run Test
-                `;
-                el.btnRun.style.opacity = '1';
-                el.btnRun.style.cursor = 'pointer';
-
-                if (el.footerStatus) el.footerStatus.innerText = "System status: Ready";
-                if (el.engineStatus) {
-                    el.engineStatus.innerText = 'ONLINE';
-                    el.engineStatus.style.color = '';
-                }
-
-                alert("Test execution timeout. Please check your data source.");
-            }
-        }, 15000);
 
         // ── Try running via real FastAPI backend ──
         console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
@@ -677,13 +593,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return res.json();
         })
         .then(data => {
-            console.log('[Frontend] API Response data:', data);
             console.log(`[Frontend] Backtest run initiated. Received task_id: ${data.task_id}, status: ${data.status}`);
             
             // Poll for task status
-            pollId = DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
-                clearTimeout(timeoutId); // Clear timeout since it resolved successfully
-                
+            DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
                 if (err) {
                     console.error(`[Frontend] Polling completed with error:`, err);
                     showNotice('Backtest failed on the backend server.');
@@ -692,10 +605,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 console.log(`[Frontend] Polling completed successfully. Processing results...`);
-                const comp = statusResponse.competition;
-                
-                // Update dashboard using the concurrent results
-                updateDashboardMetrics(comp, t0);
+                const m = statusResponse.metrics;
+                const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+                // Construct result object from real backend response
+                const result = {
+                    ticker: state.selectedAsset,
+                    candles: m.candles,
+                    equityCurve: m.equity_curve,
+                    metrics: {
+                        netProfitPct: m.total_profit,
+                        netProfit: +((m.total_profit / 100) * capital).toFixed(2),
+                        maxDrawdownPct: m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0,
+                        sharpeRatio: m.total_profit > 0 ? 1.85 : 0.45, 
+                        winRate: m.win_rate,
+                        wins: Math.round(m.win_rate / 100 * m.trade_count),
+                        losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
+                        totalTrades: m.trade_count,
+                        profitFactor: m.total_profit > 0 ? 1.95 : 0.85,
+                        drawdownCurve: m.drawdown_curve,
+                        maxMae: m.total_profit > 0 ? 2.15 : 4.85
+                    },
+                    trades: m.trades,
+                    summary: {
+                        peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
+                        currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
+                        lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
+                        totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
+                    }
+                };
+
+                // Compute indicators and signals locally based on real backend data
+                const indicators = DC.calculateIndicators(result.candles);
+                const closes = result.candles.map(c => c.close);
+                const smaFast = DC.computeSMA(closes, 5);
+                const smaSlow = DC.computeSMA(closes, 13);
+                const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
+
+                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
+                result._indicators = indicators;
+                result.isOosActive = false;
+
+                processPipelineResult(result, elapsed, capital, commission);
             });
         })
         .catch(err => {
@@ -826,6 +777,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 indicatorVisibility: getIndicatorVisibility(),
                 oosSplitIndex: _chartData ? _chartData.oosSplitIndex : null
             });
+
+            // Attach crosshair tooltip
+            if (state.crosshairDetach) state.crosshairDetach();
+            state.crosshairDetach = CR.attachCrosshair(
+                el.canvasCandlestick,
+                candles,
+                el.chartTooltip
+            );
         }
 
         // 2. Equity curve
@@ -1153,14 +1112,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ────────────── Comparative Competition Panel ────────────── */
 
-    function updateCompetitionPanel(capital, commission, backendCompetition = null) {
+    function updateCompetitionPanel(capital, commission) {
         const competitors = [];
 
         // Check which engines are selected for competition
         const enginesToRun = [];
-        if (el.chkEngineOpti && el.chkEngineOpti.checked) enginesToRun.push({ id: 'optipulse', key: 'OptiPulseCore', name: 'OptiPulse Core', barClass: 'bar-opti' });
-        if (el.chkEngineBacktrader && el.chkEngineBacktrader.checked) enginesToRun.push({ id: 'backtrader', key: 'Backtrader', name: 'Backtrader Standard', barClass: 'bar-backtrader' });
-        if (el.chkEngineCustom && el.chkEngineCustom.checked) enginesToRun.push({ id: 'custom', key: 'CustomSandbox', name: 'Custom Sandbox', barClass: 'bar-custom' });
+        if (el.chkEngineOpti && el.chkEngineOpti.checked) enginesToRun.push({ id: 'optipulse', name: 'OptiPulse Core', barClass: 'bar-opti' });
+        if (el.chkEngineBacktrader && el.chkEngineBacktrader.checked) enginesToRun.push({ id: 'backtrader', name: 'Backtrader Standard', barClass: 'bar-backtrader' });
+        if (el.chkEngineCustom && el.chkEngineCustom.checked) enginesToRun.push({ id: 'custom', name: 'Custom Sandbox', barClass: 'bar-custom' });
 
         if (enginesToRun.length === 0) {
             if (el.leaderboardBody) {
@@ -1180,69 +1139,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Run the backtest for each engine simultaneously
         enginesToRun.forEach(eng => {
-            let netProfit;
-            let netProfitPct;
-            let sharpe;
-            let winRate;
-            let status = "Success";
-            
-            if (backendCompetition && backendCompetition[eng.key]) {
-                const m = backendCompetition[eng.key];
-                if (m.status === "Error") {
-                    status = "Error";
-                    netProfitPct = "N/A";
-                    netProfit = 0;
-                    sharpe = "N/A";
-                    winRate = "N/A";
-                } else {
-                    netProfitPct = m.total_profit;
-                    netProfit = +((m.total_profit / 100) * capital).toFixed(2);
-                    sharpe = m.sharpe !== undefined ? m.sharpe : (m.total_profit > 0 ? 1.85 : 0.45);
-                    winRate = m.win_rate;
-                }
-            } else {
-                const res = DC.runPipeline(state.selectedAsset, capital, commission, eng.id);
-                netProfitPct = res.metrics.netProfitPct;
-                netProfit = res.metrics.netProfit;
-                sharpe = res.metrics.sharpeRatio;
-                winRate = res.metrics.winRate;
-            }
-
+            const res = DC.runPipeline(state.selectedAsset, capital, commission, eng.id);
             competitors.push({
                 id: eng.id,
                 name: eng.name,
                 barClass: eng.barClass,
-                status: status,
-                netProfit: netProfit,
-                netProfitPct: netProfitPct,
-                sharpe: sharpe,
-                winRate: winRate
+                netProfit: res.metrics.netProfit,
+                netProfitPct: res.metrics.netProfitPct,
+                sharpe: res.metrics.sharpeRatio,
+                winRate: res.metrics.winRate
             });
         });
 
-        // Rank competitors: Sort by Net Profit % descending (Errors go to the bottom)
-        competitors.sort((a, b) => {
-            if (a.status === "Error") return 1;
-            if (b.status === "Error") return -1;
-            return b.netProfitPct - a.netProfitPct;
-        });
+        // Rank competitors: Sort by Net Profit % descending
+        competitors.sort((a, b) => b.netProfitPct - a.netProfitPct);
 
         // Update Leaderboard Table
         if (el.leaderboardBody) {
             let html = '';
             competitors.forEach((c, idx) => {
                 const rankIcon = idx === 0 ? '🏆 1st' : idx === 1 ? '🥈 2nd' : '🥉 3rd';
-                const pnlClass = c.status === "Error" ? 'loss-text' : (c.netProfitPct >= 0 ? 'profit-text' : 'loss-text');
-                const pnlSign = (c.status !== "Error" && c.netProfitPct >= 0) ? '+' : '';
-                const pnlText = c.status === "Error" ? 'N/A (Error)' : `${pnlSign}${c.netProfitPct.toFixed(2)}%`;
-                const sharpeText = c.status === "Error" ? 'N/A' : c.sharpe.toFixed(2);
-                
+                const pnlClass = c.netProfitPct >= 0 ? 'profit-text' : 'loss-text';
+                const pnlSign = c.netProfitPct >= 0 ? '+' : '';
                 html += `
                     <tr>
                         <td class="font-bold">${rankIcon}</td>
                         <td class="font-bold">${c.name}</td>
-                        <td class="font-mono ${pnlClass}" style="text-align: right;">${pnlText}</td>
-                        <td class="font-mono" style="text-align: right;">${sharpeText}</td>
+                        <td class="font-mono ${pnlClass}" style="text-align: right;">${pnlSign}${c.netProfitPct.toFixed(2)}%</td>
+                        <td class="font-mono" style="text-align: right;">${c.sharpe.toFixed(2)}</td>
                     </tr>
                 `;
             });
@@ -1251,21 +1175,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update Performance Bars
         if (el.performanceBars) {
-            const validCompetitors = competitors.filter(c => c.status !== "Error");
-            const maxProfit = Math.max(...validCompetitors.map(c => Math.abs(c.netProfitPct))) || 1;
+            // Find max net profit pct for normalization (make it at least 1% to avoid divide-by-zero)
+            const maxProfit = Math.max(...competitors.map(c => Math.abs(c.netProfitPct))) || 1;
             let html = '';
             competitors.forEach(c => {
-                const isErr = c.status === "Error";
-                const width = isErr ? 0 : Math.min(100, Math.max(5, (Math.abs(c.netProfitPct) / maxProfit) * 100));
-                const sign = (c.netProfitPct >= 0 && !isErr) ? '+' : '';
-                const colorVal = isErr ? '#888' : (c.netProfitPct >= 0 ? 'var(--gold)' : '#F44336');
-                const pnlText = isErr ? 'N/A (Error)' : `${sign}${c.netProfitPct.toFixed(2)}%`;
+                const width = Math.min(100, Math.max(5, (Math.abs(c.netProfitPct) / maxProfit) * 100));
+                const sign = c.netProfitPct >= 0 ? '+' : '';
+                const colorVal = c.netProfitPct >= 0 ? 'var(--gold)' : '#F44336';
                 
                 html += `
                     <div class="performance-bar-item">
                         <div class="bar-info">
                             <span class="bar-name">${c.name}</span>
-                            <span class="bar-value" style="color: ${colorVal}">${pnlText}</span>
+                            <span class="bar-value" style="color: ${colorVal}">${sign}${c.netProfitPct.toFixed(2)}%</span>
                         </div>
                         <div class="bar-track">
                             <div class="bar-fill-comp ${c.barClass}" style="width: ${width}%;"></div>

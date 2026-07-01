@@ -838,7 +838,6 @@ const DataController = (() => {
                     console.error(`[DataController] Polling error for task_id: ${taskId}:`, err);
                 });
         }, 1000);
-        return intervalId;
     }
 
     let ohlcvPollIntervalId = null;

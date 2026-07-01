@@ -11,8 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="styles.css">
-    <!-- TradingView Lightweight Charts -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <div class="dashboard-container">
@@ -273,7 +271,9 @@
                                         <span class="stat-val" id="price-overlay-vol">42.8M</span>
                                     </div>
                                 </div>
-                                <div id="tv-price-chart" style="width: 100%; height: 380px; position: relative;"></div>
+                                <canvas id="canvas-candlestick" class="chart-canvas"></canvas>
+                                <!-- Crosshair tooltip -->
+                                <div id="chart-tooltip" class="chart-tooltip"></div>
                             </div>
                         </div>
                     </div>
