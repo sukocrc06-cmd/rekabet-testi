@@ -126,6 +126,22 @@ const ChartRenderer = (() => {
             return;
         }
 
+        // Check if Lightweight Charts is loaded
+        if (!window.LightweightCharts) {
+            console.warn("[ChartRenderer] TradingView Lightweight Charts library not found. Falling back to canvas charting.");
+            let canvas = container.querySelector('canvas');
+            if (!canvas) {
+                container.innerHTML = '';
+                canvas = document.createElement('canvas');
+                canvas.className = 'chart-canvas';
+                canvas.style.width = '100%';
+                canvas.style.height = '380px';
+                container.appendChild(canvas);
+            }
+            renderCandlestickChartCanvas(canvas, data);
+            return;
+        }
+
         // Clear container first
         container.innerHTML = '';
 
@@ -994,6 +1010,59 @@ const ChartRenderer = (() => {
         // Sort signals by index
         signals.sort((a, b) => a.index - b.index);
         return signals;
+    }
+
+    function renderCandlestickChartCanvas(canvas, data) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.clientWidth || 800;
+        const h = canvas.clientHeight || 380;
+        canvas.width = w;
+        canvas.height = h;
+
+        const { candles, signals = [] } = data;
+        if (!candles || candles.length === 0) return;
+
+        // Draw background
+        ctx.fillStyle = '#1E1E1E';
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw grid
+        ctx.strokeStyle = '#262626';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 5; i++) {
+            const y = (h / 5) * i;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+        }
+
+        // Draw simple candlesticks
+        const minP = Math.min(...candles.map(c => c.low));
+        const maxP = Math.max(...candles.map(c => c.high));
+        const pRange = maxP - minP || 1;
+
+        const gap = w / candles.length;
+        const candleW = Math.max(2, gap * 0.6);
+
+        candles.forEach((c, idx) => {
+            const x = idx * gap + gap / 2;
+            const yOpen = h - ((c.open - minP) / pRange) * h;
+            const yClose = h - ((c.close - minP) / pRange) * h;
+            const yHigh = h - ((c.high - minP) / pRange) * h;
+            const yLow = h - ((c.low - minP) / pRange) * h;
+
+            // Wick
+            ctx.strokeStyle = '#D4AF37';
+            ctx.beginPath();
+            ctx.moveTo(x, yHigh);
+            ctx.lineTo(x, yLow);
+            ctx.stroke();
+
+            // Body
+            ctx.fillStyle = c.close >= c.open ? '#4CAF50' : '#F44336';
+            ctx.fillRect(x - candleW / 2, Math.min(yOpen, yClose), candleW, Math.max(1, Math.abs(yOpen - yClose)));
+        });
     }
 
     /* ────────── Public API ────────── */

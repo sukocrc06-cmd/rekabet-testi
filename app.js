@@ -631,6 +631,36 @@ document.addEventListener('DOMContentLoaded', () => {
         const commission = parseFloat(el.commissionInput.value) || 0.05;
 
         const t0 = performance.now();
+        let pollId = null;
+
+        // Setup 15-second timeout
+        const timeoutId = setTimeout(() => {
+            if (state.isSimulating) {
+                console.warn("[Frontend] Backtest execution timed out (15s limit reached). Aborting...");
+                state.isSimulating = false;
+                if (pollId) clearInterval(pollId);
+
+                // Restore button state
+                el.btnRun.disabled = false;
+                el.btnRun.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    Run Test
+                `;
+                el.btnRun.style.opacity = '1';
+                el.btnRun.style.cursor = 'pointer';
+
+                if (el.footerStatus) el.footerStatus.innerText = "System status: Ready";
+                if (el.engineStatus) {
+                    el.engineStatus.innerText = 'ONLINE';
+                    el.engineStatus.style.color = '';
+                }
+
+                alert("Test execution timeout. Please check your data source.");
+            }
+        }, 15000);
 
         // ── Try running via real FastAPI backend ──
         console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
@@ -647,10 +677,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return res.json();
         })
         .then(data => {
+            console.log('[Frontend] API Response data:', data);
             console.log(`[Frontend] Backtest run initiated. Received task_id: ${data.task_id}, status: ${data.status}`);
             
             // Poll for task status
-            DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
+            pollId = DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
+                clearTimeout(timeoutId); // Clear timeout since it resolved successfully
+                
                 if (err) {
                     console.error(`[Frontend] Polling completed with error:`, err);
                     showNotice('Backtest failed on the backend server.');
