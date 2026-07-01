@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="OptiPulseLab - High-performance algorithmic trading backtest and optimization dashboard. Analyze strategies, metrics, and equity curves.">
+    <title>OptiPulseLab - Algorithmic Testing Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- HEADER -->
+        <header class="dashboard-header" id="main-header">
+            <div class="logo-area">
+                <div class="pulse-indicator"></div>
+                <h1>OptiPulse<span>Lab</span></h1>
+            </div>
+            <div class="header-status">
+                <div class="status-item">
+                    <span class="status-label">Engine:</span>
+                    <span class="status-value status-online" id="engine-status">ONLINE</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Latency:</span>
+                    <span class="status-value" id="latency-val">1.2ms</span>
+                </div>
+                <div class="status-item text-hide-mobile">
+                    <span class="status-label">Market Time:</span>
+                    <span class="status-value" id="market-time">13:58:19 UTC</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" id="btn-reset-params">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+                    Reset
+                </button>
+                <button class="btn btn-primary" id="btn-run-backtest">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    Run Test
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <div class="dashboard-body">
+            <!-- SIDEBAR: TEST PARAMETERS -->
+            <aside class="sidebar-panel" aria-label="Test Parameters">
+                <div class="panel-header">
+                    <h2>Test Parameters</h2>
+                    <span class="panel-badge">Setup</span>
+                </div>
+                
+                <form id="parameters-form" onsubmit="event.preventDefault();">
+                    <!-- Stock Selection -->
+                    <div class="form-group">
+                        <label for="stock-select">Asset Selection</label>
+                        <div class="select-wrapper">
+                            <select id="stock-select" class="form-input">
+                                <option value="THYAO">THYAO (Türk Hava Yolları)</option>
+                                <option value="ASELS">ASELS (ASELSAN)</option>
+                                <option value="BIMAS">BIMAS (BİM Mağazalar)</option>
+                                <option value="TUPRS">TUPRS (Tüpraş)</option>
+                                <option value="AKBNK">AKBNK (Akbank)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Timeframe Selection -->
+                    <div class="form-group">
+                        <label>Timeframe Resolution</label>
+                        <div class="timeframe-presets" role="group" aria-label="Timeframe resolution presets">
+                            <button type="button" class="preset-btn active" data-res="1m">1m</button>
+                            <button type="button" class="preset-btn" data-res="5m">5m</button>
+                            <button type="button" class="preset-btn" data-res="1h">1h</button>
+                            <button type="button" class="preset-btn" data-res="1d">1d</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="start-date">Date Range</label>
+                        <div class="date-range-inputs">
+                            <div class="date-input-wrapper">
+                                <span class="date-label">FROM</span>
+                                <input type="date" id="start-date" class="form-input" value="2026-01-01">
+                            </div>
+                            <div class="date-input-wrapper">
+                                <span class="date-label">TO</span>
+                                <input type="date" id="end-date" class="form-input" value="2026-07-01">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Engine Selection -->
+                    <div class="form-group">
+                        <label>Execution Engine</label>
+                        <div class="engine-options">
+                            <label class="engine-radio-label">
+                                <input type="radio" name="engine-select" value="optipulse" checked>
+                                <span class="custom-radio"></span>
+                                <div class="engine-details">
+                                    <span class="engine-name">OptiPulse Core</span>
+                                    <span class="engine-desc">Ultra-low latency C++ runner</span>
+                                </div>
+                            </label>
+                            
+                            <label class="engine-radio-label">
+                                <input type="radio" name="engine-select" value="backtrader">
+                                <span class="custom-radio"></span>
+                                <div class="engine-details">
+                                    <span class="engine-name">Backtrader Engine</span>
+                                    <span class="engine-desc">Python standard backtest module</span>
+                                </div>
+                            </label>
+
+                            <label class="engine-radio-label">
+                                <input type="radio" name="engine-select" value="custom">
+                                <span class="custom-radio"></span>
+                                <div class="engine-details">
+                                    <span class="engine-name">Custom Sandbox</span>
+                                    <span class="engine-desc">Isolated JS script environment</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Technical Indicator Overlays -->
+                    <div class="form-group collapsible-group open">
+                        <div class="collapsible-header" id="indicators-settings-toggle">
+                            <span>Overlay Indicators</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron-icon"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                        <div class="collapsible-content" id="indicators-settings-content" style="max-height: 500px; margin-top: 12px;">
+                            <div class="indicator-checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-sma20" checked>
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text">SMA 20 (Blue)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-sma50">
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text">SMA 50 (Purple)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-sma200">
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text">SMA 200 (Red)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-bollinger" checked>
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text">Bollinger Bands (20, 2)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-vwap">
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text">VWAP (Teal)</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Strategy Config -->
+                    <div class="form-group collapsible-group">
+                        <div class="collapsible-header" id="advanced-settings-toggle">
+                            <span>Advanced Settings</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron-icon"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                        <div class="collapsible-content" id="advanced-settings-content">
+                            <div class="form-group-sub">
+                                <label for="initial-capital">Initial Capital ($)</label>
+                                <input type="number" id="initial-capital" class="form-input form-input-sub" value="100000" min="1000">
+                            </div>
+                            <div class="form-group-sub">
+                                <label for="commission-rate">Slippage & Commission (%)</label>
+                                <input type="number" id="commission-rate" class="form-input form-input-sub" value="0.05" step="0.01" min="0">
+                            </div>
+                            <div class="form-group-sub" style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 12px;">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="chk-oos-validation">
+                                    <span class="custom-checkbox"></span>
+                                    <span class="checkbox-text" style="font-weight: 600;">Out-of-Sample (OOS)</span>
+                                </label>
+                                <span style="display: block; font-size: 10px; color: var(--text-muted); margin-top: 4px;">Splits data: 70% Training / 30% Validation</span>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </aside>
+
+            <!-- MAIN CONTENT AREA -->
+            <main class="main-content-panel">
+                <!-- CHART INTERFACE (TOP) -->
+                <section class="content-card chart-section" aria-label="Chart Analysis">
+                    <div class="panel-header tab-header-container">
+                        <div class="tab-list" role="tablist" id="chart-tabs">
+                            <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="equity-curve-panel" id="tab-equity">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-3 3"></path></svg>
+                                Equity Curve
+                            </button>
+                            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="drawdown-panel" id="tab-drawdown">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 5-7 7-7-7"></path><path d="M14 5h5v5"></path><path d="M3 3v18h18"></path></svg>
+                                Drawdown Chart
+                            </button>
+                            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="price-action-panel" id="tab-price">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><rect width="4" height="8" x="7" y="10" rx="1"></rect><rect width="4" height="12" x="15" y="6" rx="1"></rect></svg>
+                                Price Action
+                            </button>
+                        </div>
+                        <div class="panel-controls text-hide-mobile">
+                            <span class="indicator-live">● REALTIME DATA</span>
+                        </div>
+                    </div>
+
+                    <!-- Tab Panels -->
+                    <div class="tab-content-container">
+                        <!-- Equity Curve Tab Panel -->
+                        <div class="tab-panel active" id="equity-curve-panel" role="tabpanel" aria-labelledby="tab-equity">
+                            <div class="chart-wrapper">
+                                <div class="chart-overlay-info">
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Peak Value</span>
+                                        <span class="stat-val" id="equity-peak-val">₺148,250.00</span>
+                                    </div>
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Current Value</span>
+                                        <span class="stat-val accent-text" id="equity-current-val">₺142,390.15</span>
+                                    </div>
+                                </div>
+                                <canvas id="canvas-equity" class="chart-canvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Drawdown Tab Panel -->
+                        <div class="tab-panel" id="drawdown-panel" role="tabpanel" aria-labelledby="tab-drawdown">
+                            <div class="chart-wrapper">
+                                <div class="chart-overlay-info">
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Max Drawdown</span>
+                                        <span class="stat-val warning-text" id="dd-overlay-max">-8.45%</span>
+                                    </div>
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Average Drawdown</span>
+                                        <span class="stat-val" id="dd-overlay-avg">-2.12%</span>
+                                    </div>
+                                </div>
+                                <canvas id="canvas-drawdown" class="chart-canvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Price Action Tab Panel -->
+                        <div class="tab-panel" id="price-action-panel" role="tabpanel" aria-labelledby="tab-price">
+                            <div class="chart-wrapper" style="position:relative;">
+                                <div class="chart-overlay-info">
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Last Price</span>
+                                        <span class="stat-val" id="price-overlay-last">₺183.24</span>
+                                    </div>
+                                    <div class="overlay-stat">
+                                        <span class="stat-label">Total Vol (30d)</span>
+                                        <span class="stat-val" id="price-overlay-vol">42.8M</span>
+                                    </div>
+                                </div>
+                                <canvas id="canvas-candlestick" class="chart-canvas"></canvas>
+                                <!-- Crosshair tooltip -->
+                                <div id="chart-tooltip" class="chart-tooltip"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- PERFORMANCE METRICS SECTION (BOTTOM) -->
+                <section class="content-card metrics-section" aria-label="Strategy Metrics">
+                    <!-- Tab Navigation -->
+                    <div class="panel-header tab-header-container">
+                        <div class="tab-list" role="tablist" id="metrics-tabs">
+                            <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="key-metrics-panel" id="tab-metrics">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg>
+                                Key Metrics
+                            </button>
+                            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="trade-log-panel" id="tab-tradelog">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                                Trade Log
+                            </button>
+                            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="strategy-config-panel" id="tab-strat">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                Strategy Details
+                            </button>
+                        </div>
+                        <div class="panel-controls">
+                            <button class="btn btn-outline" id="btn-export-report" style="padding: 6px 12px; font-size: 11px; height: 30px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Export Report
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Metrics Content Panels -->
+                    <div class="tab-content-container">
+                        <!-- Key Metrics Panel -->
+                        <div class="tab-panel active" id="key-metrics-panel" role="tabpanel" aria-labelledby="tab-metrics">
+                            <!-- Overfitting Warning Banner -->
+                            <div id="overfitting-warning-banner" class="alert-banner warning-banner" style="display: none; margin-bottom: 20px; border: 1px solid #EF6C00; background-color: rgba(239, 108, 0, 0.08); padding: 14px; border-radius: var(--radius-md); align-items: center; gap: 12px;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF6C00" stroke-width="2" style="flex-shrink:0;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                <div>
+                                    <div style="font-weight: 700; color: #FFF3A8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Overfitting Detected (High Risk)</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">The validation set shows a significant performance degradation compared to the training set. Stratejiniz aşırı öğrenmiş (overfit) olabilir.</div>
+                                </div>
+                            </div>
+
+                            <!-- OOS Header Info -->
+                            <div id="oos-info-header" style="display: none; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; font-size: 11px; color: var(--gold); border-bottom: 1px solid rgba(212,175,55,0.25); padding-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase;">
+                                <span>Training Set (First 70% In-Sample)</span>
+                            </div>
+
+                            <!-- Summary Cards Grid -->
+                            <div class="metrics-cards-grid" id="metrics-training-grid">
+                                <div class="metric-card">
+                                    <span class="card-label">Net Profit</span>
+                                    <span class="card-value accent-text" id="metric-return">+42.39%</span>
+                                    <span class="card-subtext" id="metric-netprofit-abs">₺42,390 net</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Sharpe Ratio</span>
+                                    <span class="card-value" id="metric-sharpe">2.41</span>
+                                    <span class="card-subtext">Risk-adjusted return rating</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Max Drawdown</span>
+                                    <span class="card-value drawdown-warning" id="metric-drawdown">-8.45%</span>
+                                    <span class="card-subtext">Recovery time: 14 days</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Profit Factor</span>
+                                    <span class="card-value" id="metric-factor">1.84</span>
+                                    <span class="card-subtext">Gross wins / Gross losses</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Win Rate</span>
+                                    <span class="card-value" id="metric-winrate">58.7%</span>
+                                    <span class="card-subtext" id="metric-winloss">118 Wins / 83 Losses</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Total Trades</span>
+                                    <span class="card-value" id="metric-trades">201</span>
+                                    <span class="card-subtext">Avg duration: 4.2 hours</span>
+                                </div>
+                                <div class="metric-card risk-score-card">
+                                    <span class="card-label">Risk Score</span>
+                                    <div class="risk-score-container">
+                                        <span class="card-value" id="risk-score-value">34</span>
+                                        <span class="risk-score-label risk-moderate" id="risk-score-text">MODERATE</span>
+                                    </div>
+                                    <div class="risk-bar-bg">
+                                        <div class="risk-bar-fill" id="risk-score-bar" style="width: 34%;"></div>
+                                    </div>
+                                    <span class="card-subtext" id="risk-score-subtext">Based on 8.45% max drawdown</span>
+                                </div>
+                            </div>
+
+                            <!-- OOS Validation Grid Header -->
+                            <div id="oos-validation-header" style="display: none; justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; font-weight: 700; font-size: 11px; color: var(--gold); border-bottom: 1px solid rgba(212,175,55,0.25); padding-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase;">
+                                <span>Validation Set (Last 30% Out-of-Sample)</span>
+                            </div>
+
+                            <!-- Summary Cards Grid (Validation) -->
+                            <div class="metrics-cards-grid" id="metrics-validation-grid" style="display: none;">
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Net Profit</span>
+                                    <span class="card-value accent-text" id="oos-metric-return">+0.00%</span>
+                                    <span class="card-subtext" id="oos-metric-netprofit-abs">₺0 net</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Sharpe Ratio</span>
+                                    <span class="card-value" id="oos-metric-sharpe">0.00</span>
+                                    <span class="card-subtext">Risk-adjusted return rating</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Max Drawdown</span>
+                                    <span class="card-value drawdown-warning" id="oos-metric-drawdown">-0.00%</span>
+                                    <span class="card-subtext">Peak to trough decline</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Profit Factor</span>
+                                    <span class="card-value" id="oos-metric-factor">0.00</span>
+                                    <span class="card-subtext">Wins/losses ratio</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Win Rate</span>
+                                    <span class="card-value" id="oos-metric-winrate">0.0%</span>
+                                    <span class="card-subtext" id="oos-metric-winloss">0 Wins / 0 Losses</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">OOS Total Trades</span>
+                                    <span class="card-value" id="oos-metric-trades">0</span>
+                                    <span class="card-subtext">Validation period trades</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Trade Log Panel -->
+                        <div class="tab-panel" id="trade-log-panel" role="tabpanel" aria-labelledby="tab-tradelog">
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>Asset</th>
+                                            <th>Type</th>
+                                            <th>Size</th>
+                                            <th>Entry Price</th>
+                                            <th>Exit Price</th>
+                                            <th>P&amp;L (₺)</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="trade-log-body">
+                                        <tr>
+                                            <td class="font-mono">2026-06-30 16:45:01</td>
+                                            <td class="font-bold">NVDA</td>
+                                            <td><span class="badge badge-long">BUY</span></td>
+                                            <td class="font-mono">250</td>
+                                            <td class="font-mono">$124.50</td>
+                                            <td class="font-mono">$128.90</td>
+                                            <td class="font-mono profit-text">+$1,100.00</td>
+                                            <td><span class="badge badge-closed">CLOSED</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="font-mono">2026-06-29 11:20:14</td>
+                                            <td class="font-bold">NVDA</td>
+                                            <td><span class="badge badge-short">SELL</span></td>
+                                            <td class="font-mono">150</td>
+                                            <td class="font-mono">$126.10</td>
+                                            <td class="font-mono">$127.80</td>
+                                            <td class="font-mono loss-text">-$255.00</td>
+                                            <td><span class="badge badge-closed">CLOSED</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="font-mono">2026-06-28 09:35:00</td>
+                                            <td class="font-bold">AAPL</td>
+                                            <td><span class="badge badge-long">BUY</span></td>
+                                            <td class="font-mono">500</td>
+                                            <td class="font-mono">$180.20</td>
+                                            <td class="font-mono">$183.50</td>
+                                            <td class="font-mono profit-text">+$1,650.00</td>
+                                            <td><span class="badge badge-closed">CLOSED</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="font-mono">2026-06-27 14:15:30</td>
+                                            <td class="font-bold">TSLA</td>
+                                            <td><span class="badge badge-long">BUY</span></td>
+                                            <td class="font-mono">100</td>
+                                            <td class="font-mono">$250.40</td>
+                                            <td class="font-mono">$242.10</td>
+                                            <td class="font-mono loss-text">-$830.00</td>
+                                            <td><span class="badge badge-closed">CLOSED</span></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Strategy Config / Details Panel -->
+                        <div class="tab-panel" id="strategy-config-panel" role="tabpanel" aria-labelledby="tab-strat">
+                            <div class="strategy-details-grid">
+                                <div class="detail-block">
+                                    <h3>System Information</h3>
+                                    <ul class="detail-list">
+                                        <li><span>Strategy Name</span><span class="font-mono">Momentum Breakout Alpha</span></li>
+                                        <li><span>Framework Version</span><span class="font-mono">OptiPulse Core v2.4.1</span></li>
+                                        <li><span>Calculated Expectancy</span><span class="font-mono">$14.20 per trade</span></li>
+                                    </ul>
+                                </div>
+                                <div class="detail-block">
+                                    <h3>Risk Management Rules</h3>
+                                    <ul class="detail-list">
+                                        <li><span>Hard Stop Loss</span><span class="font-mono text-gold">2.0% from entry</span></li>
+                                        <li><span>Trailing Profit Target</span><span class="font-mono text-gold">3.5% with pullback</span></li>
+                                        <li><span>Max Concurrent Positions</span><span class="font-mono">5 assets</span></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <!-- RIGHT SIDEBAR: COMPARATIVE COMPETITION PANEL -->
+            <aside class="competition-panel" aria-label="Comparative Competition">
+                <div class="panel-header">
+                    <h2>Engine Competition</h2>
+                    <span class="panel-badge">Live Arena</span>
+                </div>
+
+                <!-- Select multiple engines checkbox list -->
+                <div class="form-group">
+                    <label>Select Competitors</label>
+                    <div class="indicator-checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-engine-opti" checked>
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Motor 1: OptiPulse Core</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-engine-backtrader" checked>
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Motor 2: Backtrader Standard</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-engine-custom" checked>
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Motor 3: Custom Sandbox</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Leaderboard Table -->
+                <div class="form-group" style="margin-top: 24px;">
+                    <label>Leaderboard</label>
+                    <div class="table-container" style="border-radius: var(--radius-md); border-color: rgba(212,175,55,0.15); background-color: var(--bg-card);">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Engine</th>
+                                    <th style="text-align: right;">Net Profit</th>
+                                    <th style="text-align: right;">Sharpe</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboard-body">
+                                <!-- Populated dynamically by app.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Visual CSS Bar Chart -->
+                <div class="form-group" style="margin-top: 24px;">
+                    <label>Performance Gap (Net Profit %)</label>
+                    <div id="performance-gap-bars" class="performance-bars-container">
+                        <!-- Populated dynamically by app.js -->
+                </div>
+
+                <!-- Risk Monitor Panel -->
+                <div class="form-group" style="margin-top: 24px; border-top: 1px solid rgba(212,175,55,0.15); padding-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <label style="margin-bottom: 0;">Risk Monitor</label>
+                        <span id="risk-warning-badge" class="panel-badge" style="font-weight: 700; transition: all 0.3s ease;">COMPLIANT</span>
+                    </div>
+                    <div class="metrics-cards-grid" style="grid-template-columns: 1fr; gap: 10px;">
+                        <div class="metric-card" style="padding: 12px; border-color: rgba(255,255,255,0.05); background-color: var(--bg-card);">
+                            <div class="metric-label" style="font-size: 11px;">Max Adverse Excursion (MAE)</div>
+                            <div class="metric-value" id="risk-mae-value" style="font-size: 18px; color: var(--text-primary);">0.00%</div>
+                            <div class="metric-subtext" id="risk-mae-status" style="font-size: 10px; color: var(--text-secondary);">Limit: < 5.00% (Safety Limit)</div>
+                        </div>
+                        <div class="metric-card" style="padding: 12px; border-color: rgba(255,255,255,0.05); background-color: var(--bg-card);">
+                            <div class="metric-label" style="font-size: 11px;">Max Drawdown (MDD)</div>
+                            <div class="metric-value" id="risk-mdd-value" style="font-size: 18px; color: var(--text-primary);">0.00%</div>
+                            <div class="metric-subtext" id="risk-mdd-status" style="font-size: 10px; color: var(--text-secondary);">Limit: < 10.00% (Project Plan)</div>
+                        </div>
+                        <div class="metric-card" style="padding: 12px; border-color: rgba(255,255,255,0.05); background-color: var(--bg-card);">
+                            <div class="metric-label" style="font-size: 11px;">Sharpe Ratio</div>
+                            <div class="metric-value" id="risk-sharpe-value" style="font-size: 18px; color: var(--text-primary);">0.00</div>
+                            <div class="metric-subtext" id="risk-sharpe-status" style="font-size: 10px; color: var(--text-secondary);">Limit: > 1.50 (Project Plan)</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- FOOTER STATUS BAR -->
+        <footer class="dashboard-footer">
+            <div class="footer-left">
+                <span class="indicator-glow"></span>
+                <span id="footer-status-text">System status: Ready</span>
+            </div>
+            <div class="footer-center">
+                <span>OptiPulseLab Quantitative Simulation Engine</span>
+            </div>
+            <div class="footer-right">
+                <span>v1.0.0-Beta</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Data Controller -->
+    <script src="dataController.js"></script>
+    <!-- Canvas Chart Renderer -->
+    <script src="chartRenderer.js"></script>
+    <!-- Application Controller -->
+    <script src="app.js"></script>
+</body>
+</html>
