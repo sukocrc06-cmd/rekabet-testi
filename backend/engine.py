@@ -4,7 +4,10 @@ class StrategyEngine:
         """
         Calculates moving average crossover strategy metrics on historical BIST OHLCV data.
         Adjusts periods and commissions dynamically based on the execution engine.
+        Calculates authentic Sharpe ratio, max drawdown, and profit factor.
         """
+        import math
+
         # Determine strategy parameters by engine
         if engine == 'backtrader':
             fast_period = 7
@@ -24,6 +27,9 @@ class StrategyEngine:
                 "total_profit": 0.0,
                 "win_rate": 0.0,
                 "trade_count": 0,
+                "sharpe": 0.0,
+                "max_dd": 0.0,
+                "profit_factor": 1.0,
                 "equity_curve": [100000.0] * max(1, len(data)),
                 "drawdown_curve": [0.0] * max(1, len(data)),
                 "dates": [d.get("Date", "") for d in data],
@@ -147,10 +153,39 @@ class StrategyEngine:
             dd = ((peak - eq) / peak * 100) if peak > 0 else 0.0
             drawdown_curve.append(dd)
             
+        max_dd = max(drawdown_curve) if drawdown_curve else 0.0
+
+        # Calculate Profit Factor
+        gross_profits = sum(t["pnl"] for t in trades if t["pnl"] > 0)
+        gross_losses = abs(sum(t["pnl"] for t in trades if t["pnl"] < 0))
+        profit_factor = gross_profits / gross_losses if gross_losses > 0 else (99.9 if gross_profits > 0 else 1.0)
+
+        # Calculate Sharpe Ratio from daily returns
+        returns = []
+        for i in range(1, len(equity_curve)):
+            prev = equity_curve[i-1]
+            if prev > 0:
+                returns.append((equity_curve[i] - prev) / prev)
+                
+        if len(returns) > 1:
+            mean_ret = sum(returns) / len(returns)
+            var_ret = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
+            std_ret = math.sqrt(var_ret)
+            if std_ret > 0:
+                # Annualized Sharpe (assuming daily returns, risk free rate = 0)
+                sharpe = (mean_ret / std_ret) * math.sqrt(252)
+            else:
+                sharpe = 0.0
+        else:
+            sharpe = 0.0
+            
         return {
             "total_profit": round(total_profit, 2),
             "win_rate": round(win_rate, 2),
             "trade_count": trade_count,
+            "sharpe": round(sharpe, 2),
+            "max_dd": round(max_dd, 2),
+            "profit_factor": round(profit_factor, 2),
             "equity_curve": [round(eq, 2) for eq in equity_curve],
             "drawdown_curve": [round(dd, 2) for dd in drawdown_curve],
             "dates": dates,

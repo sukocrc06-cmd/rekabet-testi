@@ -90,11 +90,6 @@ async def run_backtest(request: BacktestRequest):
         if "Date" in record:
             record["Date"] = str(record["Date"])
             
-    # Run the backtest concurrently across all three engines
-    opti_metrics = StrategyEngine.calculate_metrics(data, "optipulse")
-    bt_metrics = StrategyEngine.calculate_metrics(data, "backtrader")
-    custom_metrics = StrategyEngine.calculate_metrics(data, "custom")
-    
     # Format candles for frontend candlestick chart mapping
     formatted_candles = []
     for record in data:
@@ -107,9 +102,32 @@ async def run_backtest(request: BacktestRequest):
             "volume": float(record.get("Volume", 0.0))
         })
         
-    opti_metrics["candles"] = formatted_candles
-    bt_metrics["candles"] = formatted_candles
-    custom_metrics["candles"] = formatted_candles
+    def run_engine_safe(engine_name: str) -> dict:
+        try:
+            res = StrategyEngine.calculate_metrics(data, engine_name)
+            res["status"] = "Success"
+            res["candles"] = formatted_candles
+            return res
+        except Exception as e:
+            print(f"[Backend] Engine calculation failure for {engine_name}: {e}")
+            return {
+                "status": "Error",
+                "total_profit": 0.0,
+                "win_rate": 0.0,
+                "trade_count": 0,
+                "sharpe": 0.0,
+                "max_dd": 0.0,
+                "profit_factor": 1.0,
+                "equity_curve": [100000.0] * max(1, len(data)),
+                "drawdown_curve": [0.0] * max(1, len(data)),
+                "dates": [d.get("Date", "") for d in data],
+                "trades": [],
+                "candles": formatted_candles
+            }
+
+    opti_metrics = run_engine_safe("optipulse")
+    bt_metrics = run_engine_safe("backtrader")
+    custom_metrics = run_engine_safe("custom")
     
     competition_results = {
         "OptiPulseCore": opti_metrics,
