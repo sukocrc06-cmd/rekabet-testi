@@ -3,7 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yfinance as yf
 import io
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
+import gc
+
+# Keep FPDF import as was
 from fpdf import FPDF
 from engine import StrategyEngine
 import asyncio
@@ -78,7 +81,8 @@ async def health_check():
 
 @app.get("/api/v1/ohlcv/{ticker}")
 async def get_data(ticker: str):
-    stock = yf.Ticker(ticker + ".IS") 
+    formatted = format_ticker(ticker)
+    stock = yf.Ticker(formatted) 
     hist = stock.history(period="3mo", interval="1d")
     data = hist.reset_index().to_dict(orient="records")
     
@@ -92,43 +96,69 @@ async def get_data(ticker: str):
 # Global task cache to simulate asynchronous queues
 task_store = {}
 
+def format_ticker(ticker: str) -> str:
+    ticker = ticker.upper()
+    ticker_map = {
+        "ASELSAN": "ASELS",
+        "ASELS": "ASELS",
+        "THYAO": "THYAO",
+        "BIMAS": "BIMAS",
+        "TUPRS": "TUPRS",
+        "AKBNK": "AKBNK"
+    }
+    if ticker in ticker_map:
+        ticker = ticker_map[ticker]
+    if not ticker.endswith(".IS"):
+        ticker = ticker + ".IS"
+    return ticker
+
 @app.post("/api/v1/backtest/run")
 async def run_backtest(request: BacktestRequest):
-    ticker = request.ticker
-    stock = yf.Ticker(ticker + ".IS")
-    hist = stock.history(period="3mo", interval="1d")
-    data = hist.reset_index().to_dict(orient="records")
-    
-    # Convert Date values to string for serialization
-    for record in data:
-        if "Date" in record:
-            record["Date"] = str(record["Date"])
-            
-    metrics = StrategyEngine.calculate_metrics(data)
-    
-    # Format candles for frontend candlestick chart mapping
-    formatted_candles = []
-    for record in data:
-        formatted_candles.append({
-            "date": str(record.get("Date", ""))[:10],
-            "open": float(record.get("Open", 0.0)),
-            "high": float(record.get("High", 0.0)),
-            "low": float(record.get("Low", 0.0)),
-            "close": float(record.get("Close", 0.0)),
-            "volume": float(record.get("Volume", 0.0))
-        })
-    metrics["candles"] = formatted_candles
-    
-    task_id = f"task_{ticker}_{request.engine_id}"
-    task_store[task_id] = {
-        "status": "completed",
-        "metrics": metrics
-    }
-    
-    return {
-        "task_id": task_id,
-        "status": "processing"
-    }
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="3mo", interval="1d")
+        data = df.reset_index().to_dict(orient="records")
+        
+        # Convert Date values to string for serialization
+        for record in data:
+            if "Date" in record:
+                record["Date"] = str(record["Date"])
+                
+        metrics = StrategyEngine.calculate_metrics(data)
+        
+        # Format candles for frontend candlestick chart mapping
+        formatted_candles = []
+        for record in data:
+            formatted_candles.append({
+                "date": str(record.get("Date", ""))[:10],
+                "open": float(record.get("Open", 0.0)),
+                "high": float(record.get("High", 0.0)),
+                "low": float(record.get("Low", 0.0)),
+                "close": float(record.get("Close", 0.0)),
+                "volume": float(record.get("Volume", 0.0))
+            })
+        metrics["candles"] = formatted_candles
+        
+        task_id = f"task_{request.ticker}_{request.engine_id}"
+        task_store[task_id] = {
+            "status": "completed",
+            "metrics": metrics
+        }
+        
+        # Clean up memory
+        del df
+        gc.collect()
+        
+        return {
+            "task_id": task_id,
+            "status": "processing"
+        }
+    except Exception as e:
+        gc.collect()
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
 
 @app.get("/api/v1/backtest/status/{task_id}")
 async def get_status(task_id: str):
@@ -153,7 +183,8 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
     await websocket.accept()
     try:
         # Fetch initial historical candles to populate the chart
-        stock = yf.Ticker(ticker + ".IS")
+        formatted = format_ticker(ticker)
+        stock = yf.Ticker(formatted)
         hist = stock.history(period="3mo", interval="1d")
         data = hist.reset_index().to_dict(orient="records")
         
@@ -206,7 +237,8 @@ async def export_report(request: PDFRequest):
         metrics = task_data["metrics"]
     else:
         # Fallback dynamic calculation
-        stock = yf.Ticker(request.ticker + ".IS")
+        formatted = format_ticker(request.ticker)
+        stock = yf.Ticker(formatted)
         hist = stock.history(period="3mo", interval="1d")
         data = hist.reset_index().to_dict(orient="records")
         for record in data:
