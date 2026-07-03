@@ -709,4 +709,3 @@ def export_report(request: PDFRequest):
             content={"status": "error", "message": f"Failed to generate report PDF: {str(e)}"}
         )
 # EOF
-
