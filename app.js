@@ -388,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             trade_count: state.lastResult.metrics.totalTrades
         };
 
-        fetch('https://rekabet-testi.onrender.com/api/v1/backtest/export', {
+        fetch('http://127.0.0.1:8000/api/v1/backtest/export', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(reqBody)
@@ -580,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Try running via real FastAPI backend ──
         console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
-        fetch('https://rekabet-testi.onrender.com/api/v1/backtest/run', {
+        fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -650,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         })
         .catch(err => {
-            const targetUrl = 'https://rekabet-testi.onrender.com/api/v1/backtest/run';
+            const targetUrl = 'http://127.0.0.1:8000/api/v1/backtest/run';
             console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
             showNotice('Server offline. Using offline simulation mode.');
             
@@ -1041,7 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.marketTime) el.marketTime.innerText = timeStr;
 
         // Poll health endpoint
-        fetch('https://rekabet-testi.onrender.com/api/v1/health')
+        fetch('http://127.0.0.1:8000/api/v1/health')
             .then(res => {
                 if (!res.ok) throw new Error('Unhealthy status');
                 return res.json();
