@@ -5,7 +5,7 @@ import yfinance as yf
 import io
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
-from backend.engine import StrategyEngine
+from engine import StrategyEngine
 import asyncio
 import random
 
@@ -13,15 +13,8 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5500",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5500",
-        "https://rekabet-testi.vercel.app",
-        "https://rekabet-testi-git-main.vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
