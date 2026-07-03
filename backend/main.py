@@ -72,6 +72,19 @@ class PDFReport(FPDF):
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Page {self.page_no()} | CONFIDENTIAL - SANDBOX MODE NON-LIVE", align="C")
 
+@app.get("/")
+async def root_index():
+    return {
+        "status": "online",
+        "message": "OptiPulseLab Backend Engine is running live!",
+        "endpoints": {
+            "health": "/api/v1/health",
+            "run_backtest": "/api/v1/backtest/run",
+            "get_status": "/api/v1/backtest/status/{task_id}",
+            "ohlcv_data": "/api/v1/ohlcv/{ticker}"
+        }
+    }
+
 @app.get("/api/v1/health")
 async def health_check():
     return {"status": "ok"}

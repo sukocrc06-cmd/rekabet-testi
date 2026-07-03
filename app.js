@@ -650,7 +650,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         })
         .catch(err => {
-            console.warn('[Frontend] Backend connection failed, falling back to local simulation:', err);
+            const targetUrl = 'https://rekabet-testi.onrender.com/api/v1/backtest/run';
+            console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
             showNotice('Server offline. Using offline simulation mode.');
             
             if (el.engineStatus) {
