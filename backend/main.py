@@ -130,9 +130,14 @@ def format_ticker(ticker: str) -> str:
 @app.post("/api/v1/backtest/run")
 def run_backtest(request: BacktestRequest):
     try:
+        print("1: Request received")
         ticker = format_ticker(request.ticker)
+        
+        print("2: Starting data fetch")
         stock = yf.Ticker(ticker, session=session)
-        df = stock.history(period="3mo", interval="1d", timeout=10)
+        df = stock.history(period="3mo", interval="1d", timeout=5)
+        
+        print("3: Data fetch successful")
         if df.empty:
             raise ValueError("No historical data found for this ticker")
         data = df.reset_index().to_dict(orient="records")
@@ -142,6 +147,7 @@ def run_backtest(request: BacktestRequest):
             if "Date" in record:
                 record["Date"] = str(record["Date"])
                 
+        print("4: Calculation started")
         metrics = StrategyEngine.calculate_metrics(data)
         
         # Format candles for frontend candlestick chart mapping
@@ -156,6 +162,8 @@ def run_backtest(request: BacktestRequest):
                 "volume": float(record.get("Volume", 0.0))
             })
         metrics["candles"] = formatted_candles
+        
+        print("5: Calculation finished")
         
         task_id = f"task_{request.ticker}_{request.engine_id}"
         task_store[task_id] = {
@@ -172,6 +180,7 @@ def run_backtest(request: BacktestRequest):
             "status": "processing"
         }
     except Exception as e:
+        print(f"Error during run_backtest: {e}")
         gc.collect()
         return JSONResponse(
             status_code=500,
