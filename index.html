@@ -602,16 +602,57 @@
     <script>
         async function runAnalysis() {
             try {
+                // Get selected asset ticker
+                const assetSelect = document.getElementById('stock-select');
+                const ticker = assetSelect ? assetSelect.value : 'THYAO';
+                
                 const response = await fetch('/run-analysis', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticker: ticker })
                 });
-                if (!response.ok) throw new Error('Network response was not ok');
+                
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.message || 'Server error');
+                }
+                
                 const data = await response.json();
-                alert(data.message);
+                
+                // Alert confirmation
+                alert(`Opti AI Analysis Complete for ${ticker}!\nPrediction: ${data.opti_ai.prediction}\nConfidence: ${data.opti_ai.confidence}\nAlpha Generation: ${data.opti_ai.alpha_generation}`);
+                
+                // Add to trade log results section
+                const logBody = document.getElementById('trade-log-body');
+                if (logBody) {
+                    const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+                    const isBullish = data.opti_ai.prediction === 'BULLISH';
+                    const badgeClass = isBullish ? 'badge-long' : 'badge-short';
+                    const pnlClass = isBullish ? 'profit-text' : 'loss-text';
+                    const pnlSign = isBullish ? '+' : '-';
+                    
+                    const row = document.createElement('tr');
+                    row.style.background = 'rgba(212, 175, 55, 0.08)';
+                    row.style.borderLeft = '3px solid var(--gold)';
+                    row.innerHTML = `
+                        <td class="font-mono">${timeStr}</td>
+                        <td class="font-bold" style="color: var(--gold);">Opti AI (${ticker})</td>
+                        <td><span class="badge ${badgeClass}">${data.opti_ai.prediction}</span></td>
+                        <td class="font-mono">Conf: ${data.opti_ai.confidence}</td>
+                        <td class="font-mono">Alpha: ${data.opti_ai.alpha_generation}</td>
+                        <td class="font-mono">-</td>
+                        <td class="font-mono ${pnlClass}" style="font-weight: bold;">${pnlSign}${data.opti_ai.alpha_generation}</td>
+                        <td><span class="badge badge-closed" style="background: rgba(0, 255, 204, 0.15); color: var(--accent-neon);">ACTIVE</span></td>
+                    `;
+                    logBody.insertBefore(row, logBody.firstChild);
+                    
+                    // Switch tab to Trade Log
+                    const tabTradelog = document.getElementById('tab-tradelog');
+                    if (tabTradelog) tabTradelog.click();
+                }
             } catch (error) {
                 console.error('Error running analysis:', error);
-                alert('Connection to backend failed or error occurred.');
+                alert(`Opti AI calculation failed: ${error.message}`);
             }
         }
     </script>

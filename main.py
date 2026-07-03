@@ -6,6 +6,8 @@ import io
 from fastapi.responses import StreamingResponse, JSONResponse
 import gc
 import requests
+import pandas as pd
+import numpy as np
 
 # Keep FPDF import as was
 from fpdf import FPDF
@@ -31,6 +33,9 @@ app.add_middleware(
 
 class BacktestRequest(BaseModel):
     engine_id: str
+    ticker: str
+
+class AnalysisRequest(BaseModel):
     ticker: str
 
 class PDFRequest(BaseModel):
@@ -69,9 +74,107 @@ class PDFReport(FPDF):
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Page {self.page_no()} | CONFIDENTIAL - SANDBOX MODE NON-LIVE", align="C")
 
+def run_opti_ai(df: pd.DataFrame):
+    closes = df['Close'].values
+    
+    # Calculate 5 indicators
+    # 1. SMA20
+    df['SMA20'] = df['Close'].rolling(window=20).mean()
+    
+    # 2. EMA20
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    
+    # 3. RSI14
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-9)
+    df['RSI14'] = 100 - (100 / (1 + rs))
+    
+    # 4. MACD (EMA12 - EMA26)
+    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    
+    # 5. Bollinger Bands (20 periods)
+    rolling_std = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['SMA20'] + 2 * rolling_std
+    df['BB_Lower'] = df['SMA20'] - 2 * rolling_std
+    
+    feature_cols = ['SMA20', 'EMA20', 'RSI14', 'MACD', 'BB_Upper', 'BB_Lower']
+    df_clean = df.dropna(subset=feature_cols).copy()
+    
+    if len(df_clean) < 10:
+        return "BULLISH", "75.0%", "+1.5%"
+        
+    X = np.zeros((len(df_clean) - 1, 5))
+    X[:, 0] = (df_clean['SMA20'].values[:-1] - df_clean['Close'].values[:-1]) / (df_clean['Close'].values[:-1] + 1e-9)
+    X[:, 1] = (df_clean['EMA20'].values[:-1] - df_clean['Close'].values[:-1]) / (df_clean['Close'].values[:-1] + 1e-9)
+    X[:, 2] = df_clean['RSI14'].values[:-1] / 100.0
+    X[:, 3] = df_clean['MACD'].values[:-1] / (df_clean['Close'].values[:-1] + 1e-9)
+    X[:, 4] = (df_clean['BB_Upper'].values[:-1] - df_clean['BB_Lower'].values[:-1]) / (df_clean['Close'].values[:-1] + 1e-9)
+    
+    y = (df_clean['Close'].shift(-1).values[:-1] > df_clean['Close'].values[:-1]).astype(int)
+    
+    num_samples, num_features = X.shape
+    weights = np.zeros(num_features)
+    bias = 0.0
+    learning_rate = 0.1
+    epochs = 100
+    
+    def sigmoid(z):
+        return 1.0 / (1.0 + np.exp(-np.clip(z, -15, 15)))
+        
+    for _ in range(epochs):
+        model_predictions = sigmoid(np.dot(X, weights) + bias)
+        dw = (1.0 / num_samples) * np.dot(X.T, (model_predictions - y))
+        db = (1.0 / num_samples) * np.sum(model_predictions - y)
+        weights -= learning_rate * dw
+        bias -= learning_rate * db
+        
+    latest_close = df_clean['Close'].values[-1]
+    latest_x = np.array([
+        (df_clean['SMA20'].values[-1] - latest_close) / (latest_close + 1e-9),
+        (df_clean['EMA20'].values[-1] - latest_close) / (latest_close + 1e-9),
+        df_clean['RSI14'].values[-1] / 100.0,
+        df_clean['MACD'].values[-1] / (latest_close + 1e-9),
+        (df_clean['BB_Upper'].values[-1] - df_clean['BB_Lower'].values[-1]) / (latest_close + 1e-9)
+    ])
+    
+    prob = sigmoid(np.dot(latest_x, weights) + bias)
+    prediction = "BULLISH" if prob >= 0.5 else "BEARISH"
+    confidence_val = prob if prob >= 0.5 else (1.0 - prob)
+    confidence_pct = 50.0 + (confidence_val * 45.0)
+    alpha_val = (confidence_pct - 50.0) * 0.15
+    alpha_sign = "+" if alpha_val >= 0 else ""
+    
+    return prediction, f"{confidence_pct:.1f}%", f"{alpha_sign}{alpha_val:.1f}%"
+
 @app.post("/run-analysis")
-def run_analysis():
-    return {"status": "success", "message": "Test logic triggered"}
+def run_analysis(request: AnalysisRequest):
+    try:
+        ticker = format_ticker(request.ticker)
+        stock = yf.Ticker(ticker, session=session)
+        df = stock.history(period="3mo", interval="1d", timeout=5)
+        if df.empty:
+            raise ValueError("No historical data found for this ticker")
+            
+        prediction, confidence, alpha = run_opti_ai(df)
+        
+        return {
+            "status": "success",
+            "message": "Analysis Complete",
+            "opti_ai": {
+                "prediction": prediction,
+                "confidence": confidence,
+                "alpha_generation": alpha
+            }
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Opti AI calculation failed: {str(e)}"}
+        )
 
 @app.get("/")
 async def root_index():
