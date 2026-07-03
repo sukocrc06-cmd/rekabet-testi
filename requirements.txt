@@ -3,3 +3,5 @@ uvicorn
 pandas
 yfinance
 requests
+fpdf2
+websockets
