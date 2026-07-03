@@ -30,6 +30,10 @@ def serve_index():
     with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read(), status_code=200)
 
+@app.post("/run-analysis")
+def run_analysis():
+    return {"status": "success", "message": "Test logic triggered"}
+
 @app.get("/fetch-data/{ticker}")
 def fetch_data(ticker: str):
     try:
