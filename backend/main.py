@@ -5,12 +5,19 @@ import yfinance as yf
 import io
 from fastapi.responses import StreamingResponse, JSONResponse
 import gc
+import requests
 
 # Keep FPDF import as was
 from fpdf import FPDF
 from engine import StrategyEngine
 import asyncio
 import random
+
+# Global requests session with browser-like User-Agent
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+})
 
 app = FastAPI()
 
@@ -80,18 +87,24 @@ async def health_check():
     return {"status": "ok"}
 
 @app.get("/api/v1/ohlcv/{ticker}")
-async def get_data(ticker: str):
-    formatted = format_ticker(ticker)
-    stock = yf.Ticker(formatted) 
-    hist = stock.history(period="3mo", interval="1d")
-    data = hist.reset_index().to_dict(orient="records")
-    
-    # Convert Timestamp values to string for serialization
-    for record in data:
-        if "Date" in record:
-            record["Date"] = str(record["Date"])
-            
-    return {"ticker": ticker, "data": data}
+def get_data(ticker: str):
+    try:
+        formatted = format_ticker(ticker)
+        stock = yf.Ticker(formatted, session=session) 
+        hist = stock.history(period="3mo", interval="1d", timeout=10)
+        data = hist.reset_index().to_dict(orient="records")
+        
+        # Convert Timestamp values to string for serialization
+        for record in data:
+            if "Date" in record:
+                record["Date"] = str(record["Date"])
+                
+        return {"ticker": ticker, "data": data}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Data fetch timed out or failed: {str(e)}"}
+        )
 
 # Global task cache to simulate asynchronous queues
 task_store = {}
@@ -113,11 +126,11 @@ def format_ticker(ticker: str) -> str:
     return ticker
 
 @app.post("/api/v1/backtest/run")
-async def run_backtest(request: BacktestRequest):
+def run_backtest(request: BacktestRequest):
     try:
         ticker = format_ticker(request.ticker)
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="3mo", interval="1d")
+        stock = yf.Ticker(ticker, session=session)
+        df = stock.history(period="3mo", interval="1d", timeout=10)
         data = df.reset_index().to_dict(orient="records")
         
         # Convert Date values to string for serialization
@@ -158,7 +171,7 @@ async def run_backtest(request: BacktestRequest):
         gc.collect()
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": str(e)}
+            content={"status": "error", "message": f"Data fetch timed out or failed: {str(e)}"}
         )
 
 @app.get("/api/v1/backtest/status/{task_id}")
@@ -185,8 +198,8 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
     try:
         # Fetch initial historical candles to populate the chart
         formatted = format_ticker(ticker)
-        stock = yf.Ticker(formatted)
-        hist = stock.history(period="3mo", interval="1d")
+        stock = yf.Ticker(formatted, session=session)
+        hist = stock.history(period="3mo", interval="1d", timeout=10)
         data = hist.reset_index().to_dict(orient="records")
         
         for record in data:
@@ -229,7 +242,7 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         print(f"[WebSocket] Error for {ticker}: {e}")
 
 @app.post("/api/v1/backtest/export")
-async def export_report(request: PDFRequest):
+def export_report(request: PDFRequest):
     # Retrieve metrics from cache or calculate them dynamically
     task_id = f"task_{request.ticker}_{request.engine_id}"
     task_data = task_store.get(task_id)
@@ -239,8 +252,8 @@ async def export_report(request: PDFRequest):
     else:
         # Fallback dynamic calculation
         formatted = format_ticker(request.ticker)
-        stock = yf.Ticker(formatted)
-        hist = stock.history(period="3mo", interval="1d")
+        stock = yf.Ticker(formatted, session=session)
+        hist = stock.history(period="3mo", interval="1d", timeout=10)
         data = hist.reset_index().to_dict(orient="records")
         for record in data:
             if "Date" in record:
