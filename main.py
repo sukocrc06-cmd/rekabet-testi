@@ -707,4 +707,6 @@ def export_report(request: PDFRequest):
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": f"Failed to generate report PDF: {str(e)}"}
-        )
+        )
+# EOF
+
