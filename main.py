@@ -38,6 +38,9 @@ class BacktestRequest(BaseModel):
 class AnalysisRequest(BaseModel):
     ticker: str
 
+class ChatRequest(BaseModel):
+    question: str
+
 class PDFRequest(BaseModel):
     ticker: str
     engine_id: str
@@ -175,6 +178,13 @@ def run_analysis(request: AnalysisRequest):
             status_code=500,
             content={"status": "error", "message": f"Opti AI calculation failed: {str(e)}"}
         )
+
+@app.post("/opti-chat")
+def opti_chat(request: ChatRequest):
+    return {
+        "status": "success",
+        "answer": f"I am Opti. You asked: '{request.question}'. I am currently analyzing the market data for this."
+    }
 
 @app.get("/")
 async def root_index():
