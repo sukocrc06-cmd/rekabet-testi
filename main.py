@@ -251,54 +251,42 @@ def run_analysis(request: AnalysisRequest):
         )
 
 @app.post("/opti-chat")
-def opti_chat(request: ChatRequest):
-    import re
-    question = request.question
+async def opti_chat(req: ChatRequest):
+    question = req.question.upper()
     
-    # Extract ticker
-    ticker = None
-    common_tickers = ["AAPL", "MSFT", "TSLA", "THYAO", "ASELS", "BIMAS", "TUPRS", "AKBNK", "NVDA", "AMZN", "AMD"]
-    for t in common_tickers:
-        if re.search(r'\b' + t + r'\b', question, re.IGNORECASE):
-            ticker = t
-            break
+    # Try to find a ticker in the sentence (words with 1-8 uppercase letters)
+    words = question.replace("?", "").replace(".", "").split()
+    target = next((w for w in words if w.isupper() and 1 <= len(w) <= 8 and w not in ["NE", "NASIL", "OPTI"]), None)
+    
+    if target:
+        try:
+            stock = yf.Ticker(target)
+            hist = stock.history(period="3mo")
             
-    if not ticker:
-        matches = re.findall(r'\b[A-Za-z]{3,5}\b', question)
-        if matches:
-            # Check if any match is all-caps or we uppercase and check length
-            for m in matches:
-                if m.isupper() or m.upper() in common_tickers:
-                    ticker = m.upper()
-                    break
-                    
-    if ticker:
-        analysis = analyze_stock_logic(ticker)
-        if analysis:
-            direction = "UPWARD" if analysis['overall_signal'] == 'BUY' else "DOWNWARD" if analysis['overall_signal'] == 'SELL' else "STABILIZING"
-            answer = (
-                f"I have performed a real-time quantitative audit of **{analysis['ticker']}** for you. "
-                f"The latest daily closing price is **₺{analysis['close']}**. "
-                f"The RSI is currently at **{analysis['rsi14']}** ({analysis['rsi_condition']}), "
-                f"indicating a neutral-to-{direction.lower()} momentum. "
-                f"The price lies {analysis['bb_condition'].lower()} relative to the Bollinger Bands (Upper: {analysis['bb_upper']}, Lower: {analysis['bb_lower']}), "
-                f"and the MACD oscillator indicates a **{analysis['macd_signal']}** regime. "
-                f"My overall supervised predictive rating is a **{analysis['overall_signal']}** with a confidence score of **{analysis['confidence']}** (Expected Alpha: **{analysis['alpha_generation']}**)."
-            )
-        else:
-            answer = f"I detected you asked about **{ticker}**, but I couldn't retrieve valid pricing data from Yahoo Finance. Please check the spelling or market availability."
-    else:
-        answer = (
-            "Hello! I am Opti, your advanced quantitative trading assistant. I can analyze BIST or US stocks for you. "
-            "Simply mention any ticker like **THYAO**, **ASELS**, or **AAPL** in your message, and I will calculate "
-            "real-time technical indicators (RSI, MACD, Bollinger Bands) and predict the market regime instantly. "
-            "You can also use the 'Run Test' button to run a full backtest simulation."
-        )
-        
-    return {
-        "status": "success",
-        "answer": answer
-    }
+            if hist.empty:
+                return {"response": f"Patron, {target} hissesi için veri bulamadım. Kodu doğru yazdığına emin misin?"}
+            
+            # Real Calculations
+            current_price = hist['Close'].iloc[-1]
+            sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+            
+            # Simple RSI Calculation
+            delta = hist['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs)).iloc[-1]
+            
+            signal = "AL 🟢" if current_price > sma_20 and rsi < 70 else "BEKLE/SAT 🔴"
+            
+            msg = f"Hemen {target} hissesini senin için analiz ettim. Güncel fiyat: ${current_price:.2f}. 20 Günlük Ortalaması: ${sma_20:.2f}. RSI seviyesi şu an {rsi:.1f}. Algoritmamın şu anki kararı: {signal}"
+            return {"response": msg}
+            
+        except Exception as e:
+            return {"response": f"Analiz sırasında bir hata oluştu patron: {str(e)}"}
+    
+    return {"response": "Ben Opti, senin baş asistanınım! Lütfen bana analiz etmemi istediğin hissenin tam kodunu (örneğin: AAPL veya TSLA) büyük harflerle yaz."}
+
 
 @app.get("/")
 async def root_index():
