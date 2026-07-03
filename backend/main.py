@@ -13,24 +13,18 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (FastAPI/Starlette restriction: cannot use wildcard "*" if allow_credentials=True)
-    allow_credentials=False,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5500",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5500",
+        "https://rekabet-testi.vercel.app",
+        "https://rekabet-testi-git-main.vercel.app",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# NOTE: If you need allow_credentials=True for session/cookie sharing, uncomment this block and list your domains explicitly:
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=[
-#         "http://localhost:5500",
-#         "http://127.0.0.1:5500",
-#         "https://your-vercel-domain-here.vercel.app"
-#     ],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
 
 class BacktestRequest(BaseModel):
     engine_id: str

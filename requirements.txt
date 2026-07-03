@@ -1,8 +1,7 @@
-fastapi==0.115.10
-uvicorn==0.34.0
-gunicorn==23.0.0
-yfinance==0.2.54
-fpdf2==2.8.2
-pandas==2.2.3
-requests==2.32.3
-websockets==14.2
+fastapi
+uvicorn
+gunicorn
+pandas
+yfinance
+fpdf2
+websockets
