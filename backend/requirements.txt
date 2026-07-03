@@ -1,6 +1,6 @@
 fastapi==0.100.0
-uvicorn==0.23.0
+uvicorn==0.23.2
 gunicorn==21.2.0
-pandas
+pandas==2.0.3
 yfinance
 fpdf2

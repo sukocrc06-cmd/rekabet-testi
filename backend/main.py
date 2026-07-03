@@ -5,7 +5,7 @@ import yfinance as yf
 import io
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
-from engine import StrategyEngine
+from backend.engine import StrategyEngine
 import asyncio
 import random
 
