@@ -817,7 +817,7 @@ const DataController = (() => {
         console.log(`[DataController] Initiating polling for task_id: ${taskId}`);
         const intervalId = setInterval(() => {
             console.log(`[DataController] Polling task status: ${taskId}`);
-            fetch(`https://optipulse-backend-production.up.railway.app/api/v1/backtest/status/${taskId}`)
+            fetch(`https://rekabet-testi.onrender.com/api/v1/backtest/status/${taskId}`)
                 .then(res => {
                     if (!res.ok) throw new Error(`Status check failed: ${res.status}`);
                     return res.json();
@@ -867,7 +867,7 @@ const DataController = (() => {
             isFetchingOhlcv = true;
             console.log(`[DataController] Fetching latest OHLCV data for: ${ticker}`);
             
-            fetch(`https://optipulse-backend-production.up.railway.app/api/v1/ohlcv/${ticker}`)
+            fetch(`https://rekabet-testi.onrender.com/api/v1/ohlcv/${ticker}`)
                 .then(res => {
                     if (!res.ok) {
                         throw { status: res.status, message: `Server error: ${res.statusText}` };

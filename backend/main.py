@@ -115,6 +115,7 @@ def format_ticker(ticker: str) -> str:
 @app.post("/api/v1/backtest/run")
 async def run_backtest(request: BacktestRequest):
     try:
+        ticker = format_ticker(request.ticker)
         stock = yf.Ticker(ticker)
         df = stock.history(period="3mo", interval="1d")
         data = df.reset_index().to_dict(orient="records")
