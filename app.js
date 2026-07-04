@@ -25,6 +25,10 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
+    function safeGetElement(id) {
+        return document.getElementById(id) || null;
+    }
+
     const DC = window.DataController;
     const CR = window.ChartRenderer;
 
@@ -375,17 +379,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const btn = el.btnExport;
-        const originalText = btn.innerHTML;
-        
-        btn.disabled = true;
-        btn.innerHTML = `
-            <svg class="spinner-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" stroke-width="2.5" style="margin-right: 4px;">
-                <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
-            </svg>
-            Generating PDF...
-        `;
-        btn.style.opacity = '0.7';
+        const originalText = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.innerHTML = `
+                <svg class="spinner-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5" style="margin-right: 4px;">
+                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                </svg>
+                Generating PDF...
+            `;
+            btn.style.opacity = '0.7';
+        }
 
         const reqBody = {
             ticker: state.selectedAsset,
@@ -421,9 +425,10 @@ document.addEventListener('DOMContentLoaded', () => {
             showNotice('Failed to generate PDF. Make sure backend is online.');
         })
         .finally(() => {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            btn.style.opacity = '1';
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.style.opacity = '1';
+            }
         });
     }
 
@@ -444,23 +449,13 @@ document.addEventListener('DOMContentLoaded', () => {
         updateRiskMonitor(result.metrics);
 
         // ── Update header analysis-ticker-label dynamically ──
-        const tickerLabel = document.getElementById('analysis-ticker-label');
+        const tickerLabel = safeGetElement('analysis-ticker-label');
         if (tickerLabel) {
             tickerLabel.innerText = `Şu an analiz ediliyor: ${state.selectedAsset}`;
         }
 
-        // ── Restore button ──
+        // ── Restore state ──
         state.isSimulating = false;
-        el.btnRun.disabled = false;
-        el.btnRun.innerHTML = `
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
-            Run Test
-        `;
-        el.btnRun.style.opacity = '1';
-        el.btnRun.style.cursor = 'pointer';
 
         if (el.latencyVal) el.latencyVal.innerText = `${elapsed}s`;
 
@@ -573,16 +568,6 @@ document.addEventListener('DOMContentLoaded', () => {
             state.isSimulating = true;
 
             // --- UI: show processing ---
-            el.btnRun.disabled = true;
-            el.btnRun.innerHTML = `
-                <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" stroke-width="2.5">
-                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
-                </svg>
-                Running...
-            `;
-            el.btnRun.style.opacity = '0.7';
-            el.btnRun.style.cursor = 'not-allowed';
 
             if (el.footerStatus) el.footerStatus.innerText = `System status: Computing backtest for ${state.selectedAsset}…`;
             if (el.engineStatus) {
@@ -1033,7 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateTradeLog(resultWithUpdatedTicker);
 
         // Update trade log active ticker verification text
-        const activeTickerEl = document.getElementById('trade-log-active-ticker');
+        const activeTickerEl = safeGetElement('trade-log-active-ticker');
         if (activeTickerEl) {
             activeTickerEl.innerText = ticker;
         }

@@ -19,7 +19,7 @@
             <div class="logo-area">
                 <div class="pulse-indicator"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
-                <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: THYAO</span>
+                <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: ---</span>
             </div>
             <div class="header-status">
                 <div class="status-item">
@@ -620,8 +620,14 @@
     <script src="app.js"></script>
 
     <script>
+        function safeGetElement(id) {
+            return document.getElementById(id) || null;
+        }
+
+        window.safeGetElement = safeGetElement;
+
         function setEngineStatusOnline() {
-            const engineStatus = document.getElementById('engine-status');
+            const engineStatus = safeGetElement('engine-status');
             if (engineStatus) {
                 engineStatus.innerText = 'ONLINE';
                 engineStatus.style.color = '#2ecc71'; // Green
@@ -646,12 +652,12 @@
                 'metric-indicator-summary', 'metric-bb-summary'
             ];
             ids.forEach(id => {
-                const el = document.getElementById(id);
+                const el = safeGetElement(id);
                 if (el) el.textContent = '---';
             });
 
             // Reset Trade Log
-            const tradeLogBody = document.getElementById('trade-log-body');
+            const tradeLogBody = safeGetElement('trade-log-body');
             if (tradeLogBody) {
                 tradeLogBody.innerHTML = `
                     <tr>
@@ -663,8 +669,8 @@
             }
 
             // Handle Loading Overlay
-            const overlay = document.getElementById('chart-loading-overlay');
-            const overlayText = document.getElementById('loading-overlay-text');
+            const overlay = safeGetElement('chart-loading-overlay');
+            const overlayText = safeGetElement('loading-overlay-text');
             if (overlay) {
                 if (loading) {
                     overlay.style.display = 'flex';
@@ -680,10 +686,10 @@
             // Clear canvases via ChartRenderer.reset if loaded
             if (window.ChartRenderer && window.ChartRenderer.reset) {
                 const canvases = [
-                    document.getElementById('canvas-candlestick'),
-                    document.getElementById('canvas-equity'),
-                    document.getElementById('canvas-drawdown'),
-                    document.getElementById('canvas-subchart')
+                    safeGetElement('canvas-candlestick'),
+                    safeGetElement('canvas-equity'),
+                    safeGetElement('canvas-drawdown'),
+                    safeGetElement('canvas-subchart')
                 ];
                 canvases.forEach(c => {
                     if (c) window.ChartRenderer.reset(c);
@@ -691,15 +697,15 @@
             }
 
             // Hide sub-chart container initially
-            const subChartContainer = document.getElementById('sub-chart-container');
+            const subChartContainer = safeGetElement('sub-chart-container');
             if (subChartContainer) {
                 subChartContainer.style.display = 'none';
             }
         }
 
         function renderSubChart(rsiSeries, macdSeries) {
-            const container = document.getElementById('sub-chart-container');
-            const canvas = document.getElementById('canvas-subchart');
+            const container = safeGetElement('sub-chart-container');
+            const canvas = safeGetElement('canvas-subchart');
             if (!container || !canvas) return;
 
             if (!rsiSeries || rsiSeries.length === 0) {
@@ -806,48 +812,48 @@
             const formatPct = (val) => (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
             const formatTRY = (val) => '₺' + val.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-            const returnEl = document.getElementById('metric-return');
+            const returnEl = safeGetElement('metric-return');
             if (returnEl) {
                 returnEl.textContent = formatPct(backtestResult.metrics.netProfitPct);
                 returnEl.className = backtestResult.metrics.netProfitPct >= 0 ? 'card-value accent-text' : 'card-value drawdown-warning';
             }
-            const netabsEl = document.getElementById('metric-netprofit-abs');
+            const netabsEl = safeGetElement('metric-netprofit-abs');
             if (netabsEl) {
                 netabsEl.textContent = formatTRY(backtestResult.metrics.netProfit) + ' net';
             }
-            const sharpeEl = document.getElementById('metric-sharpe');
+            const sharpeEl = safeGetElement('metric-sharpe');
             if (sharpeEl) {
                 sharpeEl.textContent = rsiData.sharpe_ratio !== undefined ? rsiData.sharpe_ratio.toFixed(2) : backtestResult.metrics.sharpeRatio.toFixed(2);
             }
-            const drawdownEl = document.getElementById('metric-drawdown');
+            const drawdownEl = safeGetElement('metric-drawdown');
             if (drawdownEl) {
                 drawdownEl.textContent = '-' + backtestResult.metrics.maxDrawdownPct.toFixed(2) + '%';
             }
-            const factorEl = document.getElementById('metric-factor');
+            const factorEl = safeGetElement('metric-factor');
             if (factorEl) {
                 factorEl.textContent = backtestResult.metrics.profitFactor.toFixed(2);
             }
-            const winrateEl = document.getElementById('metric-winrate');
+            const winrateEl = safeGetElement('metric-winrate');
             if (winrateEl) {
                 winrateEl.textContent = rsiData.win_rate || (backtestResult.metrics.winRate ? backtestResult.metrics.winRate.toFixed(1) + '%' : '---');
             }
-            const winlossEl = document.getElementById('metric-winloss');
+            const winlossEl = safeGetElement('metric-winloss');
             if (winlossEl) {
                 winlossEl.textContent = `${backtestResult.metrics.wins} Wins / ${backtestResult.metrics.losses} Losses`;
             }
-            const tradesEl = document.getElementById('metric-trades');
+            const tradesEl = safeGetElement('metric-trades');
             if (tradesEl) {
                 tradesEl.textContent = backtestResult.metrics.totalTrades;
             }
-            const betaEl = document.getElementById('metric-beta');
+            const betaEl = safeGetElement('metric-beta');
             if (betaEl) {
                 betaEl.textContent = rsiData.beta !== undefined ? rsiData.beta.toFixed(2) : '---';
             }
-            const indicatorSummaryEl = document.getElementById('metric-indicator-summary');
+            const indicatorSummaryEl = safeGetElement('metric-indicator-summary');
             if (indicatorSummaryEl && rsiData.rsi14 !== undefined && rsiData.macd !== undefined) {
                 indicatorSummaryEl.textContent = `RSI: ${rsiData.rsi14.toFixed(1)} | MACD: ${rsiData.macd.toFixed(2)}`;
             }
-            const bbSummaryEl = document.getElementById('metric-bb-summary');
+            const bbSummaryEl = safeGetElement('metric-bb-summary');
             if (bbSummaryEl && rsiData.bb_lower !== undefined && rsiData.bb_upper !== undefined) {
                 bbSummaryEl.textContent = `Bollinger: ₺${rsiData.bb_lower.toFixed(1)} - ₺${rsiData.bb_upper.toFixed(1)}`;
             }
@@ -862,12 +868,19 @@
             resetDashboardUI(true);
         }
 
-        async function runAnalysis() {
+        async function runAnalysis(ticker) {
+            // Retrieve selected ticker safely if none passed
+            if (!ticker) {
+                const stockSelect = safeGetElement('stock-select');
+                ticker = stockSelect ? stockSelect.value : '';
+            }
+            if (!ticker) return;
+
             // Cleanup logs and metrics before starting
             clearDashboardUI();
 
             // Set UI indicators to Analysing...
-            const footerStatus = document.getElementById('footer-status');
+            const footerStatus = safeGetElement('footer-status');
             if (footerStatus) {
                 footerStatus.innerText = 'System status: Analysing...';
             }
@@ -887,13 +900,12 @@
             }, 15000);
 
             try {
-                const ticker = document.getElementById('stock-select').value;
                 if (!window.executePipelinePromise) {
                     throw new Error('Application pipeline controller not loaded.');
                 }
 
                 // Immediately update header status
-                const tickerLabel = document.getElementById('analysis-ticker-label');
+                const tickerLabel = safeGetElement('analysis-ticker-label');
                 if (tickerLabel) {
                     tickerLabel.innerText = `Şu an analiz ediliyor: ${ticker}`;
                 }
@@ -942,7 +954,6 @@
                     }
                 } else {
                     console.error('Error running analysis:', error);
-                    alert('Analiz hatası: ' + error.message);
                     resetDashboardUI(false, 'Analiz hatası: ' + error.message);
                 }
             } finally {
