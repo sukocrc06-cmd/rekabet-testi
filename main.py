@@ -252,7 +252,42 @@ def run_analysis(request: AnalysisRequest):
 
 @app.post("/opti-chat")
 def opti_chat(req: ChatRequest):
-    return {"response": "Backend is ready."}
+    import re
+    question = req.question.upper()
+    
+    # Try to find a ticker in the sentence (words with 2-5 uppercase letters)
+    words = re.findall(r'\b[A-Z]{2,5}\b', question)
+    stop_words = {"NE", "NASIL", "OPTI", "BEN", "SEN", "VE", "VEX", "HI", "HELLO", "OK"}
+    target = next((w for w in words if w not in stop_words), None)
+    
+    if not target:
+        target = "AAPL"  # Default to AAPL
+        
+    try:
+        stock = yf.Ticker(target)
+        hist = stock.history(period="3mo")
+        
+        if hist.empty:
+            return {"response": f"Patron, {target} hissesi için veri bulamadım. Kodu doğru yazdığına emin misin?"}
+        
+        # Real Calculations
+        current_price = hist['Close'].iloc[-1]
+        sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+        
+        # Simple RSI Calculation
+        delta = hist['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-9)
+        rsi = 100 - (100 / (1 + rs)).iloc[-1]
+        
+        signal = "AL 🟢" if current_price > sma_20 and rsi < 70 else "BEKLE/SAT 🔴"
+        
+        msg = f"Hemen {target} hissesini senin için analiz ettim. Güncel fiyatı: ${current_price:.2f}. RSI seviyesi {rsi:.1f} ve 20 günlük ortalaması ${sma_20:.2f}. Mevcut indikatörlere göre kararım: {signal}"
+        return {"response": msg}
+        
+    except Exception as e:
+        return {"response": f"Analiz sırasında bir hata oluştu patron: {str(e)}"}
 
 
 @app.get("/")
