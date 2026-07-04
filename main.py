@@ -80,31 +80,45 @@ def analyze_stock_logic(ticker: str) -> dict:
         if df.empty:
             return {}
             
-        # Calculate indicators
-        # 1. SMA20
+        # Calculate SMA20 and EMA20 for standard signal logic
         df['SMA20'] = df['Close'].rolling(window=20).mean()
-        
-        # 2. EMA20
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-        
-        # 3. RSI14
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / (loss + 1e-9)
-        df['RSI14'] = 100 - (100 / (1 + rs))
-        
-        # 4. MACD (EMA12 - EMA26)
-        ema12 = df['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = ema12 - ema26
-        df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        
-        # 5. Bollinger Bands (20 periods)
-        rolling_std = df['Close'].rolling(window=20).std()
-        df['BB_Upper'] = df['SMA20'] + 2 * rolling_std
-        df['BB_Lower'] = df['SMA20'] - 2 * rolling_std
-        
+
+        try:
+            import pandas_ta as ta
+            df['RSI14'] = ta.rsi(df['Close'], length=14)
+            macd_df = ta.macd(df['Close'], fast=12, slow=26, signal=9)
+            if macd_df is not None:
+                df['MACD'] = macd_df['MACD_12_26_9']
+                df['MACD_Signal'] = macd_df['MACDs_12_26_9']
+            else:
+                df['MACD'] = df['Close'].ewm(span=12, adjust=False).mean() - df['Close'].ewm(span=26, adjust=False).mean()
+                df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+                
+            bb_df = ta.bbands(df['Close'], length=20, std=2)
+            if bb_df is not None:
+                df['BB_Upper'] = bb_df['BBU_20_2.0']
+                df['BB_Lower'] = bb_df['BBL_20_2.0']
+            else:
+                df['BB_Upper'] = df['SMA20'] + 2 * df['Close'].rolling(window=20).std()
+                df['BB_Lower'] = df['SMA20'] - 2 * df['Close'].rolling(window=20).std()
+        except ImportError:
+            # Fallback native pandas indicator calculations
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / (loss + 1e-9)
+            df['RSI14'] = 100 - (100 / (1 + rs))
+            
+            ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+            ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+            df['MACD'] = ema12 - ema26
+            df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+            
+            rolling_std = df['Close'].rolling(window=20).std()
+            df['BB_Upper'] = df['SMA20'] + 2 * rolling_std
+            df['BB_Lower'] = df['SMA20'] - 2 * rolling_std
+            
         feature_cols = ['SMA20', 'EMA20', 'RSI14', 'MACD', 'BB_Upper', 'BB_Lower']
         df_clean = df.dropna(subset=feature_cols).copy()
         
@@ -199,6 +213,39 @@ def analyze_stock_logic(ticker: str) -> dict:
         drawdowns = (df['Close'] - peaks) / (peaks + 1e-9) * 100
         max_dd = float(drawdowns.min())
         
+        # Sharpe Ratio calculation
+        df['Returns'] = df['Close'].pct_change()
+        returns = df['Returns'].dropna()
+        sharpe = 0.0
+        if len(returns) > 5:
+            avg_return = returns.mean()
+            std_return = returns.std()
+            if std_return > 0:
+                sharpe = (avg_return / std_return) * np.sqrt(252)
+                
+        # Beta calculation against XU100 (BIST 100)
+        beta = 1.0
+        try:
+            xu100 = yf.Ticker("XU100.IS", session=session)
+            xu100_df = xu100.history(period="6mo", interval="1d", timeout=5)
+            if not xu100_df.empty:
+                xu100_df['Market_Returns'] = xu100_df['Close'].pct_change()
+                combined = pd.concat([df['Returns'], xu100_df['Market_Returns']], axis=1).dropna()
+                if len(combined) > 5:
+                    cov = combined.cov().iloc[0, 1]
+                    market_var = combined.iloc[:, 1].var()
+                    if market_var > 0:
+                        beta = cov / market_var
+        except Exception as e:
+            print(f"Error calculating Beta: {e}")
+            
+        # Get historical series for Chart.js sub-chart
+        df_chart = df.dropna(subset=['RSI14']).copy()
+        rsi_series = [{"date": str(idx)[:10], "value": float(val)} for idx, val in df_chart['RSI14'].items()]
+        macd_series = []
+        if 'MACD' in df_chart.columns:
+            macd_series = [{"date": str(idx)[:10], "macd": float(row['MACD']), "signal": float(row['MACD_Signal'])} for idx, row in df_chart.iterrows()]
+            
         return {
             "ticker": formatted,
             "close": round(close, 2),
@@ -207,7 +254,7 @@ def analyze_stock_logic(ticker: str) -> dict:
             "rsi14": round(rsi, 2),
             "rsi_condition": rsi_condition,
             "macd": round(macd, 2),
-            "macd_signal": macd_signal,
+            "macd_signal": round(signal, 2),
             "bb_upper": round(bb_upper, 2),
             "bb_lower": round(bb_lower, 2),
             "bb_condition": bb_condition,
@@ -215,7 +262,11 @@ def analyze_stock_logic(ticker: str) -> dict:
             "confidence": f"{confidence:.1f}%",
             "alpha_generation": f"+{alpha_val:.1f}%",
             "win_rate": f"{win_rate:.1f}%",
-            "max_drawdown": f"{max_dd:.1f}%"
+            "max_drawdown": f"{max_dd:.1f}%",
+            "sharpe_ratio": round(sharpe, 2),
+            "beta": round(beta, 2),
+            "rsi_series": rsi_series,
+            "macd_series": macd_series
         }
     except Exception as e:
         print(f"Error in analyze_stock_logic: {e}")

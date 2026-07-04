@@ -270,6 +270,12 @@
                                 <canvas id="canvas-candlestick" class="chart-canvas"></canvas>
                                 <!-- Crosshair tooltip -->
                                 <div id="chart-tooltip" class="chart-tooltip"></div>
+                             </div>
+                             
+                             <!-- Indicator Sub-chart (Chart.js) -->
+                             <div id="sub-chart-container" style="height: 120px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px; display: none;">
+                                 <canvas id="canvas-subchart"></canvas>
+                             </div>
                         </div>
                     </div>
                 </section>
@@ -349,6 +355,16 @@
                                     <span class="card-label">Total Trades</span>
                                     <span class="card-value" id="metric-trades">201</span>
                                     <span class="card-subtext">Avg duration: 4.2 hours</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Beta Katsayısı</span>
+                                    <span class="card-value" id="metric-beta">1.00</span>
+                                    <span class="card-subtext">XU100 Benchmark Duyarlılığı</span>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="card-label">Teknik Gösterge Özeti</span>
+                                    <span class="card-value" id="metric-indicator-summary" style="font-size: 14px; line-height: 1.6; color: var(--gold); padding-top: 4px; display: block;">RSI: 50.0 | MACD: 0.00</span>
+                                    <span class="card-subtext" id="metric-bb-summary">Bollinger: Inside Bands</span>
                                 </div>
                                 <div class="metric-card risk-score-card">
                                     <span class="card-label">Risk Score</span>
@@ -612,6 +628,106 @@
             setEngineStatusOnline();
         });
 
+        let subChartInstance = null;
+
+        function renderSubChart(rsiSeries, macdSeries) {
+            const container = document.getElementById('sub-chart-container');
+            const canvas = document.getElementById('canvas-subchart');
+            if (!container || !canvas) return;
+
+            if (!rsiSeries || rsiSeries.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+
+            if (subChartInstance) {
+                subChartInstance.destroy();
+                subChartInstance = null;
+            }
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            const labels = rsiSeries.map(item => item.date);
+            const rsiData = rsiSeries.map(item => item.value);
+
+            const datasets = [
+                {
+                    label: 'RSI (14)',
+                    data: rsiData,
+                    borderColor: '#D4AF37',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'yRsi'
+                }
+            ];
+
+            if (macdSeries && macdSeries.length > 0) {
+                const macdData = macdSeries.map(item => item.macd);
+                datasets.push({
+                    label: 'MACD',
+                    data: macdData,
+                    borderColor: '#3498DB',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'yMacd'
+                });
+            }
+
+            subChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#e0e0e0',
+                                font: { size: 9 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#1f1f1f',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                            ticks: { color: '#888888', font: { size: 8 }, maxTicksLimit: 12 }
+                        },
+                        yRsi: {
+                            type: 'linear',
+                            position: 'left',
+                            min: 0,
+                            max: 100,
+                            grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                            ticks: { color: '#888888', font: { size: 8 } }
+                        },
+                        yMacd: {
+                            type: 'linear',
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            ticks: { color: '#888888', font: { size: 8 } }
+                        }
+                    }
+                }
+            });
+        }
+
         async function runAnalysis() {
             try {
                 const assetSelect = document.getElementById('stock-select');
@@ -652,6 +768,30 @@
                 if (drawdownEl) {
                     drawdownEl.textContent = data.max_drawdown || "-12.0%";
                 }
+
+                const sharpeEl = document.getElementById('metric-sharpe');
+                if (sharpeEl && data.sharpe_ratio !== undefined) {
+                    sharpeEl.textContent = data.sharpe_ratio.toFixed(2);
+                }
+
+                const betaEl = document.getElementById('metric-beta');
+                if (betaEl && data.beta !== undefined) {
+                    betaEl.textContent = data.beta.toFixed(2);
+                }
+
+                const indicatorSummaryEl = document.getElementById('metric-indicator-summary');
+                if (indicatorSummaryEl && data.rsi14 !== undefined && data.macd !== undefined) {
+                    indicatorSummaryEl.textContent = `RSI: ${data.rsi14.toFixed(1)} | MACD: ${data.macd.toFixed(2)}`;
+                }
+
+                const bbSummaryEl = document.getElementById('metric-bb-summary');
+                if (bbSummaryEl && data.bb_lower !== undefined && data.bb_upper !== undefined) {
+                    bbSummaryEl.textContent = `Bollinger: ₺${data.bb_lower.toFixed(1)} - ₺${data.bb_upper.toFixed(1)}`;
+                }
+
+                // Render Chart.js sub-chart for RSI & MACD
+                renderSubChart(data.rsi_series, data.macd_series);
+
             } catch (error) {
                 console.error('Error running analysis:', error);
             } finally {
