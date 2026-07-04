@@ -849,8 +849,36 @@
                 if (chatSidebar) {
                     chatSidebar.classList.add('open');
                 }
-                appendMessage(`Analyzing the requested ticker ${ticker} based on current indicators... Please wait.`, 'assistant');
                 
+                // Trigger background question to /opti-chat about the selected stock
+                appendMessage(`Lütfen ${ticker} hissesini analiz et.`, 'user');
+                const typingId = appendMessage('Düşünüyor...', 'assistant');
+                
+                // Fetch technical analysis from /opti-chat
+                fetch('/opti-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: `Lütfen ${ticker} hissesini analiz et.` })
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error('Chat failed');
+                    return res.json();
+                })
+                .then(data => {
+                    const typingBubble = document.getElementById(typingId);
+                    if (typingBubble) {
+                        typingBubble.textContent = data.response;
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    const typingBubble = document.getElementById(typingId);
+                    if (typingBubble) {
+                        typingBubble.textContent = 'Hisse analizi alınırken hata oluştu.';
+                    }
+                });
+
+                // Also run the standard ML analysis route
                 const response = await fetch('/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -863,9 +891,6 @@
                 }
                 
                 const data = await response.json();
-                
-                // Show completion message in chat widget
-                appendMessage(`Analysis Complete for ${ticker}!\nPrediction: ${data.opti_ai.prediction}\nConfidence: ${data.opti_ai.confidence}\nAlpha Generation: ${data.opti_ai.alpha_generation}`, 'assistant');
                 
                 // Add to trade log results section
                 const logBody = document.getElementById('trade-log-body');
@@ -897,7 +922,6 @@
                 }
             } catch (error) {
                 console.error('Error running analysis:', error);
-                appendMessage(`Opti AI calculation failed: ${error.message}`, 'assistant');
             }
         }
     </script>
