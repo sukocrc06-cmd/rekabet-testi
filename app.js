@@ -1277,7 +1277,47 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     document.head.appendChild(style);
 
+    async function fetchStocks() {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/api/v1/list-stocks');
+            if (!response.ok) throw new Error('Failed to fetch stock list');
+            const stocks = await response.json();
+            
+            if (el.stockSelect) {
+                el.stockSelect.innerHTML = '';
+                stocks.forEach(stock => {
+                    const opt = document.createElement('option');
+                    opt.value = stock.symbol;
+                    opt.textContent = `${stock.symbol} (${stock.name})`;
+                    el.stockSelect.appendChild(opt);
+                });
+                if (stocks.length > 0) {
+                    state.selectedAsset = stocks[0].symbol;
+                }
+            }
+        } catch (error) {
+            console.error('[OptiPulseLab] Error fetching dynamic stock list:', error);
+            const fallbacks = [
+                { symbol: 'THYAO', name: 'Türk Hava Yolları' },
+                { symbol: 'ASELS', name: 'ASELSAN' },
+                { symbol: 'BIMAS', name: 'BİM Mağazalar' },
+                { symbol: 'TUPRS', name: 'Tüpraş' },
+                { symbol: 'AKBNK', name: 'Akbank' }
+            ];
+            if (el.stockSelect) {
+                el.stockSelect.innerHTML = '';
+                fallbacks.forEach(stock => {
+                    const opt = document.createElement('option');
+                    opt.value = stock.symbol;
+                    opt.textContent = `${stock.symbol} (${stock.name})`;
+                    el.stockSelect.appendChild(opt);
+                });
+            }
+        } finally {
+            connectLiveStream(state.selectedAsset);
+        }
+    }
+
     /* ────────────── Initial Load ────────────── */
-    // Open live streaming WebSocket for default asset on page load
-    connectLiveStream(state.selectedAsset);
+    fetchStocks();
 });

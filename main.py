@@ -256,6 +256,23 @@ async def run_analysis(request: Request = None):
 async def health_check():
     return {"status": "ok"}
 
+@app.get("/api/v1/list-stocks")
+async def list_stocks():
+    try:
+        stocks = [
+            {"symbol": "THYAO", "name": "Türk Hava Yolları"},
+            {"symbol": "ASELS", "name": "ASELSAN"},
+            {"symbol": "BIMAS", "name": "BİM Mağazalar"},
+            {"symbol": "TUPRS", "name": "Tüpraş"},
+            {"symbol": "AKBNK", "name": "Akbank"}
+        ]
+        return stocks
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Failed to retrieve stock list: {str(e)}"}
+        )
+
 @app.get("/api/v1/ohlcv/{ticker}")
 def get_data(ticker: str):
     try:
