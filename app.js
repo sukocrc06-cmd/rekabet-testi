@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const state = {
         isSimulating: false,
-        selectedAsset: 'THYAO',
+        selectedAsset: '',
         resolution: '1m',
         engine: 'optipulse',
         lastResult: null,          // cached runPipeline result
@@ -262,8 +262,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (el.btnReset) {
         el.btnReset.addEventListener('click', () => {
-            el.stockSelect.value = 'THYAO';
-            state.selectedAsset = 'THYAO';
+            if (el.stockSelect && el.stockSelect.options.length > 0) {
+                el.stockSelect.selectedIndex = 0;
+                state.selectedAsset = el.stockSelect.value;
+            }
 
             el.tfBtns.forEach(b => b.classList.remove('active'));
             el.tfBtns[0].classList.add('active');
@@ -1022,6 +1024,23 @@ document.addEventListener('DOMContentLoaded', () => {
         el.tradeLogBody.innerHTML = html;
     }
 
+    function updateTradeLog(ticker) {
+        if (!state.lastResult) return;
+        state.selectedAsset = ticker;
+        const resultWithUpdatedTicker = {
+            ...state.lastResult,
+            ticker: ticker
+        };
+        populateTradeLog(resultWithUpdatedTicker);
+
+        // Update trade log active ticker verification text
+        const activeTickerEl = document.getElementById('trade-log-active-ticker');
+        if (activeTickerEl) {
+            activeTickerEl.innerText = ticker;
+        }
+    }
+    window.updateTradeLog = updateTradeLog;
+
     /* ────────────── Footer Notice ────────────── */
 
     let noticeTimer = null;
@@ -1398,8 +1417,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     opt.textContent = `${stock.symbol} (${stock.name})`;
                     el.stockSelect.appendChild(opt);
                 });
-                el.stockSelect.value = 'THYAO';
-                state.selectedAsset = 'THYAO';
+                state.selectedAsset = el.stockSelect.value;
             }
         } catch (error) {
             console.error('[OptiPulseLab] Error populating BIST 100 list:', error);

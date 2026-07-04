@@ -421,6 +421,9 @@
 
                         <!-- Trade Log Panel -->
                         <div class="tab-panel" id="trade-log-panel" role="tabpanel" aria-labelledby="tab-tradelog">
+                            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; font-weight: 500; padding: 0 4px;">
+                                Analiz Edilen Hisse: <span id="trade-log-active-ticker" style="color: var(--gold); font-weight: 600;">-</span>
+                            </div>
                             <div class="table-container">
                                 <table class="data-table">
                                     <thead>
@@ -730,8 +733,7 @@
 
         async function runAnalysis() {
             try {
-                const assetSelect = document.getElementById('stock-select');
-                const ticker = assetSelect ? assetSelect.value : 'THYAO';
+                const ticker = document.getElementById('stock-select').value;
 
                 // Immediately update header label
                 const tickerLabel = document.getElementById('analysis-ticker-label');
@@ -791,6 +793,11 @@
 
                 // Render Chart.js sub-chart for RSI & MACD
                 renderSubChart(data.rsi_series, data.macd_series);
+
+                // Update trade log for the currently analyzed ticker
+                if (window.updateTradeLog) {
+                    window.updateTradeLog(tickerName);
+                }
 
             } catch (error) {
                 console.error('Error running analysis:', error);
