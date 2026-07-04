@@ -602,8 +602,6 @@
     <script src="app.js"></script>
 
     <script>
-        const baseUrl = window.location.origin.startsWith('file') ? 'http://127.0.0.1:8000' : '';
-
         function setEngineStatusOnline() {
             const engineStatus = document.getElementById('engine-status');
             if (engineStatus) {
@@ -619,7 +617,7 @@
 
         async function runAnalysis() {
             try {
-                const response = await fetch(`${baseUrl}/run-analysis`, {
+                const response = await fetch('http://127.0.0.1:8000/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
