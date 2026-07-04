@@ -250,11 +250,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ────────────── Asset Selector (AUTO-RUN) ────────────── */
 
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
     if (el.stockSelect) {
-        el.stockSelect.addEventListener('change', (e) => {
+        el.stockSelect.addEventListener('change', debounce((e) => {
             state.selectedAsset = e.target.value;
             showNotice(`Asset → ${state.selectedAsset} — streaming live rates…`);
-        });
+            if (window.runAnalysis) {
+                window.runAnalysis();
+            }
+        }, 300));
     }
 
     /* ────────────── Reset ────────────── */
