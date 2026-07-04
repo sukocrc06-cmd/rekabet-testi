@@ -11,144 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="styles.css">
-    <style>
-        /* Opti AI Chat Widget Styles */
-        .opti-chat-sidebar {
-            position: fixed;
-            top: 0;
-            right: -360px;
-            width: 360px;
-            height: 100vh;
-            background: rgba(18, 20, 28, 0.95);
-            border-left: 1px solid var(--border-color, #232735);
-            box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            transition: right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            backdrop-filter: blur(15px);
-        }
-        .opti-chat-sidebar.open {
-            right: 0;
-        }
-        .opti-chat-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color, #232735);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(30, 30, 30, 0.3);
-        }
-        .opti-chat-title {
-            font-size: 13px;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .opti-status-dot {
-            width: 8px;
-            height: 8px;
-            background-color: var(--accent-neon, #00ffcc);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--accent-neon, #00ffcc);
-            animation: pulse-glow 2s infinite;
-        }
-        @keyframes pulse-glow {
-            0% { opacity: 0.4; }
-            50% { opacity: 1; }
-            100% { opacity: 0.4; }
-        }
-        .opti-chat-close {
-            background: none;
-            border: none;
-            color: var(--text-muted, #8f9cae);
-            font-size: 24px;
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-        .opti-chat-close:hover {
-            color: #fff;
-        }
-        .opti-chat-messages {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        .opti-chat-messages::-webkit-scrollbar {
-            width: 5px;
-        }
-        .opti-chat-messages::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .opti-chat-messages::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-        }
-        .opti-message {
-            max-width: 85%;
-            padding: 12px 16px;
-            border-radius: 12px;
-            font-size: 13px;
-            line-height: 1.5;
-            word-wrap: break-word;
-        }
-        .opti-message-assistant {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border-color, #232735);
-            color: var(--text-primary, #f5f6fa);
-            align-self: flex-start;
-            border-bottom-left-radius: 2px;
-        }
-        .opti-message-user {
-            background: rgba(212, 175, 55, 0.15);
-            border: 1px solid rgba(212, 175, 55, 0.3);
-            color: #fff;
-            align-self: flex-end;
-            border-bottom-right-radius: 2px;
-        }
-        .opti-chat-input-area {
-            padding: 20px;
-            border-top: 1px solid var(--border-color, #232735);
-            display: flex;
-            gap: 10px;
-            background: rgba(30, 30, 30, 0.2);
-        }
-        .opti-chat-input-area input {
-            flex: 1;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border-color, #232735);
-            padding: 12px 15px;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .opti-chat-input-area input:focus {
-            border-color: var(--gold, #d4af37);
-        }
-        .opti-chat-input-area button {
-            background: linear-gradient(135deg, var(--gold, #d4af37), #b89326);
-            color: #000;
-            border: none;
-            padding: 0 18px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 13px;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-        .opti-chat-input-area button:hover {
-            opacity: 0.9;
-        }
-    </style>
 </head>
 <body>
     <div class="dashboard-container">
@@ -181,10 +43,6 @@
                 <button class="btn btn-secondary" id="btn-reset-params">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
                     Reset
-                </button>
-                <button class="btn btn-secondary" id="btn-toggle-opti" style="display: flex; align-items: center; gap: 6px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    Opti AI
                 </button>
                 <button class="btn btn-primary" id="btn-run-backtest" onclick="runAnalysis()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
@@ -742,25 +600,6 @@
     <script src="chartRenderer.js"></script>
     <!-- Application Controller -->
     <script src="app.js"></script>
-<!-- Opti AI Floating Chat Sidebar -->
-<div id="opti-chat-sidebar" class="opti-chat-sidebar">
-    <div class="opti-chat-header">
-        <div class="opti-chat-title">
-            <span class="opti-status-dot"></span>
-            Opti AI Assistant
-        </div>
-        <button id="opti-chat-close" class="opti-chat-close">&times;</button>
-    </div>
-    <div class="opti-chat-messages" id="opti-chat-messages">
-        <div class="opti-message opti-message-assistant">
-            Hello, I am Opti! Ask me any questions about stocks or strategies.
-        </div>
-    </div>
-    <div class="opti-chat-input-area">
-        <input type="text" id="opti-chat-input" placeholder="Type a message..." autocomplete="off">
-        <button id="opti-chat-send">Send</button>
-    </div>
-</div>
 
     <script>
         const baseUrl = window.location.origin.startsWith('file') ? 'http://127.0.0.1:8000' : '';
@@ -773,165 +612,34 @@
             }
         }
 
-        // Opti Chat Sidebar Toggle Logic
-        const chatSidebar = document.getElementById('opti-chat-sidebar');
-        const toggleBtn = document.getElementById('btn-toggle-opti');
-        const closeBtn = document.getElementById('opti-chat-close');
-        
-        if (toggleBtn && chatSidebar) {
-            toggleBtn.addEventListener('click', () => {
-                chatSidebar.classList.toggle('open');
-            });
-        }
-        
-        if (closeBtn && chatSidebar) {
-            closeBtn.addEventListener('click', () => {
-                chatSidebar.classList.remove('open');
-            });
-        }
-        
-        // Opti Chat Send Message Logic
-        const chatInput = document.getElementById('opti-chat-input');
-        const chatSendBtn = document.getElementById('opti-chat-send');
-        const chatMessages = document.getElementById('opti-chat-messages');
-        
-        async function sendChatMessage() {
-            const text = chatInput.value.trim();
-            if (!text) return;
-            
-            // Add user message to UI
-            appendMessage(text, 'user');
-            chatInput.value = '';
-            
-            // Add loading placeholder from assistant
-            const typingId = appendMessage('Thinking...', 'assistant');
-            
-            try {
-                const response = await fetch(`${baseUrl}/opti-chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: text })
-                });
-                if (!response.ok) throw new Error('Failed to reach assistant');
-                setEngineStatusOnline();
-                const data = await response.json();
-                
-                // Replace typing message with response
-                const typingBubble = document.getElementById(typingId);
-                if (typingBubble) {
-                    typingBubble.textContent = data.response;
-                }
-            } catch (err) {
-                console.error(err);
-                const typingBubble = document.getElementById(typingId);
-                if (typingBubble) {
-                    typingBubble.textContent = 'Sorry, I encountered an error communicating with my brain.';
-                }
-            }
-        }
-        
-        function appendMessage(text, sender) {
-            const bubble = document.createElement('div');
-            const uniqueId = 'msg-' + Math.random().toString(36).substr(2, 9);
-            bubble.id = uniqueId;
-            bubble.className = `opti-message opti-message-${sender}`;
-            bubble.textContent = text;
-            chatMessages.appendChild(bubble);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            return uniqueId;
-        }
-        
-        if (chatSendBtn) {
-            chatSendBtn.addEventListener('click', sendChatMessage);
-        }
-        if (chatInput) {
-            chatInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendChatMessage();
-            });
-        }
+        // Set online status on load
+        window.addEventListener('DOMContentLoaded', () => {
+            setEngineStatusOnline();
+        });
 
         async function runAnalysis() {
             try {
-                // Get selected asset ticker
-                const assetSelect = document.getElementById('stock-select');
-                const ticker = assetSelect ? assetSelect.value : 'THYAO';
-                
-                // Auto-open chat widget and show initial analyzing message
-                if (chatSidebar) {
-                    chatSidebar.classList.add('open');
-                }
-                
-                // Trigger background question to /opti-chat about the selected stock
-                appendMessage(`Lütfen ${ticker} hissesini analiz et.`, 'user');
-                const typingId = appendMessage('Düşünüyor...', 'assistant');
-                
-                // Fetch technical analysis from /opti-chat
-                fetch(`${baseUrl}/opti-chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: `Lütfen ${ticker} hissesini analiz et.` })
-                })
-                .then(res => {
-                    if (!res.ok) throw new Error('Chat failed');
-                    setEngineStatusOnline();
-                    return res.json();
-                })
-                .then(data => {
-                    const typingBubble = document.getElementById(typingId);
-                    if (typingBubble) {
-                        typingBubble.textContent = data.response;
-                    }
-                })
-                .catch(err => {
-                    console.error(err);
-                    const typingBubble = document.getElementById(typingId);
-                    if (typingBubble) {
-                        typingBubble.textContent = 'Hisse analizi alınırken hata oluştu.';
-                    }
-                });
-
-                // Also run the standard ML analysis route
                 const response = await fetch(`${baseUrl}/run-analysis`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticker: ticker })
+                    headers: { 'Content-Type': 'application/json' }
                 });
                 
                 if (!response.ok) {
-                    const errData = await response.json();
-                    throw new Error(errData.message || 'Server error');
+                    throw new Error('Analysis fetch failed');
                 }
-                setEngineStatusOnline();
                 
+                setEngineStatusOnline();
                 const data = await response.json();
                 
-                // Add to trade log results section
-                const logBody = document.getElementById('trade-log-body');
-                if (logBody) {
-                    const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
-                    const isBullish = data.opti_ai.prediction === 'BULLISH';
-                    const badgeClass = isBullish ? 'badge-long' : 'badge-short';
-                    const pnlClass = isBullish ? 'profit-text' : 'loss-text';
-                    const pnlSign = isBullish ? '+' : '-';
-                    
-                    const row = document.createElement('tr');
-                    row.style.background = 'rgba(212, 175, 55, 0.08)';
-                    row.style.borderLeft = '3px solid var(--gold)';
-                    row.innerHTML = `
-                        <td class="font-mono">${timeStr}</td>
-                        <td class="font-bold" style="color: var(--gold);">Opti AI (${ticker})</td>
-                        <td><span class="badge ${badgeClass}">${data.opti_ai.prediction}</span></td>
-                        <td class="font-mono">Conf: ${data.opti_ai.confidence}</td>
-                        <td class="font-mono">Alpha: ${data.opti_ai.alpha_generation}</td>
-                        <td class="font-mono">-</td>
-                        <td class="font-mono ${pnlClass}" style="font-weight: bold;">${pnlSign}${data.opti_ai.alpha_generation}</td>
-                        <td><span class="badge badge-closed" style="background: rgba(0, 255, 204, 0.15); color: var(--accent-neon);">ACTIVE</span></td>
-                    `;
-                    logBody.insertBefore(row, logBody.firstChild);
-                    
-                    // Switch tab to Trade Log
-                    const tabTradelog = document.getElementById('tab-tradelog');
-                    if (tabTradelog) tabTradelog.click();
+                // Update the 'Win Rate' and 'Max Drawdown' cards on the UI dynamically
+                const winrateEl = document.getElementById('metric-winrate');
+                if (winrateEl) {
+                    winrateEl.textContent = data.win_rate;
+                }
+                
+                const drawdownEl = document.getElementById('metric-drawdown');
+                if (drawdownEl) {
+                    drawdownEl.textContent = data.max_drawdown;
                 }
             } catch (error) {
                 console.error('Error running analysis:', error);
@@ -939,5 +647,4 @@
         }
     </script>
 </body>
-<!-- Opti AI Sidebar Integrated -->
 </html>
