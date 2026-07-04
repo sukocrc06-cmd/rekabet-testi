@@ -1277,47 +1277,125 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     document.head.appendChild(style);
 
-    async function fetchStocks() {
+    function populateStockList() {
+        const bist100 = [
+            {"symbol": "AEFES", "name": "Anadolu Efes"},
+            {"symbol": "AGESA", "name": "Agesa Hayat ve Emeklilik"},
+            {"symbol": "AKBNK", "name": "Akbank"},
+            {"symbol": "AKCNS", "name": "Akçansa Çimento"},
+            {"symbol": "AKFGY", "name": "Akfen GYO"},
+            {"symbol": "AKSEN", "name": "Aksa Enerji"},
+            {"symbol": "ALARK", "name": "Alarko Holding"},
+            {"symbol": "ALBRK", "name": "Albaraka Türk"},
+            {"symbol": "ALFAS", "name": "Alfa Solar Enerji"},
+            {"symbol": "ARCLK", "name": "Arçelik"},
+            {"symbol": "ASELS", "name": "Aselsan"},
+            {"symbol": "ASTOR", "name": "Astor Enerji"},
+            {"symbol": "BERA", "name": "Bera Holding"},
+            {"symbol": "BIMAS", "name": "BİM Mağazalar"},
+            {"symbol": "BRSAN", "name": "Borusan Mannesmann"},
+            {"symbol": "BRYAT", "name": "Borusan Yatırım Pazarlama"},
+            {"symbol": "BUCIM", "name": "Bursa Çimento"},
+            {"symbol": "CANTE", "name": "Çan2 Termik"},
+            {"symbol": "CCOLA", "name": "Coca-Cola İçecek"},
+            {"symbol": "CEMTS", "name": "Çemtaş Çelik Makina"},
+            {"symbol": "CIMSA", "name": "Çimsa Çimento"},
+            {"symbol": "CWENE", "name": "Cw Enerji Mühendislik"},
+            {"symbol": "DOAS", "name": "Doğuş Otomotiv Servis"},
+            {"symbol": "DOHOL", "name": "Doğan Şirketler Grubu"},
+            {"symbol": "ECILC", "name": "Eczacıbaşı İlaç"},
+            {"symbol": "ECZYT", "name": "Eczacıbaşı Yatırım"},
+            {"symbol": "EGEEN", "name": "Ege Endüstri"},
+            {"symbol": "EKGYO", "name": "Emlak Konut GYO"},
+            {"symbol": "ENJSA", "name": "Enerjisa Enerji"},
+            {"symbol": "ENKAI", "name": "Enka İnşaat"},
+            {"symbol": "EREGL", "name": "Ereğli Demir Çelik"},
+            {"symbol": "EUPWR", "name": "Europower Enerji"},
+            {"symbol": "FROTO", "name": "Ford Otomotiv Sanayi"},
+            {"symbol": "GARAN", "name": "Garanti Bankası"},
+            {"symbol": "GENIL", "name": "Gen İlaç ve Sağlık"},
+            {"symbol": "GESAN", "name": "Girişim Elektrik Sanayi"},
+            {"symbol": "GLYHO", "name": "Global Yatırım Holding"},
+            {"symbol": "GSDHO", "name": "GSD Holding"},
+            {"symbol": "GUBRF", "name": "Gübre Fabrikaları"},
+            {"symbol": "GWIND", "name": "Galata Wind Enerji"},
+            {"symbol": "HALKB", "name": "Halk Bankası"},
+            {"symbol": "HEKTS", "name": "Hektaş"},
+            {"symbol": "IPEKE", "name": "İpek Doğal Enerji"},
+            {"symbol": "ISCTR", "name": "İş Bankası (C)"},
+            {"symbol": "ISDMR", "name": "İskenderun Demir Çelik"},
+            {"symbol": "ISGYO", "name": "İş GYO"},
+            {"symbol": "ISMEN", "name": "İş Yatırım Menkul Değerler"},
+            {"symbol": "IZMDC", "name": "İzmir Demir Çelik"},
+            {"symbol": "KARDMD", "name": "Kardemir (D)"},
+            {"symbol": "KCAER", "name": "Kocaer Çelik"},
+            {"symbol": "KCHOL", "name": "Koç Holding"},
+            {"symbol": "KMPUR", "name": "Kimteks Poliüretan"},
+            {"symbol": "KONTR", "name": "Kontrolmatik Teknoloji"},
+            {"symbol": "KONYA", "name": "Konya Çimento"},
+            {"symbol": "KORDS", "name": "Kordsa Teknik Tekstil"},
+            {"symbol": "KOZAA", "name": "Koza Anadolu Metal"},
+            {"symbol": "KOZAL", "name": "Koza Altın İşletmeleri"},
+            {"symbol": "KRDMD", "name": "Kardemir Karabük"},
+            {"symbol": "MAVI", "name": "Mavi Giyim"},
+            {"symbol": "MGROS", "name": "Migros Ticaret"},
+            {"symbol": "MIATK", "name": "Mia Teknoloji"},
+            {"symbol": "ODAS", "name": "Odaş Elektrik"},
+            {"symbol": "OTKAR", "name": "Otokar Otomotiv"},
+            {"symbol": "OYAKC", "name": "Oyak Çimento"},
+            {"symbol": "PENTA", "name": "Penta Teknoloji"},
+            {"symbol": "PETKM", "name": "Petkim Petrokimya"},
+            {"symbol": "PGSUS", "name": "Pegasus Hava Taşımacılığı"},
+            {"symbol": "PSGYO", "name": "Pasifik GYO"},
+            {"symbol": "QUAGR", "name": "Qua Granite Hayal Yapı"},
+            {"symbol": "SAHOL", "name": "Sabancı Holding"},
+            {"symbol": "SASA", "name": "Sasa Polyester"},
+            {"symbol": "SAYAS", "name": "Say Yenilenebilir Enerji"},
+            {"symbol": "SDTTR", "name": "SDT Uzay ve Savunma"},
+            {"symbol": "SISE", "name": "Şişecam"},
+            {"symbol": "SKBNK", "name": "Şekerbank"},
+            {"symbol": "SMRTG", "name": "Smart Güneş Enerjisi"},
+            {"symbol": "SOKM", "name": "Şok Marketler"},
+            {"symbol": "TABGD", "name": "Tab Gıda Sanayi"},
+            {"symbol": "TAVHL", "name": "TAV Havalimanları"},
+            {"symbol": "TCELL", "name": "Turkcell"},
+            {"symbol": "TEZOL", "name": "Europap Tezol Kağıt"},
+            {"symbol": "THYAO", "name": "Türk Hava Yolları"},
+            {"symbol": "TKFEN", "name": "Tekfen Holding"},
+            {"symbol": "TOASO", "name": "Tofaş Türk Otomobil Fabrikası"},
+            {"symbol": "TSKB", "name": "TSKB"},
+            {"symbol": "TTKOM", "name": "Türk Telekom"},
+            {"symbol": "TTRAK", "name": "Türk Traktör"},
+            {"symbol": "TUPRS", "name": "Tüpraş"},
+            {"symbol": "TURSG", "name": "Türkiye Sigorta"},
+            {"symbol": "ULKER", "name": "Ülker Bisküvi"},
+            {"symbol": "VAKBN", "name": "Vakıflar Bankası"},
+            {"symbol": "VESBE", "name": "Vestel Beyaz Eşya"},
+            {"symbol": "VESTL", "name": "Vestel Elektronik"},
+            {"symbol": "YEOTK", "name": "Yeo Teknoloji"},
+            {"symbol": "YKBNK", "name": "Yapı ve Kredi Bankası"},
+            {"symbol": "YYLGD", "name": "Yayla Agro Gıda"},
+            {"symbol": "ZOREN", "name": "Zorlu Enerji"}
+        ];
+
         try {
-            const response = await fetch('http://127.0.0.1:8000/api/v1/list-stocks');
-            if (!response.ok) throw new Error('Failed to fetch stock list');
-            const stocks = await response.json();
-            
             if (el.stockSelect) {
                 el.stockSelect.innerHTML = '';
-                stocks.forEach(stock => {
+                bist100.forEach(stock => {
                     const opt = document.createElement('option');
                     opt.value = stock.symbol;
                     opt.textContent = `${stock.symbol} (${stock.name})`;
                     el.stockSelect.appendChild(opt);
                 });
-                if (stocks.length > 0) {
-                    state.selectedAsset = stocks[0].symbol;
-                }
+                state.selectedAsset = el.stockSelect.value;
             }
         } catch (error) {
-            console.error('[OptiPulseLab] Error fetching dynamic stock list:', error);
-            const fallbacks = [
-                { symbol: 'THYAO', name: 'Türk Hava Yolları' },
-                { symbol: 'ASELS', name: 'ASELSAN' },
-                { symbol: 'BIMAS', name: 'BİM Mağazalar' },
-                { symbol: 'TUPRS', name: 'Tüpraş' },
-                { symbol: 'AKBNK', name: 'Akbank' }
-            ];
-            if (el.stockSelect) {
-                el.stockSelect.innerHTML = '';
-                fallbacks.forEach(stock => {
-                    const opt = document.createElement('option');
-                    opt.value = stock.symbol;
-                    opt.textContent = `${stock.symbol} (${stock.name})`;
-                    el.stockSelect.appendChild(opt);
-                });
-            }
+            console.error('[OptiPulseLab] Error populating BIST 100 list:', error);
         } finally {
             connectLiveStream(state.selectedAsset);
         }
     }
 
     /* ────────────── Initial Load ────────────── */
-    fetchStocks();
+    populateStockList();
 });
