@@ -763,6 +763,16 @@
 </div>
 
     <script>
+        const baseUrl = window.location.origin.startsWith('file') ? 'http://127.0.0.1:8000' : '';
+
+        function setEngineStatusOnline() {
+            const engineStatus = document.getElementById('engine-status');
+            if (engineStatus) {
+                engineStatus.innerText = 'ONLINE';
+                engineStatus.style.color = '#2ecc71'; // Green
+            }
+        }
+
         // Opti Chat Sidebar Toggle Logic
         const chatSidebar = document.getElementById('opti-chat-sidebar');
         const toggleBtn = document.getElementById('btn-toggle-opti');
@@ -797,12 +807,13 @@
             const typingId = appendMessage('Thinking...', 'assistant');
             
             try {
-                const response = await fetch('/opti-chat', {
+                const response = await fetch(`${baseUrl}/opti-chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ question: text })
                 });
                 if (!response.ok) throw new Error('Failed to reach assistant');
+                setEngineStatusOnline();
                 const data = await response.json();
                 
                 // Replace typing message with response
@@ -855,13 +866,14 @@
                 const typingId = appendMessage('Düşünüyor...', 'assistant');
                 
                 // Fetch technical analysis from /opti-chat
-                fetch('/opti-chat', {
+                fetch(`${baseUrl}/opti-chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ question: `Lütfen ${ticker} hissesini analiz et.` })
                 })
                 .then(res => {
                     if (!res.ok) throw new Error('Chat failed');
+                    setEngineStatusOnline();
                     return res.json();
                 })
                 .then(data => {
@@ -879,7 +891,7 @@
                 });
 
                 // Also run the standard ML analysis route
-                const response = await fetch('/run-analysis', {
+                const response = await fetch(`${baseUrl}/run-analysis`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ticker: ticker })
@@ -889,6 +901,7 @@
                     const errData = await response.json();
                     throw new Error(errData.message || 'Server error');
                 }
+                setEngineStatusOnline();
                 
                 const data = await response.json();
                 
