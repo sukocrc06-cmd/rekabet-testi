@@ -339,7 +339,8 @@ const DataController = (() => {
             let buySignal = false;
             let sellSignal = false;
 
-            if (ticker === 'THYAO') {
+            const isThyao = ticker === 'THYAO' || !['ASELS', 'BIMAS', 'TUPRS', 'AKBNK'].includes(ticker);
+            if (isThyao) {
                 if (ema20[i - 1] !== null && ema20[i] !== null) {
                     buySignal = closes[i] > ema20[i] && closes[i - 1] <= ema20[i - 1];
                 }

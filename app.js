@@ -552,6 +552,9 @@ document.addEventListener('DOMContentLoaded', () => {
        ════════════════════════════════════════════════ */
 
     function executePipeline() {
+        if (el.stockSelect) {
+            state.selectedAsset = el.stockSelect.value;
+        }
         state.isSimulating = true;
 
         // --- UI: show processing ---
@@ -1387,7 +1390,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     opt.textContent = `${stock.symbol} (${stock.name})`;
                     el.stockSelect.appendChild(opt);
                 });
-                state.selectedAsset = el.stockSelect.value;
+                el.stockSelect.value = 'THYAO';
+                state.selectedAsset = 'THYAO';
             }
         } catch (error) {
             console.error('[OptiPulseLab] Error populating BIST 100 list:', error);
