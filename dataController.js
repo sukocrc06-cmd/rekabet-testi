@@ -60,12 +60,31 @@ const DataController = (() => {
      * @param {number} [days]  — number of trading days (default 30)
      * @returns {Array<{date:string, open:number, high:number, low:number, close:number, volume:number}>}
      */
+    function normalizeTicker(ticker) {
+        if (!ticker) return '';
+        ticker = ticker.toUpperCase().trim();
+        if (!ticker.endsWith('.IS') && ticker !== 'XU100' && ticker !== 'XU100.IS') {
+            return ticker + '.IS';
+        }
+        return ticker;
+    }
+
     function generateOHLCV(ticker, days = TRADING_DAYS) {
-        const profile = STOCK_PROFILES[ticker];
-        if (!profile) throw new Error(`Unknown ticker: ${ticker}`);
+        const cleanTicker = ticker.replace('.IS', '');
+        let profile = STOCK_PROFILES[cleanTicker];
+        if (!profile) {
+            profile = {
+                name: cleanTicker,
+                sector: 'BIST Stock',
+                basePrice: 100.0,
+                volatility: 0.02,
+                drift: 0.0005,
+                avgVolume: 10_000_000
+            };
+        }
 
         // Seed by ticker hash so each stock is reproducible but distinct
-        const seed = Array.from(ticker).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
+        const seed = Array.from(cleanTicker).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
         const rng = mulberry32(seed);
 
         const candles = [];
@@ -770,41 +789,79 @@ const DataController = (() => {
      * @returns {Object}  — everything the UI needs
      */
     function runPipeline(ticker, initialCapital = 100_000, commissionPct = 0.05, engine = 'optipulse') {
-        const profile = STOCK_PROFILES[ticker];
-        const candles = generateOHLCV(ticker);
-        const stratResult = runStrategy(ticker, candles, initialCapital, commissionPct, engine);
-        const metrics = calculateMetrics(stratResult, initialCapital);
-
-        const equityPaths = buildSvgPath(stratResult.equityCurve);
-        const drawdownPaths = buildDrawdownSvgPath(metrics.drawdownCurve);
-        const candlestickSvg = buildCandlestickSvg(candles);
-
-        // Last candle stats
-        const lastCandle = candles[candles.length - 1];
-        const totalVolume = candles.reduce((s, c) => s + c.volume, 0);
-
-        return {
-            ticker,
-            engine,
-            profile,
-            candles,
-            trades: stratResult.trades,
-            equityCurve: stratResult.equityCurve,
-            metrics,
-            svg: {
-                equityLine: equityPaths.linePath,
-                equityArea: equityPaths.areaPath,
-                drawdownLine: drawdownPaths.linePath,
-                drawdownArea: drawdownPaths.areaPath,
-                candlestick: candlestickSvg
-            },
-            summary: {
-                lastPrice: lastCandle ? lastCandle.close : 0,
-                totalVolume,
-                peakEquity: metrics.peakEquity,
-                currentEquity: metrics.finalEquity
+        try {
+            const cleanTicker = ticker.replace('.IS', '');
+            let profile = STOCK_PROFILES[cleanTicker];
+            if (!profile) {
+                profile = {
+                    name: cleanTicker,
+                    sector: 'BIST Stock',
+                    basePrice: 100.0,
+                    volatility: 0.02,
+                    drift: 0.0005,
+                    avgVolume: 10_000_000
+                };
             }
-        };
+            const candles = generateOHLCV(ticker);
+            const stratResult = runStrategy(ticker, candles, initialCapital, commissionPct, engine);
+            const metrics = calculateMetrics(stratResult, initialCapital);
+
+            const equityPaths = buildSvgPath(stratResult.equityCurve);
+            const drawdownPaths = buildDrawdownSvgPath(metrics.drawdownCurve);
+            const candlestickSvg = buildCandlestickSvg(candles);
+
+            // Last candle stats
+            const lastCandle = candles[candles.length - 1];
+            const totalVolume = candles.reduce((s, c) => s + c.volume, 0);
+
+            return {
+                ticker,
+                engine,
+                profile,
+                candles,
+                trades: stratResult.trades,
+                equityCurve: stratResult.equityCurve,
+                metrics,
+                svg: {
+                    equityLine: equityPaths.linePath,
+                    equityArea: equityPaths.areaPath,
+                    drawdownLine: drawdownPaths.linePath,
+                    drawdownArea: drawdownPaths.areaPath,
+                    candlestick: candlestickSvg
+                },
+                summary: {
+                    lastPrice: lastCandle ? lastCandle.close : 0,
+                    totalVolume,
+                    peakEquity: metrics.peakEquity,
+                    currentEquity: metrics.finalEquity
+                }
+            };
+        } catch (error) {
+            console.warn(`[dataController] runPipeline caught error for ${ticker}: ${error.message}`);
+            return {
+                ticker,
+                engine,
+                profile: { name: ticker, sector: 'Unknown', basePrice: 100.0 },
+                candles: [],
+                trades: [],
+                equityCurve: [initialCapital],
+                metrics: {
+                    netProfitPct: 0,
+                    netProfit: 0,
+                    maxDrawdownPct: 0,
+                    sharpeRatio: 0,
+                    winRate: 0,
+                    wins: 0,
+                    losses: 0,
+                    totalTrades: 0,
+                    profitFactor: 0,
+                    drawdownCurve: [0],
+                    maxMae: 0
+                },
+                svg: { equityLine: '', equityArea: '', drawdownLine: '', drawdownArea: '', candlestick: '' },
+                summary: { lastPrice: 0, totalVolume: 0, peakEquity: initialCapital, currentEquity: initialCapital }
+            };
+        }
     }
 
     /**
@@ -929,7 +986,8 @@ const DataController = (() => {
         runPipeline,
         pollBacktestStatus,
         startOhlcvPolling,
-        stopOhlcvPolling
+        stopOhlcvPolling,
+        normalizeTicker
     });
 })();
 

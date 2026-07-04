@@ -805,9 +805,6 @@
             // Hide loading overlay
             resetDashboardUI(false);
 
-            // Render Price Action and indicators
-            renderSubChart(rsiData.rsi_series, rsiData.macd_series);
-
             // Populate all metrics cards
             const formatPct = (val) => (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
             const formatTRY = (val) => '₺' + val.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -862,7 +859,18 @@
             if (window.updateTradeLog) {
                 window.updateTradeLog(rsiData.ticker);
             }
+
+            // Dispatch custom event for rendering
+            const event = new CustomEvent('optipulse:data-ready', {
+                detail: { rsiData, backtestResult }
+            });
+            window.dispatchEvent(event);
         }
+
+        window.addEventListener('optipulse:data-ready', (e) => {
+            const { rsiData } = e.detail;
+            renderSubChart(rsiData.rsi_series, rsiData.macd_series);
+        });
 
         function clearDashboardUI() {
             resetDashboardUI(true);
@@ -900,28 +908,33 @@
             }, 15000);
 
             try {
+                if (!window.DataController || !window.DataController.normalizeTicker) {
+                    throw new Error('DataController normalization helper not loaded.');
+                }
                 if (!window.executePipelinePromise) {
                     throw new Error('Application pipeline controller not loaded.');
                 }
 
+                const normalizedTicker = window.DataController.normalizeTicker(ticker);
+
                 // Immediately update header status
                 const tickerLabel = safeGetElement('analysis-ticker-label');
                 if (tickerLabel) {
-                    tickerLabel.innerText = `Şu an analiz ediliyor: ${ticker}`;
+                    tickerLabel.innerText = `Şu an analiz ediliyor: ${normalizedTicker}`;
                 }
 
                 // Fire concurrent requests
                 const rsiPromise = fetch('http://127.0.0.1:8000/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticker: ticker }),
+                    body: JSON.stringify({ ticker: normalizedTicker }),
                     signal: signal
                 }).then(res => {
                     if (!res.ok) throw new Error(`HTTP Error ${res.status}: Indicator calculations fetch failed`);
                     return res.json();
                 });
 
-                const backtestPromise = window.executePipelinePromise();
+                const backtestPromise = window.executePipelinePromise(normalizedTicker);
 
                 const [rsiData, backtestResult] = await Promise.all([rsiPromise, backtestPromise]);
 
@@ -934,7 +947,7 @@
                 }
 
                 // Validator: Verify returned ticker matches choice
-                const selectedTicker = ticker.toUpperCase().replace('.IS', '');
+                const selectedTicker = normalizedTicker.toUpperCase().replace('.IS', '');
                 const returnedTicker = (rsiData.ticker || '').toUpperCase().replace('.IS', '');
                 if (selectedTicker !== returnedTicker) {
                     throw new Error('Data Mismatch Error: Returned ticker does not match selected asset.');

@@ -103,6 +103,17 @@ const ChartRenderer = (() => {
         return parts[2] + '/' + parts[1];
     }
 
+    function validateData(data) {
+        if (!data || !data.candles || !Array.isArray(data.candles) || data.candles.length === 0) {
+            return false;
+        }
+        const first = data.candles[0];
+        if (!first || first.open === undefined || first.high === undefined || first.low === undefined || first.close === undefined) {
+            return false;
+        }
+        return true;
+    }
+
     /* ══════════════════════════════════════════════════════════
        1. CANDLESTICK CHART with Volume, SMAs, and Signals
        ══════════════════════════════════════════════════════════ */
@@ -120,13 +131,12 @@ const ChartRenderer = (() => {
      */
     function renderCandlestickChart(canvas, data, opts = {}) {
         const { ctx, w, h } = setupCanvas(canvas);
-        const { candles, signals = [], smaFast = [], smaSlow = [],
-                indicators = {}, indicatorVisibility = {}, oosSplitIndex = null } = data;
-
-        if (!candles || candles.length === 0) {
-            drawEmptyState(ctx, w, h, 'No OHLCV data available');
+        if (!validateData(data)) {
+            drawEmptyState(ctx, w, h, 'No data available for this asset');
             return;
         }
+        const { candles, signals = [], smaFast = [], smaSlow = [],
+                indicators = {}, indicatorVisibility = {}, oosSplitIndex = null } = data;
 
         // Layout regions
         const pad = { top: 16, right: 64, bottom: 40, left: 12 };
@@ -607,12 +617,11 @@ const ChartRenderer = (() => {
 
     function renderEquityCurve(canvas, data, opts = {}) {
         const { ctx, w, h } = setupCanvas(canvas);
-        const { equityCurve = [], dates = [] } = data;
-
-        if (equityCurve.length < 2) {
-            drawEmptyState(ctx, w, h, 'Run a backtest to see equity curve');
+        if (!data || !data.equityCurve || data.equityCurve.length < 2) {
+            drawEmptyState(ctx, w, h, 'No data available for this asset');
             return;
         }
+        const { equityCurve = [], dates = [] } = data;
 
         const pad = { top: 20, right: 64, bottom: 36, left: 12 };
         const chartTop = pad.top;
@@ -731,12 +740,11 @@ const ChartRenderer = (() => {
 
     function renderDrawdownChart(canvas, data, opts = {}) {
         const { ctx, w, h } = setupCanvas(canvas);
-        const { drawdownCurve = [], dates = [] } = data;
-
-        if (drawdownCurve.length < 2) {
-            drawEmptyState(ctx, w, h, 'Run a backtest to see drawdown');
+        if (!data || !data.drawdownCurve || data.drawdownCurve.length < 2) {
+            drawEmptyState(ctx, w, h, 'No data available for this asset');
             return;
         }
+        const { drawdownCurve = [], dates = [] } = data;
 
         const pad = { top: 16, right: 64, bottom: 36, left: 12 };
         const chartTop = pad.top;

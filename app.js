@@ -442,7 +442,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Populate UI ──
         populateMetricsCards(result);
-        renderAllCharts(result);
         populateTradeLog(result);
         populateOverlays(result);
         updateCompetitionPanel(capital, commission);
@@ -560,9 +559,11 @@ document.addEventListener('DOMContentLoaded', () => {
        CORE: Pipeline Execution + Rendering
        ════════════════════════════════════════════════ */
 
-    function executePipelinePromise() {
+    function executePipelinePromise(tickerOverride) {
         return new Promise((resolve, reject) => {
-            if (el.stockSelect) {
+            if (tickerOverride) {
+                state.selectedAsset = tickerOverride;
+            } else if (el.stockSelect) {
                 state.selectedAsset = el.stockSelect.value;
             }
             state.isSimulating = true;
@@ -1407,6 +1408,12 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('[OptiPulseLab] Error populating BIST 100 list:', error);
         }
     }
+
+    window.addEventListener('optipulse:data-ready', (e) => {
+        const { backtestResult } = e.detail;
+        console.log('[app.js] optipulse:data-ready captured, rendering all charts.');
+        renderAllCharts(backtestResult);
+    });
 
     /* ────────────── Initial Load ────────────── */
     populateStockList();
