@@ -1027,6 +1027,14 @@ const ChartRenderer = (() => {
         return signals;
     }
 
+    function reset(canvas) {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    }
+
     /* ────────── Public API ────────── */
 
     return Object.freeze({
@@ -1036,7 +1044,8 @@ const ChartRenderer = (() => {
         renderDrawdownChart,
         attachCrosshair,
         generateSignals,
-        setupCanvas
+        setupCanvas,
+        reset
     });
 })();
 

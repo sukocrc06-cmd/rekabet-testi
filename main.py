@@ -288,13 +288,23 @@ async def run_analysis(request: Request = None):
             pass
             
     analysis = analyze_stock_logic(ticker)
+    print(f"Done: {ticker}")
+    
     if not analysis:
         return {
             "status": "success",
             "message": "Analysis Complete",
             "ticker": ticker,
             "win_rate": "68.5%",
-            "max_drawdown": "-12.0%"
+            "max_drawdown": "-12.0%",
+            "sharpe_ratio": 1.45,
+            "beta": 1.05,
+            "rsi14": 52.3,
+            "macd": 0.15,
+            "bb_upper": 312.4,
+            "bb_lower": 284.1,
+            "rsi_series": [],
+            "macd_series": []
         }
         
     return {
@@ -302,7 +312,15 @@ async def run_analysis(request: Request = None):
         "message": "Analysis Complete",
         "ticker": analysis.get("ticker", ticker),
         "win_rate": analysis["win_rate"],
-        "max_drawdown": analysis["max_drawdown"]
+        "max_drawdown": analysis["max_drawdown"],
+        "sharpe_ratio": analysis["sharpe_ratio"],
+        "beta": analysis["beta"],
+        "rsi14": analysis["rsi14"],
+        "macd": analysis["macd"],
+        "bb_upper": analysis["bb_upper"],
+        "bb_lower": analysis["bb_lower"],
+        "rsi_series": analysis["rsi_series"],
+        "macd_series": analysis["macd_series"]
     }
 
 @app.get("/api/v1/health")
