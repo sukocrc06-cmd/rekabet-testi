@@ -254,7 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
         el.stockSelect.addEventListener('change', (e) => {
             state.selectedAsset = e.target.value;
             showNotice(`Asset → ${state.selectedAsset} — streaming live rates…`);
-            connectLiveStream(state.selectedAsset);
         });
     }
 
@@ -324,13 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ────────────── Run Test Button ────────────── */
 
-    if (el.btnRun) {
-        el.btnRun.addEventListener('click', (event) => {
-            event.preventDefault();
-            if (state.isSimulating) return;
-            executePipeline();
-        });
-    }
+
 
     /* ────────────── Export Results ────────────── */
 
@@ -561,193 +554,188 @@ document.addEventListener('DOMContentLoaded', () => {
        CORE: Pipeline Execution + Rendering
        ════════════════════════════════════════════════ */
 
-    function executePipeline() {
-        if (el.stockSelect) {
-            state.selectedAsset = el.stockSelect.value;
-        }
-        state.isSimulating = true;
+    function executePipelinePromise() {
+        return new Promise((resolve, reject) => {
+            if (el.stockSelect) {
+                state.selectedAsset = el.stockSelect.value;
+            }
+            state.isSimulating = true;
 
-        // --- UI: show processing ---
-        el.btnRun.disabled = true;
-        el.btnRun.innerHTML = `
-            <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" stroke-width="2.5">
-                <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
-            </svg>
-            Running...
-        `;
-        el.btnRun.style.opacity = '0.7';
-        el.btnRun.style.cursor = 'not-allowed';
+            // --- UI: show processing ---
+            el.btnRun.disabled = true;
+            el.btnRun.innerHTML = `
+                <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                </svg>
+                Running...
+            `;
+            el.btnRun.style.opacity = '0.7';
+            el.btnRun.style.cursor = 'not-allowed';
 
-        if (el.footerStatus) el.footerStatus.innerText = `System status: Computing backtest for ${state.selectedAsset}…`;
-        if (el.engineStatus) {
-            el.engineStatus.innerText = 'CALCULATING';
-            el.engineStatus.style.color = '#FFA726';
-        }
+            if (el.footerStatus) el.footerStatus.innerText = `System status: Computing backtest for ${state.selectedAsset}…`;
+            if (el.engineStatus) {
+                el.engineStatus.innerText = 'CALCULATING';
+                el.engineStatus.style.color = '#FFA726';
+            }
 
-        // Read params
-        const capital    = parseFloat(el.capitalInput.value) || 100_000;
-        const commission = parseFloat(el.commissionInput.value) || 0.05;
+            // Read params
+            const capital    = parseFloat(el.capitalInput.value) || 100_000;
+            const commission = parseFloat(el.commissionInput.value) || 0.05;
 
-        const t0 = performance.now();
+            const t0 = performance.now();
 
-        // ── Try running via real FastAPI backend ──
-        console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
-        fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ticker: state.selectedAsset,
-                engine_id: state.engine
+            // ── Try running via real FastAPI backend ──
+            console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
+            fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ticker: state.selectedAsset,
+                    engine_id: state.engine
+                })
             })
-        })
-        .then(res => {
-            if (!res.ok) throw new Error('Backend server returned error response');
-            return res.json();
-        })
-        .then(data => {
-            console.log(`[Frontend] Backtest run initiated. Received task_id: ${data.task_id}, status: ${data.status}`);
-            
-            // Poll for task status
-            DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
-                if (err) {
-                    console.error(`[Frontend] Polling completed with error:`, err);
-                    showNotice('Backtest failed on the backend server.');
-                    fallbackLocal();
-                    return;
+            .then(res => {
+                if (!res.ok) throw new Error('Backend server returned error response');
+                return res.json();
+            })
+            .then(data => {
+                console.log(`[Frontend] Backtest run initiated. Received task_id: ${data.task_id}, status: ${data.status}`);
+                
+                // Poll for task status
+                DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
+                    if (err) {
+                        console.error(`[Frontend] Polling completed with error:`, err);
+                        showNotice('Backtest failed on the backend server.');
+                        fallbackLocal();
+                        return;
+                    }
+
+                    console.log(`[Frontend] Polling completed successfully. Processing results...`);
+                    const m = statusResponse.metrics;
+                    const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+                    const result = {
+                        ticker: state.selectedAsset,
+                        candles: m.candles,
+                        equityCurve: m.equity_curve,
+                        metrics: {
+                            netProfitPct: m.total_profit,
+                            netProfit: +((m.total_profit / 100) * capital).toFixed(2),
+                            maxDrawdownPct: m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0,
+                            sharpeRatio: m.total_profit > 0 ? 1.85 : 0.45, 
+                            winRate: m.win_rate,
+                            wins: Math.round(m.win_rate / 100 * m.trade_count),
+                            losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
+                            totalTrades: m.trade_count,
+                            profitFactor: m.total_profit > 0 ? 1.95 : 0.85,
+                            drawdownCurve: m.drawdown_curve,
+                            maxMae: m.total_profit > 0 ? 2.15 : 4.85
+                        },
+                        trades: m.trades,
+                        summary: {
+                            peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
+                            currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
+                            lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
+                            totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
+                        }
+                    };
+
+                    const indicators = DC.calculateIndicators(result.candles);
+                    const closes = result.candles.map(c => c.close);
+                    const smaFast = DC.computeSMA(closes, 5);
+                    const smaSlow = DC.computeSMA(closes, 13);
+                    const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
+
+                    result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
+                    result._indicators = indicators;
+                    result.isOosActive = false;
+
+                    processPipelineResult(result, elapsed, capital, commission);
+                    resolve(result);
+                });
+            })
+            .catch(err => {
+                const targetUrl = 'http://127.0.0.1:8000/api/v1/backtest/run';
+                console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
+                showNotice('Server offline. Using offline simulation mode.');
+                
+                if (el.engineStatus) {
+                    el.engineStatus.innerText = 'OFFLINE';
+                    el.engineStatus.style.color = '#F44336';
+                }
+                if (el.latencyVal) el.latencyVal.innerText = 'N/A';
+
+                fallbackLocal();
+            });
+
+            function fallbackLocal() {
+                console.log('[Frontend] Executing offline local backtest fallback');
+                const isOosActive = el.chkOosValidation && el.chkOosValidation.checked;
+                const allCandles = DC.generateOHLCV(state.selectedAsset);
+                
+                let result;
+                let oosSplitIndex = null;
+                let oosMetrics = null;
+
+                if (isOosActive) {
+                    oosSplitIndex = Math.floor(allCandles.length * 0.7);
+                    const trainingCandles = allCandles.slice(0, oosSplitIndex);
+                    const validationCandles = allCandles.slice(oosSplitIndex);
+
+                    const trainStratResult = DC.runStrategy(state.selectedAsset, trainingCandles, capital, commission, state.engine);
+                    const trainMetrics = DC.calculateMetrics(trainStratResult, capital);
+
+                    const valStratResult = DC.runStrategy(state.selectedAsset, validationCandles, capital, commission, state.engine);
+                    const valMetrics = DC.calculateMetrics(valStratResult, capital);
+                    oosMetrics = valMetrics;
+
+                    result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
+                    
+                    result.metrics = trainMetrics;
+                    result.trades = trainStratResult.trades;
+                    result.isOosActive = true;
+                    result.oosValidationMetrics = valMetrics;
+                    result.oosSplitIndex = oosSplitIndex;
+
+                    const combinedTrades = [...trainStratResult.trades];
+                    valStratResult.trades.forEach(t => {
+                        const offsetIndex = t.entryIndex !== undefined ? t.entryIndex + oosSplitIndex : undefined;
+                        combinedTrades.push({
+                            ...t,
+                            entryIndex: offsetIndex
+                        });
+                    });
+
+                    const indicators = DC.calculateIndicators(allCandles);
+                    const closes = allCandles.map(c => c.close);
+                    const smaFast = DC.computeSMA(closes, 5);
+                    const smaSlow = DC.computeSMA(closes, 13);
+                    const signals = CR.generateSignals(allCandles, indicators, combinedTrades, state.selectedAsset);
+
+                    result._chartData = { smaFast, smaSlow, signals, oosSplitIndex };
+                    result._indicators = indicators;
+                } else {
+                    result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
+                    const indicators = DC.calculateIndicators(result.candles);
+                    const closes = result.candles.map(c => c.close);
+                    const smaFast = DC.computeSMA(closes, 5);
+                    const smaSlow = DC.computeSMA(closes, 13);
+                    const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
+
+                    result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
+                    result._indicators = indicators;
+                    result.isOosActive = false;
                 }
 
-                console.log(`[Frontend] Polling completed successfully. Processing results...`);
-                const m = statusResponse.metrics;
                 const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-
-                // Construct result object from real backend response
-                const result = {
-                    ticker: state.selectedAsset,
-                    candles: m.candles,
-                    equityCurve: m.equity_curve,
-                    metrics: {
-                        netProfitPct: m.total_profit,
-                        netProfit: +((m.total_profit / 100) * capital).toFixed(2),
-                        maxDrawdownPct: m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0,
-                        sharpeRatio: m.total_profit > 0 ? 1.85 : 0.45, 
-                        winRate: m.win_rate,
-                        wins: Math.round(m.win_rate / 100 * m.trade_count),
-                        losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
-                        totalTrades: m.trade_count,
-                        profitFactor: m.total_profit > 0 ? 1.95 : 0.85,
-                        drawdownCurve: m.drawdown_curve,
-                        maxMae: m.total_profit > 0 ? 2.15 : 4.85
-                    },
-                    trades: m.trades,
-                    summary: {
-                        peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
-                        currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
-                        lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
-                        totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
-                    }
-                };
-
-                // Compute indicators and signals locally based on real backend data
-                const indicators = DC.calculateIndicators(result.candles);
-                const closes = result.candles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
-
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
-                result._indicators = indicators;
-                result.isOosActive = false;
-
                 processPipelineResult(result, elapsed, capital, commission);
-            });
-        })
-        .catch(err => {
-            const targetUrl = 'http://127.0.0.1:8000/api/v1/backtest/run';
-            console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
-            showNotice('Server offline. Using offline simulation mode.');
-            
-            if (el.engineStatus) {
-                el.engineStatus.innerText = 'OFFLINE';
-                el.engineStatus.style.color = '#F44336'; // Red
+                resolve(result);
             }
-            if (el.latencyVal) el.latencyVal.innerText = 'N/A';
-
-            fallbackLocal();
         });
-
-        // Local fallback logic encapsulated for cleaner codebase
-        function fallbackLocal() {
-            console.log('[Frontend] Executing offline local backtest fallback');
-            const isOosActive = el.chkOosValidation && el.chkOosValidation.checked;
-            const allCandles = DC.generateOHLCV(state.selectedAsset);
-            
-            let result;
-            let oosSplitIndex = null;
-            let oosMetrics = null;
-
-            if (isOosActive) {
-                // Split 70% Training / 30% Validation
-                oosSplitIndex = Math.floor(allCandles.length * 0.7);
-                const trainingCandles = allCandles.slice(0, oosSplitIndex);
-                const validationCandles = allCandles.slice(oosSplitIndex);
-
-                // Run Training strategy
-                const trainStratResult = DC.runStrategy(state.selectedAsset, trainingCandles, capital, commission, state.engine);
-                const trainMetrics = DC.calculateMetrics(trainStratResult, capital);
-
-                // Run Validation strategy
-                const valStratResult = DC.runStrategy(state.selectedAsset, validationCandles, capital, commission, state.engine);
-                const valMetrics = DC.calculateMetrics(valStratResult, capital);
-                oosMetrics = valMetrics;
-
-                // Main pipeline on full candles
-                result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
-                
-                // Override metrics and trades with training data for standard UI logs
-                result.metrics = trainMetrics;
-                result.trades = trainStratResult.trades;
-                result.isOosActive = true;
-                result.oosValidationMetrics = valMetrics;
-                result.oosSplitIndex = oosSplitIndex;
-
-                // Combine both sets of trades for the chart signals
-                const combinedTrades = [...trainStratResult.trades];
-                valStratResult.trades.forEach(t => {
-                    const offsetIndex = t.entryIndex !== undefined ? t.entryIndex + oosSplitIndex : undefined;
-                    combinedTrades.push({
-                        ...t,
-                        entryIndex: offsetIndex
-                    });
-                });
-
-                // Compute overlays on all candles
-                const indicators = DC.calculateIndicators(allCandles);
-                const closes = allCandles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(allCandles, indicators, combinedTrades, state.selectedAsset);
-
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex };
-                result._indicators = indicators;
-            } else {
-                // Standard flow
-                result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
-                const indicators = DC.calculateIndicators(result.candles);
-                const closes = result.candles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
-
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
-                result._indicators = indicators;
-                result.isOosActive = false;
-            }
-
-            const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-            processPipelineResult(result, elapsed, capital, commission);
-        }
     }
+
+    window.executePipelinePromise = executePipelinePromise;
 
     function exportToJSON(exportData) {
         const jsonString = JSON.stringify(exportData, null, 4);
@@ -1421,8 +1409,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('[OptiPulseLab] Error populating BIST 100 list:', error);
-        } finally {
-            connectLiveStream(state.selectedAsset);
         }
     }
 

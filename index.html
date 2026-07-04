@@ -626,16 +626,17 @@
             }
         }
 
-        // Set online status on load
+        // Set online status and clean dashboard UI initially on load
         window.addEventListener('DOMContentLoaded', () => {
             setEngineStatusOnline();
+            resetDashboardUI(false);
         });
 
         let subChartInstance = null;
         let currentAbortController = null;
 
-        function resetDashboardUI() {
-            // Reset metrics cards
+        function resetDashboardUI(loading = false) {
+            // Reset metrics cards to '---'
             const ids = [
                 'metric-return', 'metric-netprofit-abs', 'metric-sharpe', 
                 'metric-drawdown', 'metric-factor', 'metric-winrate', 
@@ -644,22 +645,22 @@
             ];
             ids.forEach(id => {
                 const el = document.getElementById(id);
-                if (el) el.textContent = '...';
+                if (el) el.textContent = '---';
             });
 
-            // Clear Trade Log table
+            // Reset Trade Log
             const tradeLogBody = document.getElementById('trade-log-body');
             if (tradeLogBody) {
                 tradeLogBody.innerHTML = `
                     <tr>
                         <td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">
-                            Analiz başlatıldı, veriler hesaplanıyor...
+                            ${loading ? 'Loading Trade Log...' : 'Lütfen analiz yapın veya yeni bir hisse seçin...'}
                         </td>
                     </tr>
                 `;
             }
 
-            // Reset canvases via ChartRenderer.reset if loaded
+            // Clear or show loading on canvases
             if (window.ChartRenderer && window.ChartRenderer.reset) {
                 const canvases = [
                     document.getElementById('canvas-candlestick'),
@@ -668,7 +669,19 @@
                     document.getElementById('canvas-subchart')
                 ];
                 canvases.forEach(c => {
-                    if (c) window.ChartRenderer.reset(c);
+                    if (c) {
+                        window.ChartRenderer.reset(c);
+                        if (loading) {
+                            const ctx = c.getContext('2d');
+                            if (ctx) {
+                                ctx.fillStyle = '#888888';
+                                ctx.font = '14px Outfit, sans-serif';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'middle';
+                                ctx.fillText('Loading chart data...', c.width / 2, c.height / 2);
+                            }
+                        }
+                    }
                 });
             }
 
@@ -777,90 +790,136 @@
             });
         }
 
+        function updateDashboard(rsiData, backtestResult) {
+            // Render Price Action and indicators
+            renderSubChart(rsiData.rsi_series, rsiData.macd_series);
+
+            // Populate all metrics cards
+            const formatPct = (val) => (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+            const formatTRY = (val) => '₺' + val.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            const returnEl = document.getElementById('metric-return');
+            if (returnEl) {
+                returnEl.textContent = formatPct(backtestResult.metrics.netProfitPct);
+                returnEl.className = backtestResult.metrics.netProfitPct >= 0 ? 'card-value accent-text' : 'card-value drawdown-warning';
+            }
+            const netabsEl = document.getElementById('metric-netprofit-abs');
+            if (netabsEl) {
+                netabsEl.textContent = formatTRY(backtestResult.metrics.netProfit) + ' net';
+            }
+            const sharpeEl = document.getElementById('metric-sharpe');
+            if (sharpeEl) {
+                sharpeEl.textContent = rsiData.sharpe_ratio !== undefined ? rsiData.sharpe_ratio.toFixed(2) : backtestResult.metrics.sharpeRatio.toFixed(2);
+            }
+            const drawdownEl = document.getElementById('metric-drawdown');
+            if (drawdownEl) {
+                drawdownEl.textContent = '-' + backtestResult.metrics.maxDrawdownPct.toFixed(2) + '%';
+            }
+            const factorEl = document.getElementById('metric-factor');
+            if (factorEl) {
+                factorEl.textContent = backtestResult.metrics.profitFactor.toFixed(2);
+            }
+            const winrateEl = document.getElementById('metric-winrate');
+            if (winrateEl) {
+                winrateEl.textContent = rsiData.win_rate || (backtestResult.metrics.winRate ? backtestResult.metrics.winRate.toFixed(1) + '%' : '---');
+            }
+            const winlossEl = document.getElementById('metric-winloss');
+            if (winlossEl) {
+                winlossEl.textContent = `${backtestResult.metrics.wins} Wins / ${backtestResult.metrics.losses} Losses`;
+            }
+            const tradesEl = document.getElementById('metric-trades');
+            if (tradesEl) {
+                tradesEl.textContent = backtestResult.metrics.totalTrades;
+            }
+            const betaEl = document.getElementById('metric-beta');
+            if (betaEl) {
+                betaEl.textContent = rsiData.beta !== undefined ? rsiData.beta.toFixed(2) : '---';
+            }
+            const indicatorSummaryEl = document.getElementById('metric-indicator-summary');
+            if (indicatorSummaryEl && rsiData.rsi14 !== undefined && rsiData.macd !== undefined) {
+                indicatorSummaryEl.textContent = `RSI: ${rsiData.rsi14.toFixed(1)} | MACD: ${rsiData.macd.toFixed(2)}`;
+            }
+            const bbSummaryEl = document.getElementById('metric-bb-summary');
+            if (bbSummaryEl && rsiData.bb_lower !== undefined && rsiData.bb_upper !== undefined) {
+                bbSummaryEl.textContent = `Bollinger: ₺${rsiData.bb_lower.toFixed(1)} - ₺${rsiData.bb_upper.toFixed(1)}`;
+            }
+
+            // Update Trade Log
+            if (window.updateTradeLog) {
+                window.updateTradeLog(rsiData.ticker);
+            }
+        }
+
         async function runAnalysis() {
-            // Abort previous ongoing request
+            // Abort previous request
             if (currentAbortController) {
                 currentAbortController.abort();
             }
             currentAbortController = new AbortController();
             const signal = currentAbortController.signal;
 
-            // Reset UI state before starting
-            resetDashboardUI();
+            // Set UI to loading state immediately
+            resetDashboardUI(true);
+
+            // Trigger buttons to simulating style
+            const btn = document.getElementById('btn-run-backtest');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = `
+                    <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2.5">
+                        <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                    </svg>
+                    Running...
+                `;
+                btn.style.opacity = '0.7';
+                btn.style.cursor = 'not-allowed';
+            }
 
             try {
                 const ticker = document.getElementById('stock-select').value;
+                if (!window.executePipelinePromise) {
+                    throw new Error('Application pipeline controller not loaded.');
+                }
 
-                // Immediately update header label
+                // Immediately update header status
                 const tickerLabel = document.getElementById('analysis-ticker-label');
                 if (tickerLabel) {
                     tickerLabel.innerText = `Şu an analiz ediliyor: ${ticker}`;
                 }
 
-                const response = await fetch('http://127.0.0.1:8000/run-analysis', {
+                // Fire concurrent requests
+                const rsiPromise = fetch('http://127.0.0.1:8000/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ticker: ticker }),
                     signal: signal
+                }).then(res => {
+                    if (!res.ok) throw new Error('Indicator calculations fetch failed');
+                    return res.json();
                 });
-                
-                if (!response.ok) {
-                    throw new Error('Analysis fetch failed');
-                }
-                
-                setEngineStatusOnline();
-                const data = await response.json();
-                
-                // Update label with name returned from backend if available, else selected stock
-                const tickerName = data.ticker || ticker;
-                if (tickerLabel) {
-                    tickerLabel.innerText = `Şu an analiz ediliyor: ${tickerName}`;
-                }
-                
-                // Update the 'Win Rate' and 'Max Drawdown' cards on the UI dynamically
-                const winrateEl = document.getElementById('metric-winrate');
-                if (winrateEl) {
-                    winrateEl.textContent = data.win_rate || "68.5%";
-                }
-                
-                const drawdownEl = document.getElementById('metric-drawdown');
-                if (drawdownEl) {
-                    drawdownEl.textContent = data.max_drawdown || "-12.0%";
+
+                const backtestPromise = window.executePipelinePromise();
+
+                const [rsiData, backtestResult] = await Promise.all([rsiPromise, backtestPromise]);
+
+                // Validator: Verify returned ticker matches choice
+                const selectedTicker = ticker.toUpperCase().replace('.IS', '');
+                const returnedTicker = (rsiData.ticker || '').toUpperCase().replace('.IS', '');
+                if (selectedTicker !== returnedTicker) {
+                    throw new Error('Data Mismatch Error: Returned ticker does not match selected asset.');
                 }
 
-                const sharpeEl = document.getElementById('metric-sharpe');
-                if (sharpeEl && data.sharpe_ratio !== undefined) {
-                    sharpeEl.textContent = data.sharpe_ratio.toFixed(2);
-                }
-
-                const betaEl = document.getElementById('metric-beta');
-                if (betaEl && data.beta !== undefined) {
-                    betaEl.textContent = data.beta.toFixed(2);
-                }
-
-                const indicatorSummaryEl = document.getElementById('metric-indicator-summary');
-                if (indicatorSummaryEl && data.rsi14 !== undefined && data.macd !== undefined) {
-                    indicatorSummaryEl.textContent = `RSI: ${data.rsi14.toFixed(1)} | MACD: ${data.macd.toFixed(2)}`;
-                }
-
-                const bbSummaryEl = document.getElementById('metric-bb-summary');
-                if (bbSummaryEl && data.bb_lower !== undefined && data.bb_upper !== undefined) {
-                    bbSummaryEl.textContent = `Bollinger: ₺${data.bb_lower.toFixed(1)} - ₺${data.bb_upper.toFixed(1)}`;
-                }
-
-                // Render Chart.js sub-chart for RSI & MACD
-                renderSubChart(data.rsi_series, data.macd_series);
-
-                // Update trade log for the currently analyzed ticker
-                if (window.updateTradeLog) {
-                    window.updateTradeLog(tickerName);
-                }
+                // Render metrics and graphs synchronously
+                updateDashboard(rsiData, backtestResult);
 
             } catch (error) {
                 if (error.name === 'AbortError') {
                     console.log('Previous fetch request aborted.');
                 } else {
                     console.error('Error running analysis:', error);
+                    alert(error.message || 'Bu hisse için veri bulunamadı.');
+                    resetDashboardUI(false);
                 }
             } finally {
                 // Ensure application status indicators are set to Ready
@@ -870,7 +929,6 @@
                     footerStatus.innerText = 'System status: Ready';
                 }
 
-                const btn = document.getElementById('btn-run-backtest');
                 if (btn) {
                     btn.disabled = false;
                     btn.style.opacity = '1';
