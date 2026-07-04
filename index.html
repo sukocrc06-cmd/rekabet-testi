@@ -850,21 +850,20 @@
             }
         }
 
-        async function runAnalysis() {
-            // Abort previous request
-            if (currentAbortController) {
-                currentAbortController.abort();
-            }
-            currentAbortController = new AbortController();
-            const signal = currentAbortController.signal;
+        let isProcessing = false;
 
-            // Set UI to loading state immediately
+        function clearDashboardUI() {
             resetDashboardUI(true);
+        }
 
-            // Trigger buttons to simulating style
+        async function runAnalysis() {
+            if (isProcessing) return;
+            isProcessing = true;
+
             const btn = document.getElementById('btn-run-backtest');
             if (btn) {
-                btn.disabled = true;
+                btn.classList.add('loading');
+                btn.style.pointerEvents = 'none';
                 btn.innerHTML = `
                     <svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" stroke-width="2.5">
@@ -872,9 +871,17 @@
                     </svg>
                     Running...
                 `;
-                btn.style.opacity = '0.7';
-                btn.style.cursor = 'not-allowed';
             }
+
+            // Cleanup logs and metrics before starting
+            clearDashboardUI();
+
+            // Abort previous request
+            if (currentAbortController) {
+                currentAbortController.abort();
+            }
+            currentAbortController = new AbortController();
+            const signal = currentAbortController.signal;
 
             try {
                 const ticker = document.getElementById('stock-select').value;
@@ -903,6 +910,11 @@
 
                 const [rsiData, backtestResult] = await Promise.all([rsiPromise, backtestPromise]);
 
+                // Check if the returned JSON is empty
+                if (!rsiData || Object.keys(rsiData).length === 0) {
+                    throw new Error('Gelen veri boş.');
+                }
+
                 // Validator: Verify returned ticker matches choice
                 const selectedTicker = ticker.toUpperCase().replace('.IS', '');
                 const returnedTicker = (rsiData.ticker || '').toUpperCase().replace('.IS', '');
@@ -918,21 +930,13 @@
                     console.log('Previous fetch request aborted.');
                 } else {
                     console.error('Error running analysis:', error);
-                    alert(error.message || 'Bu hisse için veri bulunamadı.');
-                    resetDashboardUI(false);
+                    alert('Analiz hatası: ' + error.message);
                 }
             } finally {
-                // Ensure application status indicators are set to Ready
-                setEngineStatusOnline();
-                const footerStatus = document.getElementById('footer-status');
-                if (footerStatus) {
-                    footerStatus.innerText = 'System status: Ready';
-                }
-
+                isProcessing = false;
                 if (btn) {
-                    btn.disabled = false;
-                    btn.style.opacity = '1';
-                    btn.style.cursor = 'pointer';
+                    btn.classList.remove('loading');
+                    btn.style.pointerEvents = 'auto';
                     btn.innerHTML = `
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
