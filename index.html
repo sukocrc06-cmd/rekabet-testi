@@ -65,7 +65,7 @@
                     <div class="form-group">
                         <label for="stock-select">Asset Selection</label>
                         <div class="select-wrapper">
-                            <select id="stock-select" class="form-input">
+                            <select id="stock-select" class="form-input" multiple style="height: auto; min-height: 120px; padding: 6px;">
                             </select>
                         </div>
                     </div>
@@ -613,12 +613,12 @@
         async function runAnalysis() {
             try {
                 const assetSelect = document.getElementById('stock-select');
-                const ticker = assetSelect ? assetSelect.value : 'THYAO';
+                const tickers = assetSelect ? Array.from(assetSelect.selectedOptions).map(opt => opt.value) : ['THYAO'];
 
                 const response = await fetch('http://127.0.0.1:8000/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticker: ticker })
+                    body: JSON.stringify({ tickers: tickers })
                 });
                 
                 if (!response.ok) {
@@ -631,12 +631,12 @@
                 // Update the 'Win Rate' and 'Max Drawdown' cards on the UI dynamically
                 const winrateEl = document.getElementById('metric-winrate');
                 if (winrateEl) {
-                    winrateEl.textContent = data.win_rate;
+                    winrateEl.textContent = data.map(r => `${r.ticker}: ${r.win_rate}`).join(' | ');
                 }
                 
                 const drawdownEl = document.getElementById('metric-drawdown');
                 if (drawdownEl) {
-                    drawdownEl.textContent = data.max_drawdown;
+                    drawdownEl.textContent = data.map(r => `${r.ticker}: ${r.max_drawdown}`).join(' | ');
                 }
             } catch (error) {
                 console.error('Error running analysis:', error);
