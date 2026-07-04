@@ -119,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         canvasEquity:      $('#canvas-equity'),
         canvasDrawdown:    $('#canvas-drawdown'),
         canvasCandlestick: $('#canvas-candlestick'),
+        canvasComparison:  $('#canvas-comparison'),
 
         // Tooltip
         chartTooltip: $('#chart-tooltip'),
@@ -425,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /* ────────────── Helper: Process Pipeline Output ────────────── */
-    function processPipelineResult(result, elapsed, capital, commission) {
+    function processPipelineResult(result, elapsed, capital, commission, allResults) {
         state.lastResult = result;
 
         // ── Populate UI ──
@@ -435,6 +436,9 @@ document.addEventListener('DOMContentLoaded', () => {
         populateOverlays(result);
         updateCompetitionPanel(capital, commission);
         updateRiskMonitor(result.metrics);
+
+        // ── Render Chart.js comparison chart ──
+        renderEquityCurve(allResults || [result]);
 
         // ── Restore button ──
         state.isSimulating = false;
@@ -511,6 +515,126 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    let comparisonChartInstance = null;
+
+    function renderEquityCurve(results) {
+        if (!el.canvasComparison) return;
+
+        if (comparisonChartInstance) {
+            comparisonChartInstance.destroy();
+            comparisonChartInstance = null;
+        }
+
+        const ctx = el.canvasComparison.getContext('2d');
+        if (!ctx) return;
+
+        const colors = [
+            '#D4AF37', // Gold
+            '#2ECC71', // Emerald Green
+            '#3498DB', // Peter River Blue
+            '#E74C3C', // Alizarin Red
+            '#9B59B6', // Amethyst Purple
+            '#1ABC9C', // Turquoise
+            '#E67E22', // Carrot Orange
+            '#F1C40F', // Sun Yellow
+            '#34495E', // Wet Asphalt
+            '#FF6F61'  // Coral
+        ];
+
+        let longestLabels = [];
+        results.forEach(res => {
+            if (res.candles && res.candles.length > longestLabels.length) {
+                longestLabels = res.candles.map(c => c.date);
+            }
+        });
+
+        if (longestLabels.length === 0) {
+            let maxLen = 0;
+            results.forEach(res => {
+                const len = res.equityCurve ? res.equityCurve.length : 0;
+                if (len > maxLen) maxLen = len;
+            });
+            longestLabels = Array.from({ length: maxLen }, (_, i) => `Day ${i + 1}`);
+        }
+
+        const datasets = results.map((res, index) => {
+            const color = colors[index % colors.length];
+            return {
+                label: res.ticker,
+                data: res.equityCurve || [],
+                borderColor: color,
+                backgroundColor: color + '15',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                tension: 0.1,
+                fill: false
+            };
+        });
+
+        comparisonChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: longestLabels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            color: '#e0e0e0',
+                            font: {
+                                family: 'Inter, Roboto, sans-serif',
+                                size: 11
+                            }
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: '#1f1f1f',
+                        titleColor: '#e0e0e0',
+                        bodyColor: '#e0e0e0',
+                        borderColor: '#333333',
+                        borderWidth: 1
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        },
+                        ticks: {
+                            color: '#888888',
+                            font: {
+                                size: 10
+                            },
+                            maxTicksLimit: 12
+                        }
+                    },
+                    y: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        },
+                        ticks: {
+                            color: '#888888',
+                            font: {
+                                size: 10
+                            },
+                            callback: function(value) {
+                                return '₺' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     function connectLiveStream(ticker) {
         if (state.ws) {
             console.log(`[WebSocket] Closing existing connection for ticker: ${state.selectedAsset}`);
@@ -534,6 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateOverlays(result);
         updateCompetitionPanel(capital, commission);
         updateRiskMonitor(result.metrics);
+        renderEquityCurve([result]);
 
         // 2. Start background polling
         DC.startOhlcvPolling(ticker, 
@@ -569,7 +694,12 @@ document.addEventListener('DOMContentLoaded', () => {
         el.btnRun.style.opacity = '0.7';
         el.btnRun.style.cursor = 'not-allowed';
 
-        if (el.footerStatus) el.footerStatus.innerText = `System status: Computing backtest for ${state.selectedAsset}…`;
+        const tickers = el.stockSelect ? Array.from(el.stockSelect.selectedOptions).map(opt => opt.value) : [state.selectedAsset];
+        if (tickers.length === 0) {
+            tickers.push(state.selectedAsset);
+        }
+
+        if (el.footerStatus) el.footerStatus.innerText = `System status: Computing backtest for ${tickers.join(', ')}…`;
         if (el.engineStatus) {
             el.engineStatus.innerText = 'CALCULATING';
             el.engineStatus.style.color = '#FFA726';
@@ -582,160 +712,154 @@ document.addEventListener('DOMContentLoaded', () => {
         const t0 = performance.now();
 
         // ── Try running via real FastAPI backend ──
-        console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
-        fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ticker: state.selectedAsset,
-                engine_id: state.engine
+        console.log(`[Frontend] Initiating backtest run for tickers: ${tickers.join(', ')} on engine: ${state.engine}`);
+
+        const runPromises = tickers.map(ticker => {
+            return fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ticker: ticker,
+                    engine_id: state.engine
+                })
             })
-        })
-        .then(res => {
-            if (!res.ok) throw new Error('Backend server returned error response');
-            return res.json();
-        })
-        .then(data => {
-            console.log(`[Frontend] Backtest run initiated. Received task_id: ${data.task_id}, status: ${data.status}`);
-            
-            // Poll for task status
-            DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
-                if (err) {
-                    console.error(`[Frontend] Polling completed with error:`, err);
-                    showNotice('Backtest failed on the backend server.');
-                    fallbackLocal();
-                    return;
-                }
-
-                console.log(`[Frontend] Polling completed successfully. Processing results...`);
-                const m = statusResponse.metrics;
-                const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-
-                // Construct result object from real backend response
-                const result = {
-                    ticker: state.selectedAsset,
-                    candles: m.candles,
-                    equityCurve: m.equity_curve,
-                    metrics: {
-                        netProfitPct: m.total_profit,
-                        netProfit: +((m.total_profit / 100) * capital).toFixed(2),
-                        maxDrawdownPct: m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0,
-                        sharpeRatio: m.total_profit > 0 ? 1.85 : 0.45, 
-                        winRate: m.win_rate,
-                        wins: Math.round(m.win_rate / 100 * m.trade_count),
-                        losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
-                        totalTrades: m.trade_count,
-                        profitFactor: m.total_profit > 0 ? 1.95 : 0.85,
-                        drawdownCurve: m.drawdown_curve,
-                        maxMae: m.total_profit > 0 ? 2.15 : 4.85
-                    },
-                    trades: m.trades,
-                    summary: {
-                        peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
-                        currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
-                        lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
-                        totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
-                    }
-                };
-
-                // Compute indicators and signals locally based on real backend data
-                const indicators = DC.calculateIndicators(result.candles);
-                const closes = result.candles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
-
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
-                result._indicators = indicators;
-                result.isOosActive = false;
-
-                processPipelineResult(result, elapsed, capital, commission);
+            .then(res => {
+                if (!res.ok) throw new Error(`Backend returned error for ${ticker}`);
+                return res.json();
+            })
+            .then(data => {
+                return new Promise((resolve, reject) => {
+                    DC.pollBacktestStatus(data.task_id, (err, statusResponse) => {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            const m = statusResponse.metrics;
+                            resolve({
+                                ticker: ticker,
+                                candles: m.candles,
+                                equityCurve: m.equity_curve,
+                                metrics: {
+                                    netProfitPct: m.total_profit,
+                                    netProfit: +((m.total_profit / 100) * capital).toFixed(2),
+                                    maxDrawdownPct: m.drawdown_curve.length > 0 ? Math.max(...m.drawdown_curve) : 0.0,
+                                    sharpeRatio: m.total_profit > 0 ? 1.85 : 0.45, 
+                                    winRate: m.win_rate,
+                                    wins: Math.round(m.win_rate / 100 * m.trade_count),
+                                    losses: m.trade_count - Math.round(m.win_rate / 100 * m.trade_count),
+                                    totalTrades: m.trade_count,
+                                    profitFactor: m.total_profit > 0 ? 1.95 : 0.85,
+                                    drawdownCurve: m.drawdown_curve,
+                                    maxMae: m.total_profit > 0 ? 2.15 : 4.85
+                                },
+                                trades: m.trades,
+                                summary: {
+                                    peakEquity: m.equity_curve.length > 0 ? Math.max(...m.equity_curve) : capital,
+                                    currentEquity: m.equity_curve.length > 0 ? m.equity_curve[m.equity_curve.length - 1] : capital,
+                                    lastPrice: m.candles.length > 0 ? m.candles[m.candles.length - 1].close : 0,
+                                    totalVolume: m.candles.reduce((acc, c) => acc + c.volume, 0)
+                                }
+                            });
+                        }
+                    });
+                });
             });
+        });
+
+        Promise.all(runPromises)
+        .then(results => {
+            const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+            const primaryResult = results[0];
+            
+            // Compute indicators and signals locally based on real backend data
+            const indicators = DC.calculateIndicators(primaryResult.candles);
+            const closes = primaryResult.candles.map(c => c.close);
+            const smaFast = DC.computeSMA(closes, 5);
+            const smaSlow = DC.computeSMA(closes, 13);
+            const signals = CR.generateSignals(primaryResult.candles, indicators, primaryResult.trades, primaryResult.ticker);
+
+            primaryResult._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
+            primaryResult._indicators = indicators;
+            primaryResult.isOosActive = false;
+
+            processPipelineResult(primaryResult, elapsed, capital, commission, results);
         })
         .catch(err => {
-            const targetUrl = 'http://127.0.0.1:8000/api/v1/backtest/run';
-            console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
+            console.error(`[Frontend Connection Debug] Failed to reach backend: ${err.message || err}`);
             showNotice('Server offline. Using offline simulation mode.');
             
             if (el.engineStatus) {
                 el.engineStatus.innerText = 'OFFLINE';
-                el.engineStatus.style.color = '#F44336'; // Red
+                el.engineStatus.style.color = '#F44336';
             }
             if (el.latencyVal) el.latencyVal.innerText = 'N/A';
 
             fallbackLocal();
         });
 
-        // Local fallback logic encapsulated for cleaner codebase
         function fallbackLocal() {
-            console.log('[Frontend] Executing offline local backtest fallback');
+            console.log('[Frontend] Executing offline local backtest fallback for tickers:', tickers);
             const isOosActive = el.chkOosValidation && el.chkOosValidation.checked;
-            const allCandles = DC.generateOHLCV(state.selectedAsset);
             
-            let result;
-            let oosSplitIndex = null;
-            let oosMetrics = null;
+            const results = tickers.map(ticker => {
+                const allCandles = DC.generateOHLCV(ticker);
+                let result;
+                let oosSplitIndex = null;
+                let oosMetrics = null;
 
-            if (isOosActive) {
-                // Split 70% Training / 30% Validation
-                oosSplitIndex = Math.floor(allCandles.length * 0.7);
-                const trainingCandles = allCandles.slice(0, oosSplitIndex);
-                const validationCandles = allCandles.slice(oosSplitIndex);
+                if (isOosActive) {
+                    oosSplitIndex = Math.floor(allCandles.length * 0.7);
+                    const trainingCandles = allCandles.slice(0, oosSplitIndex);
+                    const validationCandles = allCandles.slice(oosSplitIndex);
 
-                // Run Training strategy
-                const trainStratResult = DC.runStrategy(state.selectedAsset, trainingCandles, capital, commission, state.engine);
-                const trainMetrics = DC.calculateMetrics(trainStratResult, capital);
+                    const trainStratResult = DC.runStrategy(ticker, trainingCandles, capital, commission, state.engine);
+                    const trainMetrics = DC.calculateMetrics(trainStratResult, capital);
 
-                // Run Validation strategy
-                const valStratResult = DC.runStrategy(state.selectedAsset, validationCandles, capital, commission, state.engine);
-                const valMetrics = DC.calculateMetrics(valStratResult, capital);
-                oosMetrics = valMetrics;
+                    const valStratResult = DC.runStrategy(ticker, validationCandles, capital, commission, state.engine);
+                    const valMetrics = DC.calculateMetrics(valStratResult, capital);
+                    oosMetrics = valMetrics;
 
-                // Main pipeline on full candles
-                result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
-                
-                // Override metrics and trades with training data for standard UI logs
-                result.metrics = trainMetrics;
-                result.trades = trainStratResult.trades;
-                result.isOosActive = true;
-                result.oosValidationMetrics = valMetrics;
-                result.oosSplitIndex = oosSplitIndex;
+                    result = DC.runPipeline(ticker, capital, commission, state.engine);
+                    result.metrics = trainMetrics;
+                    result.trades = trainStratResult.trades;
+                    result.isOosActive = true;
+                    result.oosValidationMetrics = valMetrics;
+                    result.oosSplitIndex = oosSplitIndex;
 
-                // Combine both sets of trades for the chart signals
-                const combinedTrades = [...trainStratResult.trades];
-                valStratResult.trades.forEach(t => {
-                    const offsetIndex = t.entryIndex !== undefined ? t.entryIndex + oosSplitIndex : undefined;
-                    combinedTrades.push({
-                        ...t,
-                        entryIndex: offsetIndex
+                    const combinedTrades = [...trainStratResult.trades];
+                    valStratResult.trades.forEach(t => {
+                        const offsetIndex = t.entryIndex !== undefined ? t.entryIndex + oosSplitIndex : undefined;
+                        combinedTrades.push({
+                            ...t,
+                            entryIndex: offsetIndex
+                        });
                     });
-                });
 
-                // Compute overlays on all candles
-                const indicators = DC.calculateIndicators(allCandles);
-                const closes = allCandles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(allCandles, indicators, combinedTrades, state.selectedAsset);
+                    const indicators = DC.calculateIndicators(allCandles);
+                    const closes = allCandles.map(c => c.close);
+                    const smaFast = DC.computeSMA(closes, 5);
+                    const smaSlow = DC.computeSMA(closes, 13);
+                    const signals = CR.generateSignals(allCandles, indicators, combinedTrades, ticker);
 
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex };
-                result._indicators = indicators;
-            } else {
-                // Standard flow
-                result = DC.runPipeline(state.selectedAsset, capital, commission, state.engine);
-                const indicators = DC.calculateIndicators(result.candles);
-                const closes = result.candles.map(c => c.close);
-                const smaFast = DC.computeSMA(closes, 5);
-                const smaSlow = DC.computeSMA(closes, 13);
-                const signals = CR.generateSignals(result.candles, indicators, result.trades, state.selectedAsset);
+                    result._chartData = { smaFast, smaSlow, signals, oosSplitIndex };
+                    result._indicators = indicators;
+                } else {
+                    result = DC.runPipeline(ticker, capital, commission, state.engine);
+                    const indicators = DC.calculateIndicators(result.candles);
+                    const closes = result.candles.map(c => c.close);
+                    const smaFast = DC.computeSMA(closes, 5);
+                    const smaSlow = DC.computeSMA(closes, 13);
+                    const signals = CR.generateSignals(result.candles, indicators, result.trades, ticker);
 
-                result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
-                result._indicators = indicators;
-                result.isOosActive = false;
-            }
+                    result._chartData = { smaFast, smaSlow, signals, oosSplitIndex: null };
+                    result._indicators = indicators;
+                    result.isOosActive = false;
+                }
+                return result;
+            });
 
             const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
-            processPipelineResult(result, elapsed, capital, commission);
+            const primaryResult = results[0];
+            processPipelineResult(primaryResult, elapsed, capital, commission, results);
         }
     }
 
