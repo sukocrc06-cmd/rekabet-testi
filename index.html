@@ -263,6 +263,12 @@
                                         <span class="stat-val" id="price-overlay-vol">42.8M</span>
                                     </div>
                                 </div>
+                                <div id="chart-loading-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(30,30,30,0.85); display: none; z-index: 10; align-items: center; justify-content: center; flex-direction: column;">
+                                    <svg class="spinner-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.5" style="margin-bottom: 12px;">
+                                        <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                                    </svg>
+                                    <span id="loading-overlay-text" style="color: #e0e0e0; font-size: 14px; font-weight: 500; font-family: Outfit, sans-serif;">Loading chart data...</span>
+                                </div>
                                 <canvas id="canvas-candlestick" class="chart-canvas"></canvas>
                                 <!-- Crosshair tooltip -->
                                 <div id="chart-tooltip" class="chart-tooltip"></div>
@@ -631,7 +637,7 @@
         let subChartInstance = null;
         let currentAbortController = null;
 
-        function resetDashboardUI(loading = false) {
+        function resetDashboardUI(loading = false, errorMessage = null) {
             // Reset metrics cards to '---'
             const ids = [
                 'metric-return', 'metric-netprofit-abs', 'metric-sharpe', 
@@ -650,13 +656,28 @@
                 tradeLogBody.innerHTML = `
                     <tr>
                         <td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">
-                            ${loading ? 'Loading Trade Log...' : 'Lütfen analiz yapın veya yeni bir hisse seçin...'}
+                            ${loading ? 'Loading Trade Log...' : (errorMessage ? 'Hata oluştu, veriler yüklenemedi.' : 'Lütfen analiz yapın veya yeni bir hisse seçin...')}
                         </td>
                     </tr>
                 `;
             }
 
-            // Clear or show loading on canvases
+            // Handle Loading Overlay
+            const overlay = document.getElementById('chart-loading-overlay');
+            const overlayText = document.getElementById('loading-overlay-text');
+            if (overlay) {
+                if (loading) {
+                    overlay.style.display = 'flex';
+                    if (overlayText) overlayText.textContent = 'Loading chart data...';
+                } else if (errorMessage) {
+                    overlay.style.display = 'flex';
+                    if (overlayText) overlayText.textContent = errorMessage;
+                } else {
+                    overlay.style.display = 'none';
+                }
+            }
+
+            // Clear canvases via ChartRenderer.reset if loaded
             if (window.ChartRenderer && window.ChartRenderer.reset) {
                 const canvases = [
                     document.getElementById('canvas-candlestick'),
@@ -665,19 +686,7 @@
                     document.getElementById('canvas-subchart')
                 ];
                 canvases.forEach(c => {
-                    if (c) {
-                        window.ChartRenderer.reset(c);
-                        if (loading) {
-                            const ctx = c.getContext('2d');
-                            if (ctx) {
-                                ctx.fillStyle = '#888888';
-                                ctx.font = '14px Outfit, sans-serif';
-                                ctx.textAlign = 'center';
-                                ctx.textBaseline = 'middle';
-                                ctx.fillText('Loading chart data...', c.width / 2, c.height / 2);
-                            }
-                        }
-                    }
+                    if (c) window.ChartRenderer.reset(c);
                 });
             }
 
@@ -787,6 +796,9 @@
         }
 
         function updateDashboard(rsiData, backtestResult) {
+            // Hide loading overlay
+            resetDashboardUI(false);
+
             // Render Price Action and indicators
             renderSubChart(rsiData.rsi_series, rsiData.macd_series);
 
@@ -867,6 +879,13 @@
             currentAbortController = new AbortController();
             const signal = currentAbortController.signal;
 
+            // Set up a 15-second timeout
+            let isTimeout = false;
+            const timeoutId = setTimeout(() => {
+                isTimeout = true;
+                currentAbortController.abort();
+            }, 15000);
+
             try {
                 const ticker = document.getElementById('stock-select').value;
                 if (!window.executePipelinePromise) {
@@ -886,13 +905,16 @@
                     body: JSON.stringify({ ticker: ticker }),
                     signal: signal
                 }).then(res => {
-                    if (!res.ok) throw new Error('Indicator calculations fetch failed');
+                    if (!res.ok) throw new Error(`HTTP Error ${res.status}: Indicator calculations fetch failed`);
                     return res.json();
                 });
 
                 const backtestPromise = window.executePipelinePromise();
 
                 const [rsiData, backtestResult] = await Promise.all([rsiPromise, backtestPromise]);
+
+                // Clear the timeout upon successful completion
+                clearTimeout(timeoutId);
 
                 // Check if the returned JSON is empty
                 if (!rsiData || Object.keys(rsiData).length === 0) {
@@ -910,11 +932,18 @@
                 updateDashboard(rsiData, backtestResult);
 
             } catch (error) {
+                clearTimeout(timeoutId);
                 if (error.name === 'AbortError') {
-                    console.log('Previous fetch request aborted.');
+                    if (isTimeout) {
+                        console.error('Request timed out after 15 seconds.');
+                        resetDashboardUI(false, 'Sunucu yanıt vermedi, lütfen tekrar deneyin');
+                    } else {
+                        console.log('Previous fetch request aborted.');
+                    }
                 } else {
                     console.error('Error running analysis:', error);
                     alert('Analiz hatası: ' + error.message);
+                    resetDashboardUI(false, 'Analiz hatası: ' + error.message);
                 }
             } finally {
                 // Ensure application status indicators are set to Ready

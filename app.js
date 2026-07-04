@@ -607,7 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             })
             .then(res => {
-                if (!res.ok) throw new Error('Backend server returned error response');
+                if (!res.ok) throw new Error(`HTTP Error ${res.status}: Backend server returned error response`);
                 return res.json();
             })
             .then(data => {
