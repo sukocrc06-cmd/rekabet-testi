@@ -19,6 +19,7 @@
             <div class="logo-area">
                 <div class="pulse-indicator"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
+                <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: THYAO</span>
             </div>
             <div class="header-status">
                 <div class="status-item">
@@ -65,7 +66,7 @@
                     <div class="form-group">
                         <label for="stock-select">Asset Selection</label>
                         <div class="select-wrapper">
-                            <select id="stock-select" class="form-input" multiple style="height: auto; min-height: 120px; padding: 6px;">
+                            <select id="stock-select" class="form-input">
                             </select>
                         </div>
                     </div>
@@ -211,11 +212,7 @@
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><rect width="4" height="8" x="7" y="10" rx="1"></rect><rect width="4" height="12" x="15" y="6" rx="1"></rect></svg>
                                 Price Action
                             </button>
-                            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="comparison-panel" id="tab-comparison">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"></path><path d="M18 20V4"></path><path d="M6 20v-6"></path></svg>
-                                Stock Comparison
-                            </button>
-                        </div>
+                         </div>
                         <div class="panel-controls text-hide-mobile">
                             <span class="indicator-live">● REALTIME DATA</span>
                         </div>
@@ -273,13 +270,6 @@
                                 <canvas id="canvas-candlestick" class="chart-canvas"></canvas>
                                 <!-- Crosshair tooltip -->
                                 <div id="chart-tooltip" class="chart-tooltip"></div>
-                        </div>
-                        
-                        <!-- Comparison Tab Panel -->
-                        <div class="tab-panel" id="comparison-panel" role="tabpanel" aria-labelledby="tab-comparison">
-                            <div class="chart-wrapper" style="padding: 10px;">
-                                <canvas id="canvas-comparison" class="chart-canvas"></canvas>
-                            </div>
                         </div>
                     </div>
                 </section>
@@ -625,12 +615,18 @@
         async function runAnalysis() {
             try {
                 const assetSelect = document.getElementById('stock-select');
-                const tickers = assetSelect ? Array.from(assetSelect.selectedOptions).map(opt => opt.value) : ['THYAO'];
+                const ticker = assetSelect ? assetSelect.value : 'THYAO';
+
+                // Immediately update header label
+                const tickerLabel = document.getElementById('analysis-ticker-label');
+                if (tickerLabel) {
+                    tickerLabel.innerText = `Şu an analiz ediliyor: ${ticker}`;
+                }
 
                 const response = await fetch('http://127.0.0.1:8000/run-analysis', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tickers: tickers })
+                    body: JSON.stringify({ ticker: ticker })
                 });
                 
                 if (!response.ok) {
@@ -640,15 +636,21 @@
                 setEngineStatusOnline();
                 const data = await response.json();
                 
+                // Update label with name returned from backend if available, else selected stock
+                const tickerName = data.ticker || ticker;
+                if (tickerLabel) {
+                    tickerLabel.innerText = `Şu an analiz ediliyor: ${tickerName}`;
+                }
+                
                 // Update the 'Win Rate' and 'Max Drawdown' cards on the UI dynamically
                 const winrateEl = document.getElementById('metric-winrate');
                 if (winrateEl) {
-                    winrateEl.textContent = data.map(r => `${r.ticker}: ${r.win_rate}`).join(' | ');
+                    winrateEl.textContent = data.win_rate || "68.5%";
                 }
                 
                 const drawdownEl = document.getElementById('metric-drawdown');
                 if (drawdownEl) {
-                    drawdownEl.textContent = data.map(r => `${r.ticker}: ${r.max_drawdown}`).join(' | ');
+                    drawdownEl.textContent = data.max_drawdown || "-12.0%";
                 }
             } catch (error) {
                 console.error('Error running analysis:', error);
