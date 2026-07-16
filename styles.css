@@ -172,6 +172,32 @@ body {
     gap: 12px;
 }
 
+/* --- Header Balance Pill (demo trading balance, top right) --- */
+.header-balance-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--gold-dim);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    padding: 7px 14px;
+}
+
+.header-balance-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.header-balance-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--gold);
+}
+
 /* --- Common Buttons & Controls --- */
 .btn {
     font-family: var(--font-sans);
@@ -1788,6 +1814,10 @@ body {
     margin-top: 18px;
     padding-top: 16px;
     border-top: 1px solid rgba(212, 175, 55, 0.15);
+}
+
+.qt-account-summary-2col {
+    grid-template-columns: repeat(2, 1fr);
 }
 
 .acct-item {

@@ -532,10 +532,11 @@ const TradingEngine = (() => {
         });
         const equity = portfolio.balance + longValue - shortValue;
 
-        const balEl = byId('qt-balance');
+        // Balance now lives in the header pill (top right) rather than the trade ticket itself
+        const headerBalEl = byId('header-balance-value');
         const eqEl = byId('qt-equity');
         const pnlEl = byId('qt-openpnl');
-        if (balEl) balEl.textContent = fmtTRY(portfolio.balance);
+        if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
         if (eqEl) eqEl.textContent = fmtTRY(equity);
         if (pnlEl) {
             pnlEl.textContent = (openPnl >= 0 ? '+' : '') + fmtTRY(openPnl);
