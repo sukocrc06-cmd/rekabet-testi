@@ -313,6 +313,10 @@
                          </div>
                         <div class="panel-controls text-hide-mobile">
                             <span class="indicator-live">● REALTIME DATA</span>
+                            <button type="button" id="btn-maximize-chart" class="panel-icon-btn" aria-label="Grafiği büyüt" title="Grafiği büyüt">
+                                <svg id="icon-maximize" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
+                                <svg id="icon-restore" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>
+                            </button>
                         </div>
                     </div>
 
@@ -659,6 +663,40 @@
                 window.addEventListener('resize', () => {
                     if (lastWrapHeight === null || analyticsWrap.classList.contains('collapsed')) return;
                     applyHeights(lastWrapHeight);
+                });
+            }
+
+            // Maximize / restore the realtime chart panel (Equity / Drawdown / Price Action)
+            // in-page, TradingView/Binance-style, without leaving the page.
+            const maximizeBtn = safeGetElement('btn-maximize-chart');
+            const chartSection = document.querySelector('.chart-section');
+            const iconMaximize = safeGetElement('icon-maximize');
+            const iconRestore = safeGetElement('icon-restore');
+
+            if (maximizeBtn && chartSection) {
+                function setMaximized(on) {
+                    chartSection.classList.toggle('maximized', on);
+                    document.body.classList.toggle('chart-maximized-active', on);
+                    if (iconMaximize) iconMaximize.style.display = on ? 'none' : '';
+                    if (iconRestore) iconRestore.style.display = on ? '' : 'none';
+                    maximizeBtn.setAttribute('aria-label', on ? 'Grafiği küçült' : 'Grafiği büyüt');
+                    maximizeBtn.setAttribute('title', on ? 'Grafiği küçült' : 'Grafiği büyüt');
+                    // Canvases resize responsively via the ResizeObserver already
+                    // watching their parent elements — just nudge it after the
+                    // CSS transition/layout settles.
+                    setTimeout(() => {
+                        window.dispatchEvent(new Event('resize'));
+                    }, 60);
+                }
+
+                maximizeBtn.addEventListener('click', () => {
+                    setMaximized(!chartSection.classList.contains('maximized'));
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && chartSection.classList.contains('maximized')) {
+                        setMaximized(false);
+                    }
                 });
             }
         });

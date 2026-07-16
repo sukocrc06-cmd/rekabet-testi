@@ -766,6 +766,44 @@ body {
     border-radius: 4px;
 }
 
+/* Panel icon button (e.g. maximize/restore toggle in a card header) */
+.panel-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--gold-border);
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--text-secondary, #9a9a9a);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.panel-icon-btn:hover {
+    color: var(--gold);
+    border-color: var(--gold);
+    background-color: var(--gold-dim);
+}
+
+/* Maximize the realtime chart panel (Equity / Drawdown / Price Action) to fill
+   the viewport in-page, TradingView/Binance-style, without navigating away. */
+.chart-section.maximized {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border: none;
+}
+
+body.chart-maximized-active {
+    overflow: hidden;
+}
+
 /* Tab Content Areas */
 .tab-content-container {
     flex-grow: 1;
