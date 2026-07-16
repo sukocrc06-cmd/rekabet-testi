@@ -34,6 +34,107 @@ const DataController = (() => {
         AKBNK: { name: 'Akbank',               sector: 'Bankacılık',   basePrice: 56.90,  volatility: 0.019, drift: 0.0007, avgVolume: 120_000_000 }
     };
 
+    /* ──────────────── BIST 100 Symbol Universe (shared watchlist / selector data) ──────────────── */
+    const BIST100 = [
+        {"symbol": "AEFES", "name": "Anadolu Efes"},
+        {"symbol": "AGESA", "name": "Agesa Hayat ve Emeklilik"},
+        {"symbol": "AKBNK", "name": "Akbank"},
+        {"symbol": "AKCNS", "name": "Akçansa Çimento"},
+        {"symbol": "AKFGY", "name": "Akfen GYO"},
+        {"symbol": "AKSEN", "name": "Aksa Enerji"},
+        {"symbol": "ALARK", "name": "Alarko Holding"},
+        {"symbol": "ALBRK", "name": "Albaraka Türk"},
+        {"symbol": "ALFAS", "name": "Alfa Solar Enerji"},
+        {"symbol": "ARCLK", "name": "Arçelik"},
+        {"symbol": "ASELS", "name": "Aselsan"},
+        {"symbol": "ASTOR", "name": "Astor Enerji"},
+        {"symbol": "BERA", "name": "Bera Holding"},
+        {"symbol": "BIMAS", "name": "BİM Mağazalar"},
+        {"symbol": "BRSAN", "name": "Borusan Mannesmann"},
+        {"symbol": "BRYAT", "name": "Borusan Yatırım Pazarlama"},
+        {"symbol": "BUCIM", "name": "Bursa Çimento"},
+        {"symbol": "CANTE", "name": "Çan2 Termik"},
+        {"symbol": "CCOLA", "name": "Coca-Cola İçecek"},
+        {"symbol": "CEMTS", "name": "Çemtaş Çelik Makina"},
+        {"symbol": "CIMSA", "name": "Çimsa Çimento"},
+        {"symbol": "CWENE", "name": "Cw Enerji Mühendislik"},
+        {"symbol": "DOAS", "name": "Doğuş Otomotiv Servis"},
+        {"symbol": "DOHOL", "name": "Doğan Şirketler Grubu"},
+        {"symbol": "ECILC", "name": "Eczacıbaşı İlaç"},
+        {"symbol": "ECZYT", "name": "Eczacıbaşı Yatırım"},
+        {"symbol": "EGEEN", "name": "Ege Endüstri"},
+        {"symbol": "EKGYO", "name": "Emlak Konut GYO"},
+        {"symbol": "ENJSA", "name": "Enerjisa Enerji"},
+        {"symbol": "ENKAI", "name": "Enka İnşaat"},
+        {"symbol": "EREGL", "name": "Ereğli Demir Çelik"},
+        {"symbol": "EUPWR", "name": "Europower Enerji"},
+        {"symbol": "FROTO", "name": "Ford Otomotiv Sanayi"},
+        {"symbol": "GARAN", "name": "Garanti Bankası"},
+        {"symbol": "GENIL", "name": "Gen İlaç ve Sağlık"},
+        {"symbol": "GESAN", "name": "Girişim Elektrik Sanayi"},
+        {"symbol": "GLYHO", "name": "Global Yatırım Holding"},
+        {"symbol": "GSDHO", "name": "GSD Holding"},
+        {"symbol": "GUBRF", "name": "Gübre Fabrikaları"},
+        {"symbol": "GWIND", "name": "Galata Wind Enerji"},
+        {"symbol": "HALKB", "name": "Halk Bankası"},
+        {"symbol": "HEKTS", "name": "Hektaş"},
+        {"symbol": "IPEKE", "name": "İpek Doğal Enerji"},
+        {"symbol": "ISCTR", "name": "İş Bankası (C)"},
+        {"symbol": "ISDMR", "name": "İskenderun Demir Çelik"},
+        {"symbol": "ISGYO", "name": "İş GYO"},
+        {"symbol": "ISMEN", "name": "İş Yatırım Menkul Değerler"},
+        {"symbol": "IZMDC", "name": "İzmir Demir Çelik"},
+        {"symbol": "KARDMD", "name": "Kardemir (D)"},
+        {"symbol": "KCAER", "name": "Kocaer Çelik"},
+        {"symbol": "KCHOL", "name": "Koç Holding"},
+        {"symbol": "KMPUR", "name": "Kimteks Poliüretan"},
+        {"symbol": "KONTR", "name": "Kontrolmatik Teknoloji"},
+        {"symbol": "KONYA", "name": "Konya Çimento"},
+        {"symbol": "KORDS", "name": "Kordsa Teknik Tekstil"},
+        {"symbol": "KOZAA", "name": "Koza Anadolu Metal"},
+        {"symbol": "KOZAL", "name": "Koza Altın İşletmeleri"},
+        {"symbol": "KRDMD", "name": "Kardemir Karabük"},
+        {"symbol": "MAVI", "name": "Mavi Giyim"},
+        {"symbol": "MGROS", "name": "Migros Ticaret"},
+        {"symbol": "MIATK", "name": "Mia Teknoloji"},
+        {"symbol": "ODAS", "name": "Odaş Elektrik"},
+        {"symbol": "OTKAR", "name": "Otokar Otomotiv"},
+        {"symbol": "OYAKC", "name": "Oyak Çimento"},
+        {"symbol": "PENTA", "name": "Penta Teknoloji"},
+        {"symbol": "PETKM", "name": "Petkim Petrokimya"},
+        {"symbol": "PGSUS", "name": "Pegasus Hava Taşımacılığı"},
+        {"symbol": "PSGYO", "name": "Pasifik GYO"},
+        {"symbol": "QUAGR", "name": "Qua Granite Hayal Yapı"},
+        {"symbol": "SAHOL", "name": "Sabancı Holding"},
+        {"symbol": "SASA", "name": "Sasa Polyester"},
+        {"symbol": "SAYAS", "name": "Say Yenilenebilir Enerji"},
+        {"symbol": "SDTTR", "name": "SDT Uzay ve Savunma"},
+        {"symbol": "SISE", "name": "Şişecam"},
+        {"symbol": "SKBNK", "name": "Şekerbank"},
+        {"symbol": "SMRTG", "name": "Smart Güneş Enerjisi"},
+        {"symbol": "SOKM", "name": "Şok Marketler"},
+        {"symbol": "TABGD", "name": "Tab Gıda Sanayi"},
+        {"symbol": "TAVHL", "name": "TAV Havalimanları"},
+        {"symbol": "TCELL", "name": "Turkcell"},
+        {"symbol": "TEZOL", "name": "Europap Tezol Kağıt"},
+        {"symbol": "THYAO", "name": "Türk Hava Yolları"},
+        {"symbol": "TKFEN", "name": "Tekfen Holding"},
+        {"symbol": "TOASO", "name": "Tofaş Türk Otomobil Fabrikası"},
+        {"symbol": "TSKB", "name": "TSKB"},
+        {"symbol": "TTKOM", "name": "Türk Telekom"},
+        {"symbol": "TTRAK", "name": "Türk Traktör"},
+        {"symbol": "TUPRS", "name": "Tüpraş"},
+        {"symbol": "TURSG", "name": "Türkiye Sigorta"},
+        {"symbol": "ULKER", "name": "Ülker Bisküvi"},
+        {"symbol": "VAKBN", "name": "Vakıflar Bankası"},
+        {"symbol": "VESBE", "name": "Vestel Beyaz Eşya"},
+        {"symbol": "VESTL", "name": "Vestel Elektronik"},
+        {"symbol": "YEOTK", "name": "Yeo Teknoloji"},
+        {"symbol": "YKBNK", "name": "Yapı ve Kredi Bankası"},
+        {"symbol": "YYLGD", "name": "Yayla Agro Gıda"},
+        {"symbol": "ZOREN", "name": "Zorlu Enerji"}
+    ];
+
     /* ──────────────── Seeded PRNG (Mulberry32) ──────────────── */
     function mulberry32(seed) {
         return () => {
@@ -219,6 +320,166 @@ const DataController = (() => {
             rsi.push(+val.toFixed(4));
         }
         return rsi;
+    }
+
+    /**
+     * Compute MACD (Moving Average Convergence Divergence).
+     * @returns {{macdLine:(number|null)[], signalLine:(number|null)[], histogram:(number|null)[]}}
+     */
+    function computeMACD(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+        const emaFast = computeEMA(closes, fastPeriod);
+        const emaSlow = computeEMA(closes, slowPeriod);
+        const macdLine = closes.map((_, i) => {
+            if (emaFast[i] === null || emaSlow[i] === null) return null;
+            return +(emaFast[i] - emaSlow[i]).toFixed(4);
+        });
+
+        const firstValidIdx = macdLine.findIndex(v => v !== null);
+        const signalLine = new Array(macdLine.length).fill(null);
+        const histogram = new Array(macdLine.length).fill(null);
+
+        if (firstValidIdx !== -1) {
+            const validMacd = macdLine.slice(firstValidIdx);
+            const emaOfMacd = computeEMA(validMacd, signalPeriod);
+            for (let i = 0; i < emaOfMacd.length; i++) {
+                if (emaOfMacd[i] !== null) {
+                    signalLine[firstValidIdx + i] = emaOfMacd[i];
+                    histogram[firstValidIdx + i] = +(validMacd[i] - emaOfMacd[i]).toFixed(4);
+                }
+            }
+        }
+        return { macdLine, signalLine, histogram };
+    }
+
+    /**
+     * Compute Stochastic Oscillator (%K, %D).
+     * @returns {{k:(number|null)[], d:(number|null)[]}}
+     */
+    function computeStochastic(candles, kPeriod = 14, dPeriod = 3) {
+        const kValues = [];
+        for (let i = 0; i < candles.length; i++) {
+            if (i < kPeriod - 1) { kValues.push(null); continue; }
+            let lowestLow = Infinity, highestHigh = -Infinity;
+            for (let j = i - kPeriod + 1; j <= i; j++) {
+                if (candles[j].low < lowestLow) lowestLow = candles[j].low;
+                if (candles[j].high > highestHigh) highestHigh = candles[j].high;
+            }
+            const range = (highestHigh - lowestLow) || 1;
+            kValues.push(+(((candles[i].close - lowestLow) / range) * 100).toFixed(2));
+        }
+        const dValues = [];
+        for (let i = 0; i < kValues.length; i++) {
+            if (kValues[i] === null) { dValues.push(null); continue; }
+            let sum = 0, cnt = 0;
+            for (let j = Math.max(0, i - dPeriod + 1); j <= i; j++) {
+                if (kValues[j] !== null) { sum += kValues[j]; cnt++; }
+            }
+            dValues.push(cnt > 0 ? +(sum / cnt).toFixed(2) : null);
+        }
+        return { k: kValues, d: dValues };
+    }
+
+    /**
+     * Compute Average True Range (Wilder's smoothing).
+     */
+    function computeATR(candles, period = 14) {
+        const len = candles.length;
+        const atr = new Array(len).fill(null);
+        if (len <= period) return atr;
+
+        const tr = new Array(len).fill(0);
+        for (let i = 0; i < len; i++) {
+            if (i === 0) { tr[i] = candles[i].high - candles[i].low; continue; }
+            const highLow = candles[i].high - candles[i].low;
+            const highClose = Math.abs(candles[i].high - candles[i - 1].close);
+            const lowClose = Math.abs(candles[i].low - candles[i - 1].close);
+            tr[i] = Math.max(highLow, highClose, lowClose);
+        }
+
+        let sum = 0;
+        for (let i = 0; i < period; i++) sum += tr[i];
+        let prevAtr = sum / period;
+        atr[period - 1] = +prevAtr.toFixed(4);
+
+        for (let i = period; i < len; i++) {
+            prevAtr = (prevAtr * (period - 1) + tr[i]) / period;
+            atr[i] = +prevAtr.toFixed(4);
+        }
+        return atr;
+    }
+
+    /**
+     * Compute ADX (Average Directional Index) with Wilder smoothing.
+     */
+    function computeADX(candles, period = 14) {
+        const len = candles.length;
+        const adx = new Array(len).fill(null);
+        if (len <= period * 2) return adx;
+
+        const plusDM = new Array(len).fill(0);
+        const minusDM = new Array(len).fill(0);
+        const tr = new Array(len).fill(0);
+
+        for (let i = 1; i < len; i++) {
+            const upMove = candles[i].high - candles[i - 1].high;
+            const downMove = candles[i - 1].low - candles[i].low;
+            plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+            minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+            const highLow = candles[i].high - candles[i].low;
+            const highClose = Math.abs(candles[i].high - candles[i - 1].close);
+            const lowClose = Math.abs(candles[i].low - candles[i - 1].close);
+            tr[i] = Math.max(highLow, highClose, lowClose);
+        }
+
+        let smoothTR = 0, smoothPlusDM = 0, smoothMinusDM = 0;
+        for (let i = 1; i <= period; i++) {
+            smoothTR += tr[i];
+            smoothPlusDM += plusDM[i];
+            smoothMinusDM += minusDM[i];
+        }
+
+        const dxValues = [];
+        for (let i = period; i < len; i++) {
+            if (i > period) {
+                smoothTR = smoothTR - (smoothTR / period) + tr[i];
+                smoothPlusDM = smoothPlusDM - (smoothPlusDM / period) + plusDM[i];
+                smoothMinusDM = smoothMinusDM - (smoothMinusDM / period) + minusDM[i];
+            }
+            const plusDI = smoothTR > 0 ? (smoothPlusDM / smoothTR) * 100 : 0;
+            const minusDI = smoothTR > 0 ? (smoothMinusDM / smoothTR) * 100 : 0;
+            const diSum = plusDI + minusDI;
+            const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
+            dxValues.push(dx);
+        }
+
+        let adxVal = null;
+        for (let i = 0; i < dxValues.length; i++) {
+            const idx = period + i;
+            if (i === period - 1) {
+                let sum = 0;
+                for (let j = 0; j < period; j++) sum += dxValues[j];
+                adxVal = sum / period;
+                adx[idx] = +adxVal.toFixed(2);
+            } else if (i >= period) {
+                adxVal = (adxVal * (period - 1) + dxValues[i]) / period;
+                adx[idx] = +adxVal.toFixed(2);
+            }
+        }
+        return adx;
+    }
+
+    /**
+     * Compute On-Balance Volume (cumulative).
+     */
+    function computeOBV(candles) {
+        const len = candles.length;
+        const obv = new Array(len).fill(0);
+        for (let i = 1; i < len; i++) {
+            if (candles[i].close > candles[i - 1].close) obv[i] = obv[i - 1] + candles[i].volume;
+            else if (candles[i].close < candles[i - 1].close) obv[i] = obv[i - 1] - candles[i].volume;
+            else obv[i] = obv[i - 1];
+        }
+        return obv;
     }
 
     /**
@@ -598,6 +859,18 @@ const DataController = (() => {
         const sma50  = computeSMA(closes, 50);
         const sma200 = computeSMA(closes, 200);
 
+        // --- Exponential Moving Averages ---
+        const ema9  = computeEMA(closes, 9);
+        const ema21 = computeEMA(closes, 21);
+
+        // --- Oscillators ---
+        const rsi14 = computeRSI(closes, 14);
+        const macd = computeMACD(closes, 12, 26, 9);
+        const stochastic = computeStochastic(candles, 14, 3);
+        const atr14 = computeATR(candles, 14);
+        const adx14 = computeADX(candles, 14);
+        const obv = computeOBV(candles);
+
         // --- Bollinger Bands (20-period, 2 std-dev) ---
         const bbPeriod = 20;
         const bbMult   = 2;
@@ -636,7 +909,11 @@ const DataController = (() => {
             vwap.push(+(cumTPV / cumVol).toFixed(4));
         }
 
-        return { sma20, sma50, sma200, bollingerUpper, bollingerMiddle, bollingerLower, vwap };
+        return {
+            sma20, sma50, sma200, ema9, ema21,
+            bollingerUpper, bollingerMiddle, bollingerLower, vwap,
+            rsi14, macd, stochastic, atr14, adx14, obv
+        };
     }
 
     /* ──────────────── 4. SVG Path Builder ──────────────── */
@@ -959,6 +1236,7 @@ const DataController = (() => {
 
     return Object.freeze({
         STOCK_PROFILES,
+        BIST100,
         TRADING_DAYS,
 
         // Data generation
@@ -970,6 +1248,11 @@ const DataController = (() => {
         computeSMA,
         computeEMA,
         computeRSI,
+        computeMACD,
+        computeStochastic,
+        computeATR,
+        computeADX,
+        computeOBV,
         computeSupport,
         computeResistance,
 
