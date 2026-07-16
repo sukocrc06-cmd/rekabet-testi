@@ -615,7 +615,8 @@ body {
     overflow: hidden;
 }
 
-/* Analytics drawer wraps the legacy backtest chart-section + metrics-section */
+/* Analytics drawer: realtime Price Action / Equity / Drawdown chart card.
+   Resizable (drag handle) and collapsible (toggle button). */
 .analytics-wrap {
     display: flex;
     flex-direction: column;
@@ -623,19 +624,56 @@ body {
     min-height: 0;
     max-height: 46vh;
     overflow: hidden;
-    transition: var(--transition-smooth);
+    transition: max-height 0.25s ease, flex-basis 0.25s ease;
     border-top: 1px solid var(--gold-border);
+    position: relative;
 }
 
 .analytics-wrap.collapsed {
     flex: 0 0 0;
-    max-height: 0;
+    max-height: 0 !important;
     border-top: none;
 }
 
+.analytics-wrap.resizing {
+    transition: none;
+}
+
 .analytics-wrap .content-card {
-    flex: 1 1 50%;
+    flex: 1 1 100%;
     min-height: 0;
+}
+
+/* Drag handle to resize the analytics drawer taller/shorter */
+.analytics-resize-handle {
+    flex-shrink: 0;
+    height: 10px;
+    width: 100%;
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-sidebar);
+    border-bottom: 1px solid rgba(212, 175, 55, 0.08);
+    touch-action: none;
+}
+
+.analytics-resize-handle:hover,
+.analytics-resize-handle.active {
+    background-color: var(--gold-dim);
+}
+
+.analytics-resize-grip {
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background-color: var(--gold-border);
+    transition: var(--transition-fast);
+}
+
+.analytics-resize-handle:hover .analytics-resize-grip,
+.analytics-resize-handle.active .analytics-resize-grip {
+    background-color: var(--gold);
 }
 
 /* Common Card Panel Styling */
@@ -1472,7 +1510,7 @@ body {
 
 .trading-chart-section {
     flex: 1 1 58%;
-    min-height: 420px;
+    min-height: 220px;
     display: flex;
     flex-direction: column;
 }
