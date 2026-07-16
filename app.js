@@ -409,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(reqBody),
-            targetAddressSpace: 'local'
+            targetAddressSpace: 'loopback'
         })
         .then(res => {
             if (!res.ok) throw new Error('PDF generation failed');
@@ -598,7 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ticker: state.selectedAsset,
                     engine_id: state.engine
                 }),
-                targetAddressSpace: 'local'
+                targetAddressSpace: 'loopback'
             })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP Error ${res.status}: Backend server returned error response`);
@@ -1071,10 +1071,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Access" policy. Kept on a slow interval (not every second) to
         // minimize that footprint; the backend also opts in explicitly via
         // the Access-Control-Allow-Private-Network response header. It also
-        // sets targetAddressSpace: 'local' so Chrome correctly recognizes
-        // this as a local-network request under its Local Network Access
-        // (LNA) permission model.
-        fetch('http://127.0.0.1:8000/api/v1/health', { targetAddressSpace: 'local' })
+        // sets targetAddressSpace: 'loopback' (127.0.0.1 is specifically the
+        // "loopback" address space, not "local" — Chrome distinguishes the
+        // two) so Chrome correctly recognizes this as a loopback request
+        // under its Local Network Access (LNA) permission model instead of
+        // blocking it with an address-space mismatch error.
+        fetch('http://127.0.0.1:8000/api/v1/health', { targetAddressSpace: 'loopback' })
             .then(res => {
                 if (!res.ok) throw new Error('Unhealthy status');
                 return res.json();

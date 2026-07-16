@@ -1152,10 +1152,14 @@ const DataController = (() => {
         console.log(`[DataController] Initiating polling for task_id: ${taskId}`);
         const intervalId = setInterval(() => {
             console.log(`[DataController] Polling task status: ${taskId}`);
-            // targetAddressSpace: 'local' explicitly declares this as a local-network
-            // request per Chrome's Local Network Access (LNA) policy, so Chrome can
-            // correctly trigger its permission flow instead of just failing.
-            fetch(`http://127.0.0.1:8000/api/v1/backtest/status/${taskId}`, { targetAddressSpace: 'local' })
+            // targetAddressSpace: 'loopback' explicitly declares 127.0.0.1 as a
+            // loopback-address request per Chrome's Local Network Access (LNA)
+            // policy, so Chrome can correctly trigger its permission flow instead
+            // of just failing. NOTE: 127.0.0.1 is specifically 'loopback', NOT
+            // 'local' (Chrome distinguishes the two — using the wrong value makes
+            // Chrome block the request outright with a CORS address-space-mismatch
+            // error before it ever reaches the network).
+            fetch(`http://127.0.0.1:8000/api/v1/backtest/status/${taskId}`, { targetAddressSpace: 'loopback' })
                 .then(res => {
                     if (!res.ok) throw new Error(`Status check failed: ${res.status}`);
                     return res.json();
@@ -1205,7 +1209,7 @@ const DataController = (() => {
             isFetchingOhlcv = true;
             console.log(`[DataController] Fetching latest OHLCV data for: ${ticker}`);
             
-            fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { targetAddressSpace: 'local' })
+            fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { targetAddressSpace: 'loopback' })
                 .then(res => {
                     if (!res.ok) {
                         throw { status: res.status, message: `Server error: ${res.statusText}` };

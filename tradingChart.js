@@ -164,7 +164,7 @@ const TradingChart = (() => {
 
         let candles = null;
         try {
-            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(6000), targetAddressSpace: 'local' });
+            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(6000), targetAddressSpace: 'loopback' });
             if (res.ok) {
                 const json = await res.json();
                 if (json && Array.isArray(json.data) && json.data.length > 5) {

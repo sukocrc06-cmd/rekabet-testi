@@ -990,7 +990,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ticker: normalizedTicker }),
                     signal: signal,
-                    targetAddressSpace: 'local'
+                    targetAddressSpace: 'loopback'
                 }).then(res => {
                     if (!res.ok) throw new Error(`HTTP Error ${res.status}: Indicator calculations fetch failed`);
                     return res.json();
