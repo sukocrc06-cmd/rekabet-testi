@@ -1049,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ────────────── Live Clock & Heartbeat ────────────── */
 
-    function updateClockAndHeartbeat() {
+    function updateClock() {
         const now = new Date();
         const formatter = new Intl.DateTimeFormat('tr-TR', {
             timeZone: 'Europe/Istanbul',
@@ -1060,8 +1060,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const timeStr = formatter.format(now) + ' TRT';
         if (el.marketTime) el.marketTime.innerText = timeStr;
+    }
 
-        // Poll health endpoint
+    function checkBackendHeartbeat() {
+        // Poll health endpoint. This calls a local address (127.0.0.1) from
+        // a page that may be loaded over public HTTPS (e.g. the Vercel
+        // deployment), which Chrome flags under its "Private Network
+        // Access" policy. Kept on a slow interval (not every second) to
+        // minimize that footprint; the backend also opts in explicitly via
+        // the Access-Control-Allow-Private-Network response header.
         fetch('http://127.0.0.1:8000/api/v1/health')
             .then(res => {
                 if (!res.ok) throw new Error('Unhealthy status');
@@ -1083,8 +1090,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
     }
-    setInterval(updateClockAndHeartbeat, 1000);
-    updateClockAndHeartbeat();
+
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    setInterval(checkBackendHeartbeat, 8000);
+    checkBackendHeartbeat();
 
     /* ────────────── Market Session Status Check (Ankara Trading Hours) ────────────── */
 

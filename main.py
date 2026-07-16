@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 import yfinance as yf
 import io
@@ -22,6 +23,28 @@ session.headers.update({
 })
 
 app = FastAPI()
+
+
+class PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
+    """
+    Chrome's "Private Network Access" policy requires a public/HTTPS page
+    (e.g. the Vercel-deployed frontend) that calls a local address like
+    127.0.0.1 to receive an explicit opt-in header on the CORS preflight
+    response, otherwise Chrome flags it in DevTools (and will eventually
+    block it outright). This backend is meant to be reached from the public
+    frontend running on the same machine, so we opt in here.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.headers.get("access-control-request-private-network") == "true":
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
+
+# Registered BEFORE CORSMiddleware so it wraps it (outer layer) and can still
+# attach the header to CORSMiddleware's own auto-generated preflight (OPTIONS)
+# responses.
+app.add_middleware(PrivateNetworkAccessMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
