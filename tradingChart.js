@@ -164,7 +164,7 @@ const TradingChart = (() => {
 
         let candles = null;
         try {
-            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(6000) });
+            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(6000), targetAddressSpace: 'local' });
             if (res.ok) {
                 const json = await res.json();
                 if (json && Array.isArray(json.data) && json.data.length > 5) {
@@ -212,6 +212,19 @@ const TradingChart = (() => {
 
         state.drawings = [];
         redrawDrawings();
+
+        // Hand the real last close back to the caller (TradingEngine) so its
+        // simulated live-tick price walk can anchor to the actual fetched
+        // price instead of a hardcoded fallback — otherwise the "Price
+        // Action" backtest chart and this live chart would slowly disagree
+        // on what the current price even is.
+        return { ticker, lastClose: last ? last.close : null, dayOpen: last ? last.open : null };
+    }
+
+    function getLastClose() {
+        if (!state.candles.length) return null;
+        const last = state.candles[state.candles.length - 1];
+        return { ticker: state.ticker, lastClose: last.close, dayOpen: last.open };
     }
 
     function setSymbolHeader(ticker, price, prevClose) {
@@ -619,7 +632,8 @@ const TradingChart = (() => {
         loadSymbol,
         updateLastPrice,
         renderOverlays,
-        renderOscillatorPane
+        renderOscillatorPane,
+        getLastClose
     });
 })();
 

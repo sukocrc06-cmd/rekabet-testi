@@ -408,7 +408,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('http://127.0.0.1:8000/api/v1/backtest/export', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reqBody)
+            body: JSON.stringify(reqBody),
+            targetAddressSpace: 'local'
         })
         .then(res => {
             if (!res.ok) throw new Error('PDF generation failed');
@@ -596,7 +597,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     ticker: state.selectedAsset,
                     engine_id: state.engine
-                })
+                }),
+                targetAddressSpace: 'local'
             })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP Error ${res.status}: Backend server returned error response`);
@@ -1068,8 +1070,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // deployment), which Chrome flags under its "Private Network
         // Access" policy. Kept on a slow interval (not every second) to
         // minimize that footprint; the backend also opts in explicitly via
-        // the Access-Control-Allow-Private-Network response header.
-        fetch('http://127.0.0.1:8000/api/v1/health')
+        // the Access-Control-Allow-Private-Network response header. It also
+        // sets targetAddressSpace: 'local' so Chrome correctly recognizes
+        // this as a local-network request under its Local Network Access
+        // (LNA) permission model.
+        fetch('http://127.0.0.1:8000/api/v1/health', { targetAddressSpace: 'local' })
             .then(res => {
                 if (!res.ok) throw new Error('Unhealthy status');
                 return res.json();

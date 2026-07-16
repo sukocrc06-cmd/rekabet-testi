@@ -178,7 +178,7 @@ const TradingEngine = (() => {
         });
     }
 
-    function selectSymbol(symbol) {
+    async function selectSymbol(symbol) {
         state.activeSymbol = symbol;
 
         document.querySelectorAll('.watchlist-row').forEach(row => {
@@ -186,19 +186,34 @@ const TradingEngine = (() => {
         });
 
         // Keep the (hidden) legacy <select> in sync so the existing backtest
-        // pipeline (app.js) continues to auto-run on symbol changes.
+        // pipeline (app.js) continues to auto-run on symbol changes. This is
+        // what feeds the "Price Action" (Analiz Paneli) chart with real
+        // fetched OHLCV data.
         const select = byId('stock-select');
         if (select) {
             select.value = symbol;
             select.dispatchEvent(new Event('change'));
         }
 
-        if (window.TradingChart) {
-            window.TradingChart.loadSymbol(symbol);
-        }
-
         updateActiveSymbolTicket();
         renderPositions();
+
+        if (window.TradingChart) {
+            const chartInfo = await window.TradingChart.loadSymbol(symbol);
+            // Re-anchor the simulated demo tick price to the real last close
+            // that was just fetched, instead of the hardcoded STOCK_PROFILES
+            // fallback seed. Without this, the live trading chart drifts
+            // toward a fabricated price while the Price Action (backtest)
+            // chart — which uses the real fetched data — keeps showing the
+            // actual last close, so the two charts silently disagree on
+            // "the current price" for the same symbol.
+            if (chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
+                priceProfiles[symbol].price = chartInfo.lastClose;
+                priceProfiles[symbol].dayOpen = chartInfo.lastClose;
+                renderWatchlistPrices();
+                updateActiveSymbolTicket();
+            }
+        }
     }
 
     /* ════════════════════════════════════════════════
