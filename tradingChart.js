@@ -404,9 +404,11 @@ const TradingChart = (() => {
         if (!openBtn || !backdrop) return;
 
         const open = () => {
-            // Only one modal at a time — close the alerts modal if it's open.
+            // Only one modal at a time — close any other modal that's open.
             const alertsBackdrop = byId('alerts-modal-backdrop');
             if (alertsBackdrop) alertsBackdrop.classList.remove('open');
+            const sltpBackdrop = byId('sltp-modal-backdrop');
+            if (sltpBackdrop) sltpBackdrop.classList.remove('open');
 
             backdrop.classList.add('open');
             if (searchInput) { searchInput.value = ''; filterIndicatorList(''); searchInput.focus(); }

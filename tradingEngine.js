@@ -122,6 +122,7 @@ const TradingEngine = (() => {
             maybePushRecentTrade(state.activeSymbol);
         }
 
+        checkStopLossTakeProfit();
         checkAlerts();
     }
 
@@ -412,9 +413,11 @@ const TradingEngine = (() => {
         if (!backdrop || !openBtn) return;
 
         const open = () => {
-            // Only one modal at a time — close the indicators modal if it's open.
+            // Only one modal at a time — close any other modal that's open.
             const indBackdrop = byId('indicator-modal-backdrop');
             if (indBackdrop) indBackdrop.classList.remove('open');
+            const sltpBackdrop = byId('sltp-modal-backdrop');
+            if (sltpBackdrop) sltpBackdrop.classList.remove('open');
 
             populateAlertSymbolSelect();
             if (priceInput && state.activeSymbol) {
@@ -572,6 +575,8 @@ const TradingEngine = (() => {
         const limitInput = byId('qt-limit-price');
         const submitBtn = byId('qt-submit');
         const resetBtn = byId('qt-reset-portfolio');
+        const sltpToggle = byId('qt-sltp-toggle');
+        const sltpRow = byId('qt-sltp-row');
 
         if (buyTab) buyTab.addEventListener('click', () => setSide('BUY'));
         if (sellTab) sellTab.addEventListener('click', () => setSide('SELL'));
@@ -579,6 +584,11 @@ const TradingEngine = (() => {
         if (limitTab) limitTab.addEventListener('click', () => setOrderType('LIMIT'));
         if (qtyInput) qtyInput.addEventListener('input', updateEstimate);
         if (limitInput) limitInput.addEventListener('input', updateEstimate);
+        if (sltpToggle && sltpRow) {
+            sltpToggle.addEventListener('change', () => {
+                sltpRow.style.display = sltpToggle.checked ? 'flex' : 'none';
+            });
+        }
 
         document.querySelectorAll('.qty-pct-btn').forEach(btn => {
             btn.addEventListener('click', () => applyQtyPct(parseInt(btn.dataset.pct, 10)));
@@ -709,6 +719,28 @@ const TradingEngine = (() => {
         if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); return; }
         if (!price || price <= 0) { showToast('Fiyat bilgisi alınamadı.'); return; }
 
+        // Optional Stop-Loss / Take-Profit attached to the position this order opens/adds to.
+        const sltpToggle = byId('qt-sltp-toggle');
+        let slPrice = null, tpPrice = null;
+        if (sltpToggle && sltpToggle.checked) {
+            const slInput = byId('qt-sl-price');
+            const tpInput = byId('qt-tp-price');
+            slPrice = slInput && slInput.value ? Number(slInput.value) : null;
+            tpPrice = tpInput && tpInput.value ? Number(tpInput.value) : null;
+
+            // Sanity: SL/TP must sit on the correct side of the intended new direction,
+            // otherwise it would trigger immediately (or never make sense).
+            const willBeLong = state.side === 'BUY';
+            if (slPrice !== null && ((willBeLong && slPrice >= price) || (!willBeLong && slPrice <= price))) {
+                showToast(`Stop-Loss fiyatı ${willBeLong ? 'giriş fiyatının altında' : 'giriş fiyatının üzerinde'} olmalı.`);
+                return;
+            }
+            if (tpPrice !== null && ((willBeLong && tpPrice <= price) || (!willBeLong && tpPrice >= price))) {
+                showToast(`Take-Profit fiyatı ${willBeLong ? 'giriş fiyatının üzerinde' : 'giriş fiyatının altında'} olmalı.`);
+                return;
+            }
+        }
+
         if (state.orderType === 'LIMIT') {
             // Simplified: simulate immediate fill against current market for demo purposes,
             // since this is a sandbox with no real order book.
@@ -721,11 +753,29 @@ const TradingEngine = (() => {
             return;
         }
 
+        // Attach SL/TP only if this order actually opened/added to a position in its
+        // own direction (not just reducing/closing an opposite one).
+        if ((slPrice !== null || tpPrice !== null)) {
+            const pos = portfolio.positions[state.activeSymbol];
+            const expectedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
+            if (pos && pos.side === expectedSide) {
+                if (slPrice !== null) pos.sl = slPrice;
+                if (tpPrice !== null) pos.tp = tpPrice;
+                savePortfolio();
+            }
+        }
+
         renderPositions();
         renderOrders();
         renderAccountSummary();
         showToast(`${state.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${qty} adet ${state.activeSymbol} @ ₺${fmtPrice(price)}`);
         if (qtyInput) qtyInput.value = '';
+        if (sltpToggle) { sltpToggle.checked = false; }
+        const sltpRow = byId('qt-sltp-row');
+        if (sltpRow) sltpRow.style.display = 'none';
+        const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
+        if (slInput) slInput.value = '';
+        if (tpInput) tpInput.value = '';
         updateEstimate();
     }
 
@@ -798,7 +848,7 @@ const TradingEngine = (() => {
         return { ok: true };
     }
 
-    function closePosition(symbol) {
+    function closePosition(symbol, reason) {
         const pos = portfolio.positions[symbol];
         if (!pos) return;
         const price = getPrice(symbol);
@@ -809,10 +859,123 @@ const TradingEngine = (() => {
             renderPositions();
             renderOrders();
             renderAccountSummary();
-            showToast(`${symbol} pozisyonu kapatıldı.`);
+            const msg = reason === 'SL'
+                ? `🛑 ${symbol} Stop-Loss tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
+                : reason === 'TP'
+                    ? `🎯 ${symbol} Take-Profit tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
+                    : `${symbol} pozisyonu kapatıldı.`;
+            showToast(msg);
         }
     }
     window.__optipulseClosePosition = closePosition; // used by inline onclick in rendered rows
+
+    /* ════════════════════════════════════════════════
+       Stop-Loss / Take-Profit auto-execution
+       ════════════════════════════════════════════════ */
+
+    function checkStopLossTakeProfit() {
+        Object.keys(portfolio.positions).forEach(symbol => {
+            const pos = portfolio.positions[symbol];
+            if (!pos.sl && !pos.tp) return;
+            const price = getPrice(symbol);
+            if (!price) return;
+            if (pos.side === 'LONG') {
+                if (pos.sl && price <= pos.sl) { closePosition(symbol, 'SL'); return; }
+                if (pos.tp && price >= pos.tp) { closePosition(symbol, 'TP'); return; }
+            } else {
+                if (pos.sl && price >= pos.sl) { closePosition(symbol, 'SL'); return; }
+                if (pos.tp && price <= pos.tp) { closePosition(symbol, 'TP'); return; }
+            }
+        });
+    }
+
+    function setPositionSLTP(symbol, slPrice, tpPrice) {
+        const pos = portfolio.positions[symbol];
+        if (!pos) return false;
+        pos.sl = slPrice || null;
+        pos.tp = tpPrice || null;
+        savePortfolio();
+        renderPositions();
+        return true;
+    }
+
+    function setupSltpModal() {
+        const backdrop = byId('sltp-modal-backdrop');
+        const closeBtn = byId('btn-close-sltp');
+        const saveBtn = byId('btn-sltp-save');
+        const clearBtn = byId('btn-sltp-clear');
+        const symbolEl = byId('sltp-modal-symbol');
+        const infoEl = byId('sltp-modal-info');
+        const slInput = byId('sltp-modal-sl');
+        const tpInput = byId('sltp-modal-tp');
+        if (!backdrop) return;
+
+        let editingSymbol = null;
+
+        const close = () => backdrop.classList.remove('open');
+
+        window.__optipulseOpenSltp = (symbol) => {
+            const pos = portfolio.positions[symbol];
+            if (!pos) return;
+            editingSymbol = symbol;
+            const current = getPrice(symbol);
+            if (symbolEl) symbolEl.textContent = symbol;
+            if (infoEl) {
+                infoEl.innerHTML = `Yön: <b>${pos.side}</b> · Adet: <b>${pos.qty}</b> · Ort. Fiyat: <b>₺${fmtPrice(pos.avgPrice)}</b> · Güncel: <b>₺${fmtPrice(current)}</b>`;
+            }
+            if (slInput) slInput.value = pos.sl ? pos.sl : '';
+            if (tpInput) tpInput.value = pos.tp ? pos.tp : '';
+
+            // Close other modals so only one is open at a time.
+            const indBackdrop = byId('indicator-modal-backdrop');
+            if (indBackdrop) indBackdrop.classList.remove('open');
+            const alertsBackdrop = byId('alerts-modal-backdrop');
+            if (alertsBackdrop) alertsBackdrop.classList.remove('open');
+
+            backdrop.classList.add('open');
+        };
+
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                if (!editingSymbol) return;
+                const pos = portfolio.positions[editingSymbol];
+                if (!pos) { close(); return; }
+                const current = getPrice(editingSymbol);
+                const slVal = slInput && slInput.value ? Number(slInput.value) : null;
+                const tpVal = tpInput && tpInput.value ? Number(tpInput.value) : null;
+
+                if (slVal !== null && current) {
+                    const invalid = pos.side === 'LONG' ? slVal >= current : slVal <= current;
+                    if (invalid) { showToast(`Stop-Loss fiyatı ${pos.side === 'LONG' ? 'güncel fiyatın altında' : 'güncel fiyatın üzerinde'} olmalı.`); return; }
+                }
+                if (tpVal !== null && current) {
+                    const invalid = pos.side === 'LONG' ? tpVal <= current : tpVal >= current;
+                    if (invalid) { showToast(`Take-Profit fiyatı ${pos.side === 'LONG' ? 'güncel fiyatın üzerinde' : 'güncel fiyatın altında'} olmalı.`); return; }
+                }
+
+                setPositionSLTP(editingSymbol, slVal, tpVal);
+                showToast(`${editingSymbol} için SL/TP güncellendi.`);
+                close();
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                if (!editingSymbol) return;
+                setPositionSLTP(editingSymbol, null, null);
+                if (slInput) slInput.value = '';
+                if (tpInput) tpInput.value = '';
+                showToast(`${editingSymbol} için SL/TP temizlendi.`);
+                close();
+            });
+        }
+    }
 
     /* ════════════════════════════════════════════════
        Rendering: positions / orders / account
@@ -835,14 +998,24 @@ const TradingEngine = (() => {
                 : (pos.avgPrice - current) * pos.qty;
             const pnlClass = unrealized >= 0 ? 'profit-text' : 'loss-text';
             const sideClass = pos.side === 'LONG' ? 'badge-long' : 'badge-short';
+            const hasSltp = !!(pos.sl || pos.tp);
+            const sltpParts = [];
+            if (pos.sl) sltpParts.push('SL ₺' + fmtPrice(pos.sl));
+            if (pos.tp) sltpParts.push('TP ₺' + fmtPrice(pos.tp));
+            const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             html += `
                 <tr>
-                    <td class="font-bold">${symbol}</td>
+                    <td class="font-bold">${symbol}${sltpSub}</td>
                     <td><span class="badge ${sideClass}">${pos.side}</span></td>
                     <td class="font-mono">${pos.qty}</td>
                     <td class="font-mono">₺${fmtPrice(pos.avgPrice)}</td>
                     <td class="font-mono ${pnlClass}">${unrealized >= 0 ? '+' : ''}${fmtTRY(unrealized)}</td>
-                    <td><button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}')">Kapat</button></td>
+                    <td>
+                        <div class="pos-actions-cell">
+                            <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}')" title="Stop-Loss / Take-Profit">SL/TP</button>
+                            <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}')">Kapat</button>
+                        </div>
+                    </td>
                 </tr>
             `;
         });
@@ -947,6 +1120,7 @@ const TradingEngine = (() => {
         setupExchangeSelector();
         setupPanelSubtabs();
         setupAlertsModal();
+        setupSltpModal();
         renderPositions();
         renderOrders();
         renderAccountSummary();

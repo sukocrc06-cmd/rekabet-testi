@@ -2013,6 +2013,75 @@ body.chart-maximized-active {
     background-color: rgba(244, 67, 54, 0.1);
 }
 
+/* ────────── Stop-Loss / Take-Profit ────────── */
+
+.qt-sltp-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.qt-sltp-field {
+    flex: 1;
+}
+
+.qt-sltp-field label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.sltp-modal-info {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    line-height: 1.6;
+}
+
+.pos-sltp-sub {
+    font-size: 9px;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+.pos-actions-cell {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.btn-sltp-edit {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--gold-border);
+    color: var(--gold);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-sltp-edit:hover {
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
+}
+
+.btn-sltp-edit.has-sltp {
+    background-color: rgba(255, 193, 7, 0.12);
+    border-color: rgba(255, 193, 7, 0.5);
+    color: #FFC107;
+}
+
 /* ────────── Drawing right-click context menu ────────── */
 
 .drawing-context-menu {
