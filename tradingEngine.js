@@ -115,6 +115,12 @@ const TradingEngine = (() => {
     }
 
     function tickPrices() {
+        // BIST kapalıyken (hafta sonu veya 09:55-18:00 TRT seans dışında)
+        // fiyatlar simüle edilmeyi durdurur — son kapanış fiyatında donuk kalır,
+        // tıpkı gerçek bir borsa gibi. Aksi halde mumlar piyasa kapalıyken de
+        // hareket etmeye devam ediyordu (kullanıcı tarafından bildirilen hata).
+        if (DC.isMarketOpenNow && !DC.isMarketOpenNow()) return;
+
         Object.keys(priceProfiles).forEach(sym => {
             const p = priceProfiles[sym];
             const meanReversion = (p.dayOpen - p.price) * 0.02;

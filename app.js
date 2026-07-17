@@ -1109,32 +1109,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let isMarketOpen = true;
 
     function checkMarketStatus() {
-        const now = new Date();
-        
-        // Extract weekday and time parameters in Europe/Istanbul timezone
-        const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', weekday: 'short' });
-        const hourFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', hour: 'numeric', hour12: false });
-        const minFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', minute: 'numeric' });
-        
-        const weekday = dayFormatter.format(now);
-        const hour = parseInt(hourFormatter.format(now), 10);
-        const minute = parseInt(minFormatter.format(now), 10);
-        
-        const timeInMinutes = hour * 60 + minute;
-        const openTime = 9 * 60 + 55; // 09:55 TRT
-        const closeTime = 18 * 60;    // 18:00 TRT
-        
-        const isWeekend = weekday === 'Sat' || weekday === 'Sun';
-        const isTradingHours = timeInMinutes >= openTime && timeInMinutes < closeTime;
-        
-        if (isWeekend || !isTradingHours) {
-            isMarketOpen = false;
-        } else {
-            isMarketOpen = true;
-        }
-        
-        console.log(`[MarketStatus] Ankara Time: ${hour}:${minute.toString().padStart(2, '0')} TRT (${weekday}). Open: ${isMarketOpen}`);
-        
+        // Single source of truth lives in DataController.isMarketOpenNow() so the
+        // header badge and the live price-tick engine (tradingEngine.js) can never
+        // disagree about whether BIST is in session.
+        isMarketOpen = window.DataController && window.DataController.isMarketOpenNow
+            ? window.DataController.isMarketOpenNow()
+            : true;
+
         if (el.marketStatusVal) {
             if (isMarketOpen) {
                 el.marketStatusVal.innerText = 'OPEN';

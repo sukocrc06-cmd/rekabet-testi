@@ -135,6 +135,30 @@ const DataController = (() => {
         {"symbol": "ZOREN", "name": "Zorlu Enerji"}
     ];
 
+    /* ──────────────── BIST Market Hours (shared single source of truth) ────────────────
+     * BIST equity session: Mon–Fri, 09:55–18:00 TRT (Europe/Istanbul). Used both by the
+     * header MARKET status badge (app.js) and by the live price-tick engine
+     * (tradingEngine.js) so simulated prices never move while the market is closed. */
+    function isMarketOpenNow() {
+        const now = new Date();
+        const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', weekday: 'short' });
+        const hourFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', hour: 'numeric', hour12: false });
+        const minFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Istanbul', minute: 'numeric' });
+
+        const weekday = dayFormatter.format(now);
+        const hour = parseInt(hourFormatter.format(now), 10);
+        const minute = parseInt(minFormatter.format(now), 10);
+
+        const timeInMinutes = hour * 60 + minute;
+        const openTime = 9 * 60 + 55;  // 09:55 TRT
+        const closeTime = 18 * 60;     // 18:00 TRT
+
+        const isWeekend = weekday === 'Sat' || weekday === 'Sun';
+        const isTradingHours = timeInMinutes >= openTime && timeInMinutes < closeTime;
+
+        return !isWeekend && isTradingHours;
+    }
+
     /* ──────────────── Seeded PRNG (Mulberry32) ──────────────── */
     function mulberry32(seed) {
         return () => {
@@ -1245,6 +1269,7 @@ const DataController = (() => {
         STOCK_PROFILES,
         BIST100,
         TRADING_DAYS,
+        isMarketOpenNow,
 
         // Data generation
         generateOHLCV,
