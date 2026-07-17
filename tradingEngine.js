@@ -121,6 +121,8 @@ const TradingEngine = (() => {
             renderOrderBook(state.activeSymbol);
             maybePushRecentTrade(state.activeSymbol);
         }
+
+        checkAlerts();
     }
 
     function getPrice(symbol) {
@@ -247,6 +249,217 @@ const TradingEngine = (() => {
                 if (tab.dataset.panelTab === 'trades' && state.activeSymbol) renderRecentTrades(state.activeSymbol);
             });
         });
+    }
+
+    /* ════════════════════════════════════════════════
+       Price Alerts (fiyat alarmları)
+       ════════════════════════════════════════════════ */
+
+    const ALERTS_STORAGE_KEY = 'optipulselab_price_alerts_v1';
+    let priceAlerts = [];
+
+    function loadAlerts() {
+        try {
+            const raw = localStorage.getItem(ALERTS_STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) return parsed;
+            }
+        } catch (e) { /* ignore corrupt storage */ }
+        return [];
+    }
+
+    function saveAlerts() {
+        try { localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(priceAlerts)); } catch (e) { /* quota / private mode */ }
+    }
+
+    function addAlert(symbol, condition, targetPrice) {
+        if (!symbol || !targetPrice || targetPrice <= 0) return null;
+        const alert = {
+            id: 'alrt_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            symbol,
+            condition, // 'above' | 'below'
+            targetPrice: +targetPrice,
+            createdAt: Date.now(),
+            triggered: false,
+            triggeredAt: null,
+            triggeredPrice: null
+        };
+        priceAlerts.push(alert);
+        saveAlerts();
+        renderAlertsList();
+        updateAlertBadge();
+        return alert;
+    }
+
+    function deleteAlert(id) {
+        priceAlerts = priceAlerts.filter(a => a.id !== id);
+        saveAlerts();
+        renderAlertsList();
+        updateAlertBadge();
+    }
+
+    function checkAlerts() {
+        if (!priceAlerts.length) return;
+        let firedAny = false;
+        priceAlerts.forEach(a => {
+            if (a.triggered) return;
+            const price = getPrice(a.symbol);
+            if (price === null) return;
+            const hit = a.condition === 'above' ? price >= a.targetPrice : price <= a.targetPrice;
+            if (!hit) return;
+
+            a.triggered = true;
+            a.triggeredAt = Date.now();
+            a.triggeredPrice = price;
+            firedAny = true;
+
+            const dirLabel = a.condition === 'above' ? 'üzerine çıktı' : 'altına indi';
+            showToast(`🔔 ${a.symbol} hedef fiyatı ₺${fmtPrice(a.targetPrice)} seviyesinin ${dirLabel} (şu an ₺${fmtPrice(price)})`);
+            flashAlertBadge();
+
+            if (window.Notification && Notification.permission === 'granted') {
+                try {
+                    new Notification('OptiPulseLab — Fiyat Alarmı', {
+                        body: `${a.symbol} ₺${fmtPrice(a.targetPrice)} seviyesinin ${dirLabel}. Güncel fiyat: ₺${fmtPrice(price)}`
+                    });
+                } catch (e) { /* notifications unsupported / blocked in this browser */ }
+            }
+        });
+        if (firedAny) {
+            saveAlerts();
+            renderAlertsList();
+            updateAlertBadge();
+        }
+    }
+
+    function updateAlertBadge() {
+        const badge = byId('alert-count-badge');
+        if (!badge) return;
+        const activeCount = priceAlerts.filter(a => !a.triggered).length;
+        if (activeCount > 0) {
+            badge.textContent = String(activeCount);
+            badge.style.display = 'inline-flex';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    let alertFlashTimer = null;
+    function flashAlertBadge() {
+        const btn = byId('btn-open-alerts');
+        if (!btn) return;
+        btn.classList.remove('alert-flash');
+        // force reflow so the animation restarts if it's already mid-flash
+        void btn.offsetWidth;
+        btn.classList.add('alert-flash');
+        clearTimeout(alertFlashTimer);
+        alertFlashTimer = setTimeout(() => btn.classList.remove('alert-flash'), 1700);
+    }
+
+    function alertRowHtml(a) {
+        const dirLabel = a.condition === 'above' ? '≥' : '≤';
+        const statusLabel = a.triggered ? 'Tetiklendi' : 'Aktif';
+        return '<div class="alert-item ' + (a.triggered ? 'triggered' : '') + '">' +
+            '<div class="alert-item-main">' +
+                '<span class="alert-item-symbol">' + a.symbol + '</span>' +
+                '<span class="alert-item-cond">' + dirLabel + ' ₺' + fmtPrice(a.targetPrice) + '</span>' +
+                '<span class="alert-item-status">' + statusLabel + '</span>' +
+            '</div>' +
+            '<button type="button" class="alert-delete-btn" data-id="' + a.id + '" title="Sil">×</button>' +
+        '</div>';
+    }
+
+    function renderAlertsList() {
+        const activeEl = byId('active-alerts-list');
+        const triggeredEl = byId('triggered-alerts-list');
+        const triggeredSection = byId('triggered-alerts-section');
+        const emptyMsg = byId('alerts-empty-msg');
+        if (!activeEl) return;
+
+        const active = priceAlerts.filter(a => !a.triggered).sort((a, b) => b.createdAt - a.createdAt);
+        const triggered = priceAlerts.filter(a => a.triggered).sort((a, b) => b.triggeredAt - a.triggeredAt);
+
+        activeEl.innerHTML = active.map(alertRowHtml).join('');
+        if (emptyMsg) emptyMsg.style.display = active.length ? 'none' : 'block';
+
+        if (triggeredSection) triggeredSection.style.display = triggered.length ? 'block' : 'none';
+        if (triggeredEl) triggeredEl.innerHTML = triggered.map(alertRowHtml).join('');
+
+        document.querySelectorAll('.alert-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteAlert(btn.dataset.id));
+        });
+    }
+
+    function populateAlertSymbolSelect() {
+        const sel = byId('alert-symbol-select');
+        if (!sel || !DC) return;
+        const prevValue = sel.value;
+        sel.innerHTML = DC.BIST100.map(s => '<option value="' + s.symbol + '">' + s.symbol + ' — ' + s.name + '</option>').join('');
+        sel.value = state.activeSymbol && DC.BIST100.some(s => s.symbol === state.activeSymbol)
+            ? state.activeSymbol
+            : (prevValue || sel.value);
+    }
+
+    function setupAlertsModal() {
+        const backdrop = byId('alerts-modal-backdrop');
+        const openBtn = byId('btn-open-alerts');
+        const closeBtn = byId('btn-close-alerts');
+        const addBtn = byId('btn-add-alert');
+        const priceInput = byId('alert-target-price');
+        const notifRow = byId('alert-notif-toggle-row');
+        const notifChk = byId('alert-notif-checkbox');
+        if (!backdrop || !openBtn) return;
+
+        const open = () => {
+            // Only one modal at a time — close the indicators modal if it's open.
+            const indBackdrop = byId('indicator-modal-backdrop');
+            if (indBackdrop) indBackdrop.classList.remove('open');
+
+            populateAlertSymbolSelect();
+            if (priceInput && state.activeSymbol) {
+                const p = getPrice(state.activeSymbol);
+                if (p) priceInput.placeholder = 'Örn: ' + fmtPrice(p);
+            }
+            if (notifRow && window.Notification) {
+                notifRow.style.display = 'flex';
+                if (notifChk) notifChk.checked = Notification.permission === 'granted';
+            }
+            renderAlertsList();
+            backdrop.classList.add('open');
+        };
+        const close = () => backdrop.classList.remove('open');
+
+        openBtn.addEventListener('click', open);
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+
+        if (notifChk) {
+            notifChk.addEventListener('change', () => {
+                if (notifChk.checked && window.Notification && Notification.permission !== 'granted') {
+                    Notification.requestPermission().then(perm => {
+                        notifChk.checked = perm === 'granted';
+                        if (perm !== 'granted') showToast('Tarayıcı bildirimlerine izin verilmedi.');
+                    });
+                }
+            });
+        }
+
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                const symbol = byId('alert-symbol-select')?.value;
+                const condition = byId('alert-condition-select')?.value || 'above';
+                const targetPrice = parseFloat(priceInput?.value);
+                if (!symbol) { showToast('Bir sembol seçin.'); return; }
+                if (!targetPrice || targetPrice <= 0) { showToast('Geçerli bir hedef fiyat girin.'); return; }
+                addAlert(symbol, condition, targetPrice);
+                if (priceInput) priceInput.value = '';
+                showToast(`Alarm oluşturuldu: ${symbol} ${condition === 'above' ? '≥' : '≤'} ₺${fmtPrice(targetPrice)}`);
+            });
+        }
     }
 
     /* ════════════════════════════════════════════════
@@ -725,6 +938,7 @@ const TradingEngine = (() => {
         }
         priceProfiles = buildPriceProfiles();
         portfolio = loadPortfolio();
+        priceAlerts = loadAlerts();
 
         renderWatchlistRows();
         renderWatchlistPrices();
@@ -732,9 +946,11 @@ const TradingEngine = (() => {
         setupTicket();
         setupExchangeSelector();
         setupPanelSubtabs();
+        setupAlertsModal();
         renderPositions();
         renderOrders();
         renderAccountSummary();
+        updateAlertBadge();
 
         setInterval(tickPrices, TICK_MS);
 

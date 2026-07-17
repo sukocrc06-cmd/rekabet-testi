@@ -213,6 +213,12 @@
                             <span>Göstergeler</span>
                         </button>
 
+                        <button type="button" class="tv-indicators-btn" id="btn-open-alerts" title="Fiyat Alarmları">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                            <span>Alarmlar</span>
+                            <span class="alert-count-badge" id="alert-count-badge" style="display:none;">0</span>
+                        </button>
+
                         <div class="tv-overlay-legend" id="tv-overlay-legend"></div>
 
                         <button type="button" class="btn btn-outline" id="btn-toggle-analytics" style="padding: 6px 12px; font-size: 11px; height: 30px;">
@@ -572,6 +578,47 @@
                 </div>
 
                 <div class="indicator-modal-empty" id="indicator-modal-empty" style="display:none;">Eşleşen gösterge bulunamadı.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Price Alerts modal -->
+    <div class="indicator-modal-backdrop" id="alerts-modal-backdrop">
+        <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Fiyat Alarmları">
+            <div class="indicator-modal-header">
+                <h3>Fiyat Alarmları</h3>
+                <button type="button" class="indicator-modal-close" id="btn-close-alerts" aria-label="Kapat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="indicator-modal-body">
+                <div class="indicator-modal-category" data-category-label="yeni alarm ekle">
+                    <div class="indicator-subgroup-label">Yeni Alarm</div>
+                    <div class="alert-form-row">
+                        <select id="alert-symbol-select" class="form-input alert-symbol-select" aria-label="Sembol"></select>
+                        <select id="alert-condition-select" class="form-input alert-condition-select" aria-label="Koşul">
+                            <option value="above">Üzerine çıkınca</option>
+                            <option value="below">Altına inince</option>
+                        </select>
+                        <input type="number" id="alert-target-price" class="form-input alert-target-input" min="0" step="0.01" placeholder="Hedef fiyat (₺)" aria-label="Hedef fiyat">
+                        <button type="button" class="btn-chip-action alert-add-btn" id="btn-add-alert">Ekle</button>
+                    </div>
+                    <label class="alert-notif-toggle-row" id="alert-notif-toggle-row" style="display:none;">
+                        <input type="checkbox" id="alert-notif-checkbox">
+                        <span>Tarayıcı bildirimi ile de uyar</span>
+                    </label>
+                </div>
+
+                <div class="indicator-modal-category" data-category-label="aktif alarmlar">
+                    <div class="indicator-subgroup-label">Aktif Alarmlar</div>
+                    <div class="alerts-list" id="active-alerts-list"></div>
+                    <div class="alerts-empty" id="alerts-empty-msg">Henüz alarm oluşturulmadı.</div>
+                </div>
+
+                <div class="indicator-modal-category" data-category-label="tetiklenen alarmlar" id="triggered-alerts-section" style="display:none;">
+                    <div class="indicator-subgroup-label">Tetiklenen Alarmlar</div>
+                    <div class="alerts-list" id="triggered-alerts-list"></div>
+                </div>
             </div>
         </div>
     </div>
