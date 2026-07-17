@@ -55,8 +55,11 @@ const TradingChart = (() => {
         activeTool: 'cursor',
         drawings: [],          // committed shapes
         pendingShape: null,    // in-progress shape while dragging
+        selectedDrawingIndex: -1,
         dayOpenPrice: null
     };
+
+    let copiedDrawing = null;
 
     /* ────────── Utilities ────────── */
 
@@ -111,6 +114,8 @@ const TradingChart = (() => {
         setupToolbar();
         setupOscillatorSelect();
         setupOverlayCheckboxes();
+        setupIndicatorModal();
+        setupDrawingSelection();
         setupResize();
 
         window.addEventListener('resize', () => {
@@ -211,6 +216,7 @@ const TradingChart = (() => {
         setSymbolHeader(ticker, last ? last.close : null, prev ? prev.close : null);
 
         state.drawings = [];
+        state.selectedDrawingIndex = -1;
         redrawDrawings();
 
         // Hand the real last close back to the caller (TradingEngine) so its
@@ -320,18 +326,37 @@ const TradingChart = (() => {
         return el ? el.checked : false;
     }
 
+    // TradingView-style removable chips: label -> {color, checkboxId}
+    const LEGEND_CHIP_DEFS = [
+        { key: 'sma20',     label: 'SMA20',      colorKey: 'sma20',  chk: 'chk-sma20' },
+        { key: 'sma50',     label: 'SMA50',      colorKey: 'sma50',  chk: 'chk-sma50' },
+        { key: 'sma200',    label: 'SMA200',     colorKey: 'sma200', chk: 'chk-sma200' },
+        { key: 'ema9',      label: 'EMA9',       colorKey: 'ema9',   chk: 'chk-ema9' },
+        { key: 'ema21',     label: 'EMA21',      colorKey: 'ema21',  chk: 'chk-ema21' },
+        { key: 'bollinger', label: 'BB(20,2)',   colorKey: 'bbLine', chk: 'chk-bollinger' },
+        { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' }
+    ];
+
     function updateLegend(vis) {
         const legend = byId('tv-overlay-legend');
         if (!legend) return;
-        const items = [];
-        if (vis.sma20)  items.push('<span style="color:' + COLORS.sma20 + '">■ SMA20</span>');
-        if (vis.sma50)  items.push('<span style="color:' + COLORS.sma50 + '">■ SMA50</span>');
-        if (vis.sma200) items.push('<span style="color:' + COLORS.sma200 + '">■ SMA200</span>');
-        if (vis.ema9)   items.push('<span style="color:' + COLORS.ema9 + '">■ EMA9</span>');
-        if (vis.ema21)  items.push('<span style="color:' + COLORS.ema21 + '">■ EMA21</span>');
-        if (vis.bollinger) items.push('<span style="color:' + COLORS.bbLine + '">■ BB(20,2)</span>');
-        if (vis.vwap)   items.push('<span style="color:' + COLORS.vwap + '">■ VWAP</span>');
-        legend.innerHTML = items.join(' &nbsp; ');
+        legend.innerHTML = '';
+        LEGEND_CHIP_DEFS.forEach(def => {
+            if (!vis[def.key]) return;
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'tv-indicator-chip';
+            chip.dataset.chk = def.chk;
+            chip.title = 'Kaldırmak için tıkla';
+            chip.innerHTML = '<span class="tv-chip-dot" style="background:' + COLORS[def.colorKey] + '"></span>' +
+                '<span>' + def.label + '</span>' +
+                '<span class="tv-chip-remove">×</span>';
+            chip.addEventListener('click', () => {
+                const el = byId(def.chk);
+                if (el) { el.checked = false; el.dispatchEvent(new Event('change')); }
+            });
+            legend.appendChild(chip);
+        });
     }
 
     function setupOverlayCheckboxes() {
@@ -349,6 +374,120 @@ const TradingChart = (() => {
         sel.addEventListener('change', () => {
             state.oscillator = sel.value;
             renderOscillatorPane();
+        });
+    }
+
+    // TradingView-style clickable oscillator list inside the indicator modal.
+    // Drives the (now hidden) native <select id="oscillator-type-select"> so
+    // the rest of the oscillator-rendering logic doesn't need to change.
+    function setupOscillatorButtons() {
+        const list = byId('indicator-oscillator-list');
+        const sel = byId('oscillator-type-select');
+        if (!list || !sel) return;
+        list.querySelectorAll('.indicator-osc-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                list.querySelectorAll('.indicator-osc-item').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                sel.value = btn.dataset.osc;
+                sel.dispatchEvent(new Event('change'));
+            });
+        });
+    }
+
+    /* ────────── Indicator picker modal (open/close + search) ────────── */
+
+    function setupIndicatorModal() {
+        const openBtn = byId('btn-open-indicators');
+        const closeBtn = byId('btn-close-indicators');
+        const backdrop = byId('indicator-modal-backdrop');
+        const searchInput = byId('indicator-search-input');
+        if (!openBtn || !backdrop) return;
+
+        const open = () => {
+            backdrop.classList.add('open');
+            if (searchInput) { searchInput.value = ''; filterIndicatorList(''); searchInput.focus(); }
+        };
+        const close = () => backdrop.classList.remove('open');
+
+        openBtn.addEventListener('click', open);
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => filterIndicatorList(searchInput.value));
+        }
+
+        setupOscillatorButtons();
+        setupIndicatorCopyPaste();
+    }
+
+    function filterIndicatorList(query) {
+        const q = query.trim().toLowerCase();
+        const items = document.querySelectorAll('.indicator-search-item');
+        let anyVisible = false;
+        items.forEach(item => {
+            const haystack = (item.dataset.search || '') + ' ' + item.textContent.toLowerCase();
+            const match = !q || haystack.toLowerCase().includes(q);
+            item.style.display = match ? '' : 'none';
+            if (match) anyVisible = true;
+        });
+        // Hide whole category blocks if every item inside is filtered out.
+        document.querySelectorAll('.indicator-modal-category').forEach(cat => {
+            const visibleChildren = cat.querySelectorAll('.indicator-search-item:not([style*="display: none"])');
+            cat.style.display = visibleChildren.length ? '' : 'none';
+        });
+        const empty = byId('indicator-modal-empty');
+        if (empty) empty.style.display = anyVisible ? 'none' : 'block';
+    }
+
+    /* ────────── Copy/paste indicator settings between symbols ────────── */
+
+    let copiedIndicatorSettings = null;
+
+    function setupIndicatorCopyPaste() {
+        const copyBtn = byId('btn-copy-indicators');
+        const pasteBtn = byId('btn-paste-indicators');
+        if (!copyBtn || !pasteBtn) return;
+
+        copyBtn.addEventListener('click', () => {
+            copiedIndicatorSettings = {
+                overlays: {},
+                oscillator: byId('oscillator-type-select') ? byId('oscillator-type-select').value : state.oscillator
+            };
+            ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-bollinger', 'chk-vwap'].forEach(id => {
+                const el = byId(id);
+                copiedIndicatorSettings.overlays[id] = el ? el.checked : false;
+            });
+            pasteBtn.disabled = false;
+            pasteBtn.title = 'Kopyalanan ayarları yapıştır (' + state.ticker + ' sembolünden)';
+            copyBtn.textContent = 'Kopyalandı ✓';
+            setTimeout(() => { copyBtn.textContent = 'Ayarları Kopyala'; }, 1400);
+        });
+
+        pasteBtn.addEventListener('click', () => {
+            if (!copiedIndicatorSettings) return;
+            Object.keys(copiedIndicatorSettings.overlays).forEach(id => {
+                const el = byId(id);
+                if (el) el.checked = copiedIndicatorSettings.overlays[id];
+            });
+            renderOverlays();
+            const sel = byId('oscillator-type-select');
+            const list = byId('indicator-oscillator-list');
+            if (sel) {
+                sel.value = copiedIndicatorSettings.oscillator;
+                state.oscillator = sel.value;
+                if (list) {
+                    list.querySelectorAll('.indicator-osc-item').forEach(b => {
+                        b.classList.toggle('active', b.dataset.osc === sel.value);
+                    });
+                }
+                renderOscillatorPane();
+            }
+            pasteBtn.textContent = 'Yapıştırıldı ✓';
+            setTimeout(() => { pasteBtn.textContent = 'Yapıştır'; }, 1400);
         });
     }
 
@@ -461,11 +600,13 @@ const TradingChart = (() => {
                 const tool = btn.dataset.tool;
                 if (tool === 'clear') {
                     state.drawings = [];
+                    state.selectedDrawingIndex = -1;
                     redrawDrawings();
                     return;
                 }
                 if (tool === 'undo') {
                     state.drawings.pop();
+                    state.selectedDrawingIndex = -1;
                     redrawDrawings();
                     return;
                 }
@@ -548,19 +689,20 @@ const TradingChart = (() => {
         const rect = drawCanvas.getBoundingClientRect();
         drawCtx.clearRect(0, 0, rect.width, rect.height);
 
-        const all = state.pendingShape ? [...state.drawings, state.pendingShape] : state.drawings;
-        all.forEach(shape => drawShape(shape));
+        state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
+        if (state.pendingShape) drawShape(state.pendingShape, false);
     }
 
-    function drawShape(shape) {
+    function drawShape(shape, isSelected) {
         const a = dataPointToPixel(shape.p1);
         const b = dataPointToPixel(shape.p2);
         if (a.x === null || b.x === null || a.y === null || b.y === null) return;
 
         drawCtx.save();
-        drawCtx.strokeStyle = COLORS.draw;
-        drawCtx.fillStyle = 'rgba(212,175,55,0.10)';
-        drawCtx.lineWidth = 1.5;
+        drawCtx.strokeStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+        drawCtx.fillStyle = isSelected ? 'rgba(79,195,247,0.12)' : 'rgba(212,175,55,0.10)';
+        drawCtx.lineWidth = isSelected ? 2.25 : 1.5;
+        if (isSelected) drawCtx.setLineDash([5, 3]);
 
         if (shape.type === 'trend') {
             drawCtx.beginPath();
@@ -601,7 +743,189 @@ const TradingChart = (() => {
                 drawCtx.fillText(`${(lvl * 100).toFixed(1)}%  ₺${fmtPrice(price)}`, xEnd + 4, y + 3);
             });
         }
+
+        if (isSelected) {
+            drawCtx.setLineDash([]);
+            drawCtx.fillStyle = '#4FC3F7';
+            [a, b].forEach(pt => {
+                drawCtx.beginPath();
+                drawCtx.rect(pt.x - 3.5, pt.y - 3.5, 7, 7);
+                drawCtx.fill();
+            });
+        }
         drawCtx.restore();
+    }
+
+    /* ────────── Drawing selection, copy/paste, delete ────────── */
+
+    function distToSegment(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1, dy = y2 - y1;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+        let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const cx = x1 + t * dx, cy = y1 + t * dy;
+        return Math.hypot(px - cx, py - cy);
+    }
+
+    function hitTestDrawings(x, y) {
+        const HIT_TOLERANCE = 6;
+        for (let i = state.drawings.length - 1; i >= 0; i--) {
+            const shape = state.drawings[i];
+            const a = dataPointToPixel(shape.p1);
+            const b = dataPointToPixel(shape.p2);
+            if (a.x === null || b.x === null || a.y === null || b.y === null) continue;
+
+            if (shape.type === 'trend') {
+                if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'horizontal') {
+                if (Math.abs(y - a.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'rect') {
+                const rx = Math.min(a.x, b.x), ry = Math.min(a.y, b.y);
+                const rw = Math.abs(b.x - a.x), rh = Math.abs(b.y - a.y);
+                if (x >= rx - HIT_TOLERANCE && x <= rx + rw + HIT_TOLERANCE &&
+                    y >= ry - HIT_TOLERANCE && y <= ry + rh + HIT_TOLERANCE) return i;
+            } else if (shape.type === 'fib') {
+                const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+                const xStart = Math.min(a.x, b.x), xEnd = Math.max(a.x, b.x);
+                if (x < xStart - HIT_TOLERANCE || x > xEnd + HIT_TOLERANCE) continue;
+                const p1 = shape.p1.price, p2 = shape.p2.price;
+                const hit = levels.some(lvl => {
+                    const price = p1 + (p2 - p1) * lvl;
+                    const ly = candleSeries.priceToCoordinate(price);
+                    return ly !== null && Math.abs(y - ly) <= HIT_TOLERANCE;
+                });
+                if (hit) return i;
+            }
+        }
+        return -1;
+    }
+
+    function selectDrawing(index) {
+        state.selectedDrawingIndex = index;
+        redrawDrawings();
+    }
+
+    function copySelectedDrawing() {
+        if (state.selectedDrawingIndex < 0) return false;
+        copiedDrawing = JSON.parse(JSON.stringify(state.drawings[state.selectedDrawingIndex]));
+        return true;
+    }
+
+    function pasteDrawing() {
+        if (!copiedDrawing || !state.candles.length) return false;
+        const shiftIdx = (point) => {
+            const idx = state.candles.findIndex(c => c.date === point.time);
+            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (idx >= 0 ? idx : 0) + 3));
+            return { time: state.candles[newIdx].date, price: point.price };
+        };
+        const clone = {
+            type: copiedDrawing.type,
+            p1: shiftIdx(copiedDrawing.p1),
+            p2: shiftIdx(copiedDrawing.p2)
+        };
+        state.drawings.push(clone);
+        state.selectedDrawingIndex = state.drawings.length - 1;
+        redrawDrawings();
+        return true;
+    }
+
+    function deleteSelectedDrawing() {
+        if (state.selectedDrawingIndex < 0) return false;
+        state.drawings.splice(state.selectedDrawingIndex, 1);
+        state.selectedDrawingIndex = -1;
+        redrawDrawings();
+        return true;
+    }
+
+    function setupDrawingSelection() {
+        if (!chartContainer) return;
+
+        // Capture-phase listener: run BEFORE Lightweight Charts' own pan/zoom
+        // handlers so we can intercept clicks that land on a drawing, while
+        // letting clicks on empty chart area fall through untouched for
+        // normal chart panning.
+        chartContainer.addEventListener('mousedown', (e) => {
+            if (state.activeTool !== 'cursor') return;
+            const rect = chartContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const hitIndex = hitTestDrawings(x, y);
+            if (hitIndex >= 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                selectDrawing(hitIndex);
+            } else if (state.selectedDrawingIndex >= 0) {
+                selectDrawing(-1);
+            }
+        }, true);
+
+        chartContainer.addEventListener('contextmenu', (e) => {
+            if (state.activeTool !== 'cursor') return;
+            const rect = chartContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const hitIndex = hitTestDrawings(x, y);
+            if (hitIndex >= 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                selectDrawing(hitIndex);
+                showDrawingContextMenu(e.clientX, e.clientY);
+            } else {
+                hideDrawingContextMenu();
+            }
+        }, true);
+
+        document.addEventListener('click', (e) => {
+            const menu = byId('drawing-context-menu');
+            if (menu && !menu.contains(e.target)) hideDrawingContextMenu();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            const tag = (document.activeElement && document.activeElement.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
+            const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
+            const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+            const isDelete = e.key === 'Delete' || e.key === 'Backspace';
+            if (isCopy && state.selectedDrawingIndex >= 0) {
+                copySelectedDrawing();
+            } else if (isPaste && copiedDrawing) {
+                pasteDrawing();
+            } else if (isDelete && state.selectedDrawingIndex >= 0) {
+                e.preventDefault();
+                deleteSelectedDrawing();
+            }
+        });
+
+        // Context menu actions
+        const menu = byId('drawing-context-menu');
+        if (menu) {
+            menu.querySelector('[data-action="copy"]').addEventListener('click', () => {
+                copySelectedDrawing();
+                hideDrawingContextMenu();
+            });
+            menu.querySelector('[data-action="paste"]').addEventListener('click', () => {
+                pasteDrawing();
+                hideDrawingContextMenu();
+            });
+            menu.querySelector('[data-action="delete"]').addEventListener('click', () => {
+                deleteSelectedDrawing();
+                hideDrawingContextMenu();
+            });
+        }
+    }
+
+    function showDrawingContextMenu(clientX, clientY) {
+        const menu = byId('drawing-context-menu');
+        if (!menu) return;
+        const pasteItem = menu.querySelector('[data-action="paste"]');
+        if (pasteItem) pasteItem.classList.toggle('disabled', !copiedDrawing);
+        menu.style.left = clientX + 'px';
+        menu.style.top = clientY + 'px';
+        menu.classList.add('open');
+    }
+
+    function hideDrawingContextMenu() {
+        const menu = byId('drawing-context-menu');
+        if (menu) menu.classList.remove('open');
     }
 
     /* ────────── Resize ────────── */
@@ -633,7 +957,15 @@ const TradingChart = (() => {
         updateLastPrice,
         renderOverlays,
         renderOscillatorPane,
-        getLastClose
+        getLastClose,
+        // Read-only introspection, useful for QA/debugging — no external
+        // caller in the app itself relies on this.
+        debugGetDrawings: () => JSON.parse(JSON.stringify(state.drawings)),
+        debugGetSelectedIndex: () => state.selectedDrawingIndex,
+        debugSelectDrawing: (index) => selectDrawing(index),
+        debugCopySelected: () => copySelectedDrawing(),
+        debugPaste: () => pasteDrawing(),
+        debugDeleteSelected: () => deleteSelectedDrawing()
     });
 })();
 
