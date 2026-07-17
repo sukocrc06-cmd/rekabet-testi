@@ -776,7 +776,7 @@ const TradingEngine = (() => {
                 // already handled inside tradingChart.js's own listener.)
                 if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    document.querySelector('#chart-toolbar [data-tool="undo"]')?.click();
+                    document.querySelector('#chart-toolbar [data-action="undo"]')?.click();
                 }
                 return;
             }
@@ -956,14 +956,19 @@ const TradingEngine = (() => {
             row.classList.toggle('active', row.dataset.symbol === symbol);
         });
 
-        // Keep the (hidden) legacy <select> in sync so the existing backtest
-        // pipeline (app.js) continues to auto-run on symbol changes. This is
-        // what feeds the "Price Action" (Analiz Paneli) chart with real
-        // fetched OHLCV data.
+        // Keep the (hidden) legacy <select> value in sync in case any other
+        // code still reads it (e.g. the Reset button). The old backtest
+        // pipeline it used to trigger via a 'change' event has been removed
+        // along with the Analiz Paneli, so we intentionally no longer
+        // dispatch that event here.
         const select = byId('stock-select');
         if (select) {
             select.value = symbol;
-            select.dispatchEvent(new Event('change'));
+        }
+
+        const tickerLabel = byId('analysis-ticker-label');
+        if (tickerLabel) {
+            tickerLabel.innerText = 'Şu an analiz ediliyor: ' + symbol + '.IS';
         }
 
         updateActiveSymbolTicket();

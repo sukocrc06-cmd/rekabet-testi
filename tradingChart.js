@@ -35,8 +35,25 @@ const TradingChart = (() => {
         bbFill: 'rgba(66, 165, 245, 0.06)',
         vwap: '#26A69A',
         draw: '#D4AF37',
-        fibLine: 'rgba(212, 175, 55, 0.5)'
+        fibLine: 'rgba(212, 175, 55, 0.5)',
+        volUp: 'rgba(212, 175, 55, 0.45)',
+        volDown: 'rgba(120, 120, 120, 0.35)',
+        baselineTop: '#D4AF37',
+        baselineBottom: '#EF5350'
     };
+
+    // Tier-1 chart type catalog (TradingView "Çubuklar" menu parity). Each
+    // entry drives both the dropdown UI (label/icon) and applyChartType().
+    const CHART_TYPES = [
+        { id: 'candles',      label: 'Mumlar' },
+        { id: 'hollow',       label: 'İçi Boş Mumlar' },
+        { id: 'bars',         label: 'Sütunlar' },
+        { id: 'line',         label: 'Çizgi' },
+        { id: 'step_line',    label: 'Adım Çizgisi' },
+        { id: 'area',         label: 'Alan' },
+        { id: 'baseline',     label: 'Temel Çizgi' },
+        { id: 'heikin_ashi',  label: 'Heikin Ashi' }
+    ];
 
     // Lightweight Charts renders to <canvas> internally, so its background/
     // text/grid colors are set via JS options, not CSS — this mirrors the
@@ -50,7 +67,14 @@ const TradingChart = (() => {
 
     let chart = null;
     let subChart = null;
-    let candleSeries = null;
+    let candleSeries = null;      // always-present OHLC series; the price-scale anchor
+                                   // for coordinate<->price conversions and drawing tools.
+                                   // Hidden (visible:false) whenever an alternate chart
+                                   // type (bars/line/area/baseline) is active.
+    let typeSeries = null;        // the currently visible alt-type series, or null when
+                                   // chartType is 'candles' | 'hollow' | 'heikin_ashi'
+                                   // (those render directly on candleSeries).
+    let volumeSeries = null;      // optional volume histogram, own price scale
     let overlaySeries = {};       // { sma20: LineSeries, ... }
     let subSeries = {};           // active oscillator pane series
     let drawCanvas = null;
@@ -62,9 +86,15 @@ const TradingChart = (() => {
         candles: [],
         indicators: null,
         oscillator: 'rsi',
+        chartType: 'candles',
+        showVolume: false,
         activeTool: 'cursor',
+        magnetMode: false,
+        drawingsLocked: false,
+        drawingsHidden: false,
         drawings: [],          // committed shapes
         pendingShape: null,    // in-progress shape while dragging
+        pendingPoints: null,   // accumulated points for multi-click tools (channel/triangle/position)
         selectedDrawingIndex: -1,
         dayOpenPrice: null
     };
@@ -126,6 +156,7 @@ const TradingChart = (() => {
 
         setupDrawCanvas();
         setupToolbar();
+        setupChartTypeMenu();
         setupOscillatorSelect();
         setupOverlayCheckboxes();
         setupIndicatorModal();
@@ -224,8 +255,7 @@ const TradingChart = (() => {
         state.candles = candles;
         state.dayOpenPrice = candles.length ? candles[candles.length - 1].open : null;
 
-        const lwcData = candles.map(c => ({ time: c.date, open: c.open, high: c.high, low: c.low, close: c.close }));
-        candleSeries.setData(lwcData);
+        applyChartType();
 
         state.indicators = window.DataController.calculateIndicators(candles);
         renderOverlays();
@@ -255,6 +285,122 @@ const TradingChart = (() => {
         return { ticker: state.ticker, lastClose: last.close, dayOpen: last.open };
     }
 
+    /* ────────── Chart type engine (Tier 1: Candles/Hollow/Bars/Line/StepLine/Area/Baseline/HeikinAshi) ────────── */
+
+    function computeHeikinAshi(candles) {
+        const out = [];
+        let prevHA = null;
+        candles.forEach(c => {
+            const haClose = (c.open + c.high + c.low + c.close) / 4;
+            const haOpen = prevHA ? (prevHA.open + prevHA.close) / 2 : (c.open + c.close) / 2;
+            const haHigh = Math.max(c.high, haOpen, haClose);
+            const haLow = Math.min(c.low, haOpen, haClose);
+            const ha = { date: c.date, open: haOpen, high: haHigh, low: haLow, close: haClose, volume: c.volume };
+            out.push(ha);
+            prevHA = ha;
+        });
+        return out;
+    }
+
+    function applyChartType() {
+        if (!chart || !candleSeries || !state.candles.length) return;
+
+        if (typeSeries) {
+            try { chart.removeSeries(typeSeries); } catch (e) { /* already gone */ }
+            typeSeries = null;
+        }
+
+        const type = state.chartType;
+        const isHeikin = type === 'heikin_ashi';
+        const sourceCandles = isHeikin ? computeHeikinAshi(state.candles) : state.candles;
+        const candleData = sourceCandles.map(c => ({ time: c.date, open: c.open, high: c.high, low: c.low, close: c.close }));
+
+        if (type === 'candles' || type === 'hollow' || type === 'heikin_ashi') {
+            candleSeries.applyOptions({
+                visible: true,
+                upColor: type === 'hollow' ? 'rgba(0,0,0,0)' : COLORS.up,
+                downColor: type === 'hollow' ? 'rgba(0,0,0,0)' : COLORS.down,
+                borderUpColor: COLORS.up,
+                borderDownColor: COLORS.down,
+                wickUpColor: COLORS.wickUp,
+                wickDownColor: COLORS.wickDown,
+                borderVisible: true
+            });
+            candleSeries.setData(candleData);
+        } else {
+            candleSeries.applyOptions({ visible: false });
+            // Keep candleSeries data current even while hidden — it remains
+            // the price-scale anchor for coordinate<->price conversion and
+            // for drawing-tool hit testing.
+            candleSeries.setData(candleData);
+
+            if (type === 'bars') {
+                typeSeries = chart.addBarSeries({
+                    upColor: COLORS.up, downColor: COLORS.down, thinBars: false
+                });
+                typeSeries.setData(candleData);
+            } else if (type === 'line' || type === 'step_line') {
+                typeSeries = chart.addLineSeries({
+                    color: COLORS.up, lineWidth: 2, priceLineVisible: true, lastValueVisible: true,
+                    lineType: type === 'step_line' ? LightweightCharts.LineType.WithSteps : LightweightCharts.LineType.Simple
+                });
+                typeSeries.setData(sourceCandles.map(c => ({ time: c.date, value: c.close })));
+            } else if (type === 'area') {
+                typeSeries = chart.addAreaSeries({
+                    lineColor: COLORS.up, topColor: 'rgba(212,175,55,0.35)', bottomColor: 'rgba(212,175,55,0.02)',
+                    lineWidth: 2, priceLineVisible: true, lastValueVisible: true
+                });
+                typeSeries.setData(sourceCandles.map(c => ({ time: c.date, value: c.close })));
+            } else if (type === 'baseline') {
+                const avg = sourceCandles.reduce((s, c) => s + c.close, 0) / sourceCandles.length;
+                typeSeries = chart.addBaselineSeries({
+                    baseValue: { type: 'price', price: avg },
+                    topLineColor: COLORS.baselineTop, topFillColor1: 'rgba(212,175,55,0.28)', topFillColor2: 'rgba(212,175,55,0.02)',
+                    bottomLineColor: COLORS.baselineBottom, bottomFillColor1: 'rgba(239,83,80,0.28)', bottomFillColor2: 'rgba(239,83,80,0.02)',
+                    lineWidth: 2, priceLineVisible: true, lastValueVisible: true
+                });
+                typeSeries.setData(sourceCandles.map(c => ({ time: c.date, value: c.close })));
+            }
+        }
+
+        applyVolumeVisibility();
+        redrawDrawings();
+    }
+
+    function applyVolumeVisibility() {
+        if (!chart || !state.candles.length) return;
+        if (state.showVolume) {
+            if (!volumeSeries) {
+                volumeSeries = chart.addHistogramSeries({
+                    priceFormat: { type: 'volume' },
+                    priceScaleId: 'optipulse-vol',
+                    color: COLORS.volUp
+                });
+                chart.priceScale('optipulse-vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+            }
+            const volData = state.candles.map(c => ({
+                time: c.date,
+                value: c.volume || 0,
+                color: c.close >= c.open ? COLORS.volUp : COLORS.volDown
+            }));
+            volumeSeries.setData(volData);
+            volumeSeries.applyOptions({ visible: true });
+        } else if (volumeSeries) {
+            volumeSeries.applyOptions({ visible: false });
+        }
+    }
+
+    function setChartType(type) {
+        if (!CHART_TYPES.some(t => t.id === type)) return;
+        state.chartType = type;
+        applyChartType();
+    }
+
+    function setVolumeVisible(on) {
+        state.showVolume = !!on;
+        applyVolumeVisibility();
+    }
+
     function setSymbolHeader(ticker, price, prevClose) {
         const nameEl = byId('tv-symbol-name');
         const priceEl = byId('tv-last-price');
@@ -282,7 +428,27 @@ const TradingChart = (() => {
         if (price > last.high) last.high = price;
         if (price < last.low) last.low = price;
 
-        candleSeries.update({ time: last.date, open: last.open, high: last.high, low: last.low, close: last.close });
+        if (state.chartType === 'heikin_ashi') {
+            // Heikin Ashi bars are derived from the whole series (each bar
+            // depends on the previous HA bar), so a single-bar `.update()`
+            // isn't correct here — recompute is cheap at this dataset size.
+            applyChartType();
+        } else {
+            candleSeries.update({ time: last.date, open: last.open, high: last.high, low: last.low, close: last.close });
+            if (typeSeries) {
+                if (state.chartType === 'bars') {
+                    typeSeries.update({ time: last.date, open: last.open, high: last.high, low: last.low, close: last.close });
+                } else {
+                    typeSeries.update({ time: last.date, value: last.close });
+                }
+            }
+            if (volumeSeries && state.showVolume) {
+                volumeSeries.update({
+                    time: last.date, value: last.volume || 0,
+                    color: last.close >= last.open ? COLORS.volUp : COLORS.volDown
+                });
+            }
+        }
 
         const prevClose = state.candles.length > 1 ? state.candles[state.candles.length - 2].close : last.open;
         setSymbolHeader(ticker, price, prevClose);
@@ -619,34 +785,350 @@ const TradingChart = (() => {
         drawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
+    /* ────────── Chart type dropdown ("Çubuklar" menu) ────────── */
+
+    function chartTypeIcon(id) {
+        const S = 'width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+        const ICONS = {
+            candles: '<rect x="4" y="9" width="3" height="9"></rect><line x1="5.5" y1="5" x2="5.5" y2="9"></line><line x1="5.5" y1="18" x2="5.5" y2="20"></line>' +
+                     '<rect x="10.5" y="4" width="3" height="16" fill="currentColor"></rect><line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line>' +
+                     '<rect x="17" y="12" width="3" height="6"></rect><line x1="18.5" y1="9" x2="18.5" y2="12"></line><line x1="18.5" y1="18" x2="18.5" y2="20"></line>',
+            hollow: '<rect x="4" y="9" width="3" height="9"></rect><rect x="10.5" y="4" width="3" height="16"></rect><rect x="17" y="12" width="3" height="6"></rect>',
+            bars: '<line x1="5.5" y1="6" x2="5.5" y2="18"></line><line x1="5.5" y1="6" x2="8" y2="6"></line><line x1="5.5" y1="14" x2="3" y2="14"></line>' +
+                  '<line x1="12" y1="3" x2="12" y2="21"></line><line x1="12" y1="3" x2="14.5" y2="3"></line><line x1="12" y1="12" x2="9.5" y2="12"></line>' +
+                  '<line x1="18.5" y1="9" x2="18.5" y2="19"></line><line x1="18.5" y1="9" x2="21" y2="9"></line><line x1="18.5" y1="15" x2="16" y2="15"></line>',
+            line: '<polyline points="3 17 9 10 14 14 21 5"></polyline>',
+            step_line: '<polyline points="3 17 9 17 9 11 15 11 15 6 21 6"></polyline>',
+            area: '<polyline points="3 15 9 9 14 13 21 5"></polyline><path d="M3 20h18v0L21 5 14 13 9 9 3 15z" opacity="0.25" stroke="none" fill="currentColor"></path>',
+            baseline: '<line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="2 2"></line><polyline points="3 12 8 6 13 15 21 9"></polyline>',
+            heikin_ashi: '<rect x="4" y="7" width="3" height="11" fill="currentColor"></rect><rect x="10.5" y="10" width="3" height="8" fill="currentColor"></rect><rect x="17" y="4" width="3" height="13" fill="currentColor"></rect>'
+        };
+        return '<svg ' + S + '>' + (ICONS[id] || ICONS.candles) + '</svg>';
+    }
+
+    function setupChartTypeMenu() {
+        const btn = byId('btn-chart-type');
+        const dropdown = byId('chart-type-dropdown');
+        const list = byId('chart-type-list');
+        const label = byId('chart-type-label');
+        const volChk = byId('chk-show-volume');
+        if (!btn || !dropdown || !list) return;
+
+        list.innerHTML = CHART_TYPES.map(t =>
+            '<button type="button" class="tv-charttype-item' + (t.id === state.chartType ? ' active' : '') + '" data-type="' + t.id + '">' +
+                '<span class="tv-charttype-icon" aria-hidden="true">' + chartTypeIcon(t.id) + '</span>' +
+                '<span>' + t.label + '</span>' +
+            '</button>'
+        ).join('');
+
+        const close = () => dropdown.classList.remove('open');
+        const open = () => {
+            if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            closeAllFlyouts();
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = (rect.bottom + 6) + 'px';
+            dropdown.style.left = rect.left + 'px';
+            dropdown.classList.add('open');
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdown.classList.contains('open')) close(); else open();
+        });
+        document.addEventListener('click', (e) => {
+            if (dropdown.classList.contains('open') && !dropdown.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dropdown.classList.contains('open')) close();
+        });
+
+        list.querySelectorAll('[data-type]').forEach(item => {
+            item.addEventListener('click', () => {
+                const type = item.dataset.type;
+                setChartType(type);
+                list.querySelectorAll('.tv-charttype-item').forEach(b => b.classList.remove('active'));
+                item.classList.add('active');
+                const def = CHART_TYPES.find(t => t.id === type);
+                if (label && def) label.textContent = def.label;
+                close();
+            });
+        });
+
+        if (volChk) {
+            volChk.addEventListener('change', () => setVolumeVisible(volChk.checked));
+        }
+    }
+
+    /* ────────── Drawing tools toolbar (grouped flyout menus, Tier 1) ────────── */
+
+    // Tier-1 drawing tool catalog, grouped TradingView-style. `standalone`
+    // groups render as a single flat button; the rest render as a button
+    // (showing the last-picked tool in that group) plus a caret that opens
+    // a flyout listing every tool in the group.
+    const TOOL_GROUPS = [
+        { id: 'cursor', standalone: true, tools: [{ id: 'cursor', label: 'İmleç' }] },
+        { id: 'lines', label: 'Çizgiler', tools: [
+            { id: 'trend', label: 'Trend Çizgisi' },
+            { id: 'ray', label: 'Işın' },
+            { id: 'extended', label: 'Genişletilmiş Çizgi' },
+            { id: 'horizontal', label: 'Yatay Çizgi' },
+            { id: 'hray', label: 'Yatay Işın' },
+            { id: 'vline', label: 'Dikey Çizgi' },
+            { id: 'cross', label: 'Çapraz Çizgi' },
+            { id: 'channel', label: 'Paralel Kanal' }
+        ] },
+        { id: 'fibgroup', label: 'Fibonacci', tools: [
+            { id: 'fib', label: 'Fibonacci Geri Çekilme' },
+            { id: 'fib_ext', label: 'Fibonacci Uzantı' },
+            { id: 'fib_fan', label: 'Fibonacci Yelpazesi' },
+            { id: 'fib_time', label: 'Fibonacci Zaman Bölgesi' }
+        ] },
+        { id: 'shapes', label: 'Şekiller', tools: [
+            { id: 'rect', label: 'Dikdörtgen' },
+            { id: 'ellipse', label: 'Elips' },
+            { id: 'triangle', label: 'Üçgen' }
+        ] },
+        { id: 'annotate', label: 'Not & Ok', tools: [
+            { id: 'arrow', label: 'Ok' },
+            { id: 'text', label: 'Metin' },
+            { id: 'brush', label: 'Fırça' }
+        ] },
+        { id: 'measure', standalone: true, tools: [{ id: 'measure', label: 'Ölçüm Aracı' }] },
+        { id: 'position', label: 'Pozisyon', tools: [
+            { id: 'pos_long', label: 'Uzun Pozisyon' },
+            { id: 'pos_short', label: 'Kısa Pozisyon' }
+        ] }
+    ];
+
+    const groupLastTool = {};
+
+    function toolIcon(id) {
+        const S = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+        const ICONS = {
+            cursor: '<path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>',
+            trend: '<line x1="4" y1="20" x2="20" y2="4"></line><circle cx="4" cy="20" r="1.8" fill="currentColor"></circle><circle cx="20" cy="4" r="1.8" fill="currentColor"></circle>',
+            ray: '<line x1="4" y1="20" x2="22" y2="2"></line><circle cx="4" cy="20" r="1.8" fill="currentColor"></circle>',
+            extended: '<line x1="1" y1="23" x2="23" y2="1"></line>',
+            horizontal: '<line x1="3" y1="12" x2="21" y2="12"></line>',
+            hray: '<line x1="6" y1="12" x2="21" y2="12"></line><circle cx="6" cy="12" r="1.8" fill="currentColor"></circle>',
+            vline: '<line x1="12" y1="3" x2="12" y2="21"></line>',
+            cross: '<line x1="3" y1="12" x2="21" y2="12"></line><line x1="12" y1="3" x2="12" y2="21"></line>',
+            channel: '<line x1="3" y1="18" x2="18" y2="4"></line><line x1="8" y1="21" x2="23" y2="7"></line>',
+            fib: '<line x1="3" y1="5" x2="21" y2="5"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="3" y1="20" x2="21" y2="20"></line>',
+            fib_ext: '<line x1="3" y1="4" x2="21" y2="4"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="3" y1="16" x2="21" y2="16"></line><line x1="3" y1="21" x2="12" y2="21"></line>',
+            fib_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="21" y2="11"></line><line x1="3" y1="21" x2="21" y2="17"></line>',
+            fib_time: '<line x1="4" y1="3" x2="4" y2="21"></line><line x1="10" y1="3" x2="10" y2="21"></line><line x1="16" y1="3" x2="16" y2="21"></line><line x1="21" y1="3" x2="21" y2="21"></line>',
+            rect: '<rect x="4" y="6" width="16" height="12" rx="1"></rect>',
+            ellipse: '<ellipse cx="12" cy="12" rx="9" ry="6"></ellipse>',
+            triangle: '<path d="M12 4l9 16H3z"></path>',
+            arrow: '<line x1="4" y1="20" x2="20" y2="4"></line><path d="M12 4h8v8"></path>',
+            text: '<polyline points="5 5 19 5"></polyline><line x1="12" y1="5" x2="12" y2="19"></line><line x1="8" y1="19" x2="16" y2="19"></line>',
+            brush: '<path d="M3 17c3-6 4-10 8-13 2 2 2 4 0 6-4 3-3 6-8 7z"></path><path d="M11 10l3 3"></path>',
+            measure: '<rect x="4" y="9" width="16" height="6" rx="1"></rect><line x1="7" y1="9" x2="7" y2="15"></line><line x1="12" y1="9" x2="12" y2="15"></line><line x1="17" y1="9" x2="17" y2="15"></line>',
+            pos_long: '<rect x="4" y="12" width="16" height="6" rx="1" opacity="0.4"></rect><rect x="4" y="6" width="16" height="6" rx="1"></rect><line x1="4" y1="9" x2="20" y2="9" stroke-dasharray="2 2"></line>',
+            pos_short: '<rect x="4" y="6" width="16" height="6" rx="1" opacity="0.4"></rect><rect x="4" y="12" width="16" height="6" rx="1"></rect><line x1="4" y1="15" x2="20" y2="15" stroke-dasharray="2 2"></line>',
+            undo: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path>',
+            clear: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>',
+            magnet: '<path d="M6 3v9a6 6 0 0 0 12 0V3"></path><path d="M6 3H2v9"></path><path d="M22 3h-4v9"></path>',
+            lock: '<rect x="5" y="11" width="14" height="10" rx="1"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
+            hide: '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.65 19.65 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line>'
+        };
+        return '<svg ' + S + '>' + (ICONS[id] || ICONS.cursor) + '</svg>';
+    }
+
+    function renderToolbar() {
+        const toolbar = byId('chart-toolbar');
+        if (!toolbar) return;
+
+        const groupsHtml = TOOL_GROUPS.map(g => {
+            if (g.standalone) {
+                const t = g.tools[0];
+                const isActive = state.activeTool === t.id;
+                return '<button type="button" class="tv-tool-btn' + (isActive ? ' active' : '') + '" data-tool="' + t.id + '" title="' + t.label + '">' + toolIcon(t.id) + '</button>';
+            }
+            const lastId = groupLastTool[g.id] || g.tools[0].id;
+            const lastDef = g.tools.find(t => t.id === lastId) || g.tools[0];
+            const isGroupActive = g.tools.some(t => t.id === state.activeTool);
+            return (
+                '<div class="tv-tool-group" data-group="' + g.id + '">' +
+                    '<button type="button" class="tv-tool-btn tv-tool-group-btn' + (isGroupActive ? ' active' : '') + '" data-tool="' + lastDef.id + '" title="' + lastDef.label + '">' +
+                        toolIcon(lastDef.id) +
+                        '<span class="tv-tool-caret" data-caret="' + g.id + '"><svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6l8 12 8-12z"></path></svg></span>' +
+                    '</button>' +
+                    '<div class="tv-tool-flyout" data-flyout="' + g.id + '" role="menu" aria-label="' + g.label + '">' +
+                        g.tools.map(t => '<button type="button" class="tv-tool-flyout-item' + (t.id === state.activeTool ? ' active' : '') + '" data-tool="' + t.id + '" role="menuitem">' + toolIcon(t.id) + '<span>' + t.label + '</span></button>').join('') +
+                    '</div>' +
+                '</div>'
+            );
+        }).join('');
+
+        const utilityHtml =
+            '<span class="tv-toolbar-sep" aria-hidden="true"></span>' +
+            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.magnetMode ? ' active' : '') + '" data-action="magnet" title="Mıknatıs Modu">' + toolIcon('magnet') + '</button>' +
+            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.drawingsLocked ? ' active' : '') + '" data-action="lock" title="Çizimleri Kilitle">' + toolIcon('lock') + '</button>' +
+            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.drawingsHidden ? ' active' : '') + '" data-action="hide" title="Çizimleri Gizle/Göster">' + toolIcon('hide') + '</button>' +
+            '<button type="button" class="tv-tool-btn" data-action="undo" title="Geri Al">' + toolIcon('undo') + '</button>' +
+            '<button type="button" class="tv-tool-btn" data-action="clear" title="Tümünü Temizle">' + toolIcon('clear') + '</button>';
+
+        toolbar.innerHTML = groupsHtml + utilityHtml;
+    }
+
+    function closeAllFlyouts() {
+        document.querySelectorAll('.tv-tool-flyout.open').forEach(f => f.classList.remove('open'));
+    }
+
+    function toggleFlyout(groupId) {
+        const flyout = document.querySelector('.tv-tool-flyout[data-flyout="' + groupId + '"]');
+        if (!flyout) return;
+        const willOpen = !flyout.classList.contains('open');
+        const groupEl = flyout.closest('.tv-tool-group');
+        const anchorBtn = groupEl ? groupEl.querySelector('.tv-tool-group-btn') : null;
+        closeAllFlyouts();
+        const chartTypeDropdown = byId('chart-type-dropdown');
+        if (chartTypeDropdown) chartTypeDropdown.classList.remove('open');
+        if (willOpen) {
+            if (anchorBtn) {
+                const rect = anchorBtn.getBoundingClientRect();
+                flyout.style.top = (rect.bottom + 6) + 'px';
+                flyout.style.left = rect.left + 'px';
+            }
+            flyout.classList.add('open');
+        }
+    }
+
+    function selectTool(tool) {
+        state.activeTool = tool;
+        state.pendingShape = null;
+        updateToolbarActiveState();
+        syncDrawCanvasCursor();
+    }
+
+    function updateToolbarActiveState() {
+        const toolbar = byId('chart-toolbar');
+        if (!toolbar) return;
+        toolbar.querySelectorAll('.tv-tool-btn[data-tool], .tv-tool-flyout-item[data-tool]').forEach(b => {
+            b.classList.toggle('active', b.dataset.tool === state.activeTool);
+        });
+        toolbar.querySelectorAll('.tv-tool-group').forEach(g => {
+            const groupDef = TOOL_GROUPS.find(gg => gg.id === g.dataset.group);
+            const isActive = !!(groupDef && groupDef.tools.some(t => t.id === state.activeTool));
+            const mainBtn = g.querySelector('.tv-tool-group-btn');
+            if (mainBtn) mainBtn.classList.toggle('active', isActive);
+        });
+    }
+
+    function syncDrawCanvasCursor() {
+        if (!drawCanvas) return;
+        const isCursor = state.activeTool === 'cursor';
+        drawCanvas.style.pointerEvents = isCursor ? 'none' : 'auto';
+        drawCanvas.style.cursor = isCursor ? 'default' : 'crosshair';
+    }
+
+    function updateToggleButtonState(action, on) {
+        const toolbar = byId('chart-toolbar');
+        if (!toolbar) return;
+        const btn = toolbar.querySelector('[data-action="' + action + '"]');
+        if (btn) btn.classList.toggle('active', on);
+    }
+
+    function handleToolbarAction(action) {
+        if (action === 'clear') {
+            state.drawings = [];
+            state.selectedDrawingIndex = -1;
+            redrawDrawings();
+        } else if (action === 'undo') {
+            state.drawings.pop();
+            state.selectedDrawingIndex = -1;
+            redrawDrawings();
+        } else if (action === 'magnet') {
+            state.magnetMode = !state.magnetMode;
+            updateToggleButtonState('magnet', state.magnetMode);
+        } else if (action === 'lock') {
+            state.drawingsLocked = !state.drawingsLocked;
+            updateToggleButtonState('lock', state.drawingsLocked);
+            if (state.drawingsLocked) selectDrawing(-1);
+        } else if (action === 'hide') {
+            state.drawingsHidden = !state.drawingsHidden;
+            updateToggleButtonState('hide', state.drawingsHidden);
+            redrawDrawings();
+        }
+    }
+
     function setupToolbar() {
         const toolbar = byId('chart-toolbar');
         if (!toolbar) return;
-        toolbar.querySelectorAll('[data-tool]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tool = btn.dataset.tool;
-                if (tool === 'clear') {
-                    state.drawings = [];
-                    state.selectedDrawingIndex = -1;
-                    redrawDrawings();
-                    return;
-                }
-                if (tool === 'undo') {
-                    state.drawings.pop();
-                    state.selectedDrawingIndex = -1;
-                    redrawDrawings();
-                    return;
-                }
-                state.activeTool = tool;
-                toolbar.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
-                if (tool !== 'clear' && tool !== 'undo') btn.classList.add('active');
+        renderToolbar();
 
-                if (drawCanvas) {
-                    drawCanvas.style.pointerEvents = (tool === 'cursor') ? 'none' : 'auto';
-                    drawCanvas.style.cursor = (tool === 'cursor') ? 'default' : 'crosshair';
-                }
-            });
+        toolbar.addEventListener('click', (e) => {
+            const flyoutItem = e.target.closest('.tv-tool-flyout-item');
+            if (flyoutItem) {
+                const groupEl = flyoutItem.closest('.tv-tool-group');
+                const groupId = groupEl ? groupEl.dataset.group : null;
+                if (groupId) groupLastTool[groupId] = flyoutItem.dataset.tool;
+                selectTool(flyoutItem.dataset.tool);
+                closeAllFlyouts();
+                renderToolbar();
+                return;
+            }
+
+            const caret = e.target.closest('.tv-tool-caret');
+            if (caret) {
+                e.stopPropagation();
+                const groupEl = caret.closest('.tv-tool-group');
+                if (groupEl) toggleFlyout(groupEl.dataset.group);
+                return;
+            }
+
+            const groupBtn = e.target.closest('.tv-tool-group-btn');
+            if (groupBtn) {
+                selectTool(groupBtn.dataset.tool);
+                closeAllFlyouts();
+                return;
+            }
+
+            const actionBtn = e.target.closest('[data-action]');
+            if (actionBtn) {
+                handleToolbarAction(actionBtn.dataset.action);
+                return;
+            }
+
+            const plainBtn = e.target.closest('.tv-tool-btn[data-tool]');
+            if (plainBtn) {
+                selectTool(plainBtn.dataset.tool);
+                closeAllFlyouts();
+                return;
+            }
         });
+
+        document.addEventListener('click', (e) => {
+            if (!toolbar.contains(e.target)) closeAllFlyouts();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeAllFlyouts();
+        });
+    }
+
+    const SINGLE_POINT_TOOLS = ['vline', 'cross'];
+    const FREEHAND_TOOLS = ['brush'];
+    const DERIVED_THIRD_POINT_TOOLS = ['channel', 'triangle', 'pos_long', 'pos_short'];
+
+    function priceRangeApprox() {
+        if (!state.candles.length) return 1;
+        const closes = state.candles.map(c => c.close);
+        const range = Math.max(...closes) - Math.min(...closes);
+        return range || Math.max(...closes) * 0.05 || 1;
+    }
+
+    function snapToOHLC(dp) {
+        if (!state.magnetMode || dp.idx < 0 || !state.candles[dp.idx] || dp.price === null) return dp;
+        const c = state.candles[dp.idx];
+        const candidates = [c.open, c.high, c.low, c.close];
+        let best = candidates[0], bestDist = Math.abs(dp.price - best);
+        candidates.forEach(v => {
+            const d = Math.abs(dp.price - v);
+            if (d < bestDist) { bestDist = d; best = v; }
+        });
+        return { time: dp.time, price: best, idx: dp.idx };
     }
 
     function pixelToDataPoint(x, y) {
@@ -656,15 +1138,24 @@ const TradingChart = (() => {
         idx = Math.max(0, Math.min(state.candles.length - 1, idx));
         const time = state.candles[idx] ? state.candles[idx].date : null;
         const price = candleSeries.coordinateToPrice(y);
-        return { time, price, idx };
+        return snapToOHLC({ time, price, idx });
     }
 
     function dataPointToPixel(point) {
-        if (!chart || !candleSeries) return { x: null, y: null };
+        if (!chart || !candleSeries || !point) return { x: null, y: null };
         const idx = state.candles.findIndex(c => c.date === point.time);
         const x = idx >= 0 ? chart.timeScale().logicalToCoordinate(idx) : null;
         const y = candleSeries.priceToCoordinate(point.price);
         return { x, y };
+    }
+
+    function indexForTime(time) {
+        return state.candles.findIndex(c => c.date === time);
+    }
+
+    function finishDrawing() {
+        selectTool('cursor');
+        redrawDrawings();
     }
 
     function onDrawStart(e) {
@@ -674,6 +1165,25 @@ const TradingChart = (() => {
         const y = e.clientY - rect.top;
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
+
+        if (state.activeTool === 'text') {
+            const label = window.prompt('Grafik notu:', '');
+            if (label === null || label.trim() === '') return;
+            state.drawings.push({ type: 'text', p1: dp, p2: dp, label: label.trim() });
+            finishDrawing();
+            return;
+        }
+
+        if (SINGLE_POINT_TOOLS.includes(state.activeTool)) {
+            state.drawings.push({ type: state.activeTool, p1: dp, p2: dp });
+            finishDrawing();
+            return;
+        }
+
+        if (FREEHAND_TOOLS.includes(state.activeTool)) {
+            state.pendingShape = { type: state.activeTool, points: [dp], dragging: true };
+            return;
+        }
 
         state.pendingShape = { type: state.activeTool, p1: dp, p2: dp, dragging: true };
     }
@@ -686,29 +1196,80 @@ const TradingChart = (() => {
         if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
-        state.pendingShape.p2 = dp;
+
+        if (state.pendingShape.points) {
+            state.pendingShape.points.push(dp);
+        } else {
+            state.pendingShape.p2 = dp;
+        }
         redrawDrawings();
     }
 
     function onDrawEnd() {
         if (!state.pendingShape || !state.pendingShape.dragging) return;
-        state.pendingShape.dragging = false;
-        state.drawings.push({ type: state.pendingShape.type, p1: state.pendingShape.p1, p2: state.pendingShape.p2 });
+        const pending = state.pendingShape;
+        pending.dragging = false;
         state.pendingShape = null;
 
-        // Auto return to cursor mode after a completed drawing
-        state.activeTool = 'cursor';
-        const toolbar = byId('chart-toolbar');
-        if (toolbar) {
-            toolbar.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
-            const cursorBtn = toolbar.querySelector('[data-tool="cursor"]');
-            if (cursorBtn) cursorBtn.classList.add('active');
+        if (pending.points) {
+            if (pending.points.length > 1) {
+                state.drawings.push({ type: pending.type, points: pending.points });
+            }
+        } else if (DERIVED_THIRD_POINT_TOOLS.includes(pending.type)) {
+            const range = priceRangeApprox();
+            if (pending.type === 'channel') {
+                state.drawings.push({ type: 'channel', p1: pending.p1, p2: pending.p2, offset: range * 0.12 });
+            } else if (pending.type === 'triangle') {
+                const idx1 = indexForTime(pending.p1.time), idx2 = indexForTime(pending.p2.time);
+                const midIdx = Math.max(0, Math.min(state.candles.length - 1, Math.round((idx1 + idx2) / 2)));
+                const apexPrice = Math.max(pending.p1.price, pending.p2.price) + (Math.abs(pending.p1.price - pending.p2.price) || range * 0.1);
+                state.drawings.push({
+                    type: 'triangle', p1: pending.p1, p2: pending.p2,
+                    apex: { time: state.candles[midIdx].date, price: apexPrice }
+                });
+            } else {
+                // pos_long / pos_short: p1 = entry, p2 = stop; target auto-computed at 2:1 reward:risk
+                const entry = pending.p1.price, stop = pending.p2.price;
+                const risk = Math.abs(entry - stop) || range * 0.05;
+                const target = pending.type === 'pos_long' ? entry + risk * 2 : entry - risk * 2;
+                state.drawings.push({ type: pending.type, p1: pending.p1, p2: pending.p2, target });
+            }
+        } else {
+            state.drawings.push({ type: pending.type, p1: pending.p1, p2: pending.p2 });
         }
-        if (drawCanvas) {
-            drawCanvas.style.pointerEvents = 'none';
-            drawCanvas.style.cursor = 'default';
-        }
-        redrawDrawings();
+
+        finishDrawing();
+    }
+
+    function extendLineToEdge(from, to, rect) {
+        const dx = to.x - from.x, dy = to.y - from.y;
+        if (dx === 0 && dy === 0) return to;
+        let tMax = Infinity;
+        if (dx > 0) tMax = Math.min(tMax, (rect.width - to.x) / dx);
+        else if (dx < 0) tMax = Math.min(tMax, (0 - to.x) / dx);
+        if (dy > 0) tMax = Math.min(tMax, (rect.height - to.y) / dy);
+        else if (dy < 0) tMax = Math.min(tMax, (0 - to.y) / dy);
+        if (!isFinite(tMax) || tMax < 0) tMax = 0;
+        return { x: to.x + dx * tMax, y: to.y + dy * tMax };
+    }
+
+    function drawFibLevels(a, b, shape, levels) {
+        const xStart = Math.min(a.x, b.x);
+        const xEnd = Math.max(a.x, b.x);
+        const p1 = shape.p1.price, p2 = shape.p2.price;
+        levels.forEach(lvl => {
+            const price = p1 + (p2 - p1) * lvl;
+            const y = candleSeries.priceToCoordinate(price);
+            if (y === null) return;
+            drawCtx.strokeStyle = COLORS.fibLine;
+            drawCtx.beginPath();
+            drawCtx.moveTo(xStart, y);
+            drawCtx.lineTo(xEnd, y);
+            drawCtx.stroke();
+            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.font = '9px "Fira Code", monospace';
+            drawCtx.fillText(`${(lvl * 100).toFixed(1)}%  ₺${fmtPrice(price)}`, xEnd + 4, y + 3);
+        });
     }
 
     function redrawDrawings() {
@@ -716,14 +1277,34 @@ const TradingChart = (() => {
         const rect = drawCanvas.getBoundingClientRect();
         drawCtx.clearRect(0, 0, rect.width, rect.height);
 
-        state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
+        if (!state.drawingsHidden) {
+            state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
+        }
         if (state.pendingShape) drawShape(state.pendingShape, false);
     }
 
     function drawShape(shape, isSelected) {
+        if (shape.type === 'brush') {
+            if (!shape.points || shape.points.length < 2) return;
+            const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
+            if (pts.length < 2) return;
+            drawCtx.save();
+            drawCtx.strokeStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+            drawCtx.lineWidth = isSelected ? 3 : 2;
+            drawCtx.lineJoin = 'round';
+            drawCtx.lineCap = 'round';
+            drawCtx.beginPath();
+            drawCtx.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => drawCtx.lineTo(p.x, p.y));
+            drawCtx.stroke();
+            drawCtx.restore();
+            return;
+        }
+
         const a = dataPointToPixel(shape.p1);
         const b = dataPointToPixel(shape.p2);
         if (a.x === null || b.x === null || a.y === null || b.y === null) return;
+        const rect = drawCanvas.getBoundingClientRect();
 
         drawCtx.save();
         drawCtx.strokeStyle = isSelected ? '#4FC3F7' : COLORS.draw;
@@ -736,8 +1317,20 @@ const TradingChart = (() => {
             drawCtx.moveTo(a.x, a.y);
             drawCtx.lineTo(b.x, b.y);
             drawCtx.stroke();
+        } else if (shape.type === 'ray') {
+            const ext = extendLineToEdge(a, b, rect);
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(ext.x, ext.y);
+            drawCtx.stroke();
+        } else if (shape.type === 'extended') {
+            const extFwd = extendLineToEdge(a, b, rect);
+            const extBack = extendLineToEdge(b, a, rect);
+            drawCtx.beginPath();
+            drawCtx.moveTo(extBack.x, extBack.y);
+            drawCtx.lineTo(extFwd.x, extFwd.y);
+            drawCtx.stroke();
         } else if (shape.type === 'horizontal') {
-            const rect = drawCanvas.getBoundingClientRect();
             drawCtx.beginPath();
             drawCtx.moveTo(0, a.y);
             drawCtx.lineTo(rect.width, a.y);
@@ -745,29 +1338,153 @@ const TradingChart = (() => {
             drawCtx.fillStyle = COLORS.draw;
             drawCtx.font = '10px "Fira Code", monospace';
             drawCtx.fillText('₺' + fmtPrice(shape.p1.price), 4, a.y - 4);
+        } else if (shape.type === 'hray') {
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(rect.width, a.y);
+            drawCtx.stroke();
+            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.font = '10px "Fira Code", monospace';
+            drawCtx.fillText('₺' + fmtPrice(shape.p1.price), a.x + 4, a.y - 4);
+        } else if (shape.type === 'vline') {
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, 0);
+            drawCtx.lineTo(a.x, rect.height);
+            drawCtx.stroke();
+        } else if (shape.type === 'cross') {
+            drawCtx.beginPath();
+            drawCtx.moveTo(0, a.y);
+            drawCtx.lineTo(rect.width, a.y);
+            drawCtx.moveTo(a.x, 0);
+            drawCtx.lineTo(a.x, rect.height);
+            drawCtx.stroke();
         } else if (shape.type === 'rect') {
             const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
             const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
             drawCtx.fillRect(x, y, w, h);
             drawCtx.strokeRect(x, y, w, h);
+        } else if (shape.type === 'ellipse') {
+            const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+            const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
+            drawCtx.beginPath();
+            drawCtx.ellipse(cx, cy, rx || 0.01, ry || 0.01, 0, 0, Math.PI * 2);
+            drawCtx.fill();
+            drawCtx.stroke();
+        } else if (shape.type === 'triangle') {
+            const c3 = dataPointToPixel(shape.apex);
+            if (c3.x === null || c3.y === null) { drawCtx.restore(); return; }
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(b.x, b.y);
+            drawCtx.lineTo(c3.x, c3.y);
+            drawCtx.closePath();
+            drawCtx.fill();
+            drawCtx.stroke();
+        } else if (shape.type === 'arrow') {
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(b.x, b.y);
+            drawCtx.stroke();
+            const angle = Math.atan2(b.y - a.y, b.x - a.x);
+            const headLen = 10;
+            drawCtx.beginPath();
+            drawCtx.moveTo(b.x, b.y);
+            drawCtx.lineTo(b.x - headLen * Math.cos(angle - Math.PI / 6), b.y - headLen * Math.sin(angle - Math.PI / 6));
+            drawCtx.moveTo(b.x, b.y);
+            drawCtx.lineTo(b.x - headLen * Math.cos(angle + Math.PI / 6), b.y - headLen * Math.sin(angle + Math.PI / 6));
+            drawCtx.stroke();
+        } else if (shape.type === 'text') {
+            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.font = '12px Outfit, sans-serif';
+            drawCtx.fillText(shape.label || '', a.x + 4, a.y - 6);
+        } else if (shape.type === 'measure') {
+            drawCtx.setLineDash([4, 3]);
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(b.x, b.y);
+            drawCtx.stroke();
+            drawCtx.setLineDash([]);
+            const priceDiff = shape.p2.price - shape.p1.price;
+            const pct = shape.p1.price !== 0 ? (priceDiff / shape.p1.price * 100) : 0;
+            const idx1 = indexForTime(shape.p1.time), idx2 = indexForTime(shape.p2.time);
+            const bars = Math.abs(idx2 - idx1);
+            const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+            const text = (priceDiff >= 0 ? '+' : '') + fmtPrice(priceDiff) + '  (' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)  ' + bars + ' bar';
+            drawCtx.font = '10px "Fira Code", monospace';
+            const tw = drawCtx.measureText(text).width + 12;
+            drawCtx.fillStyle = priceDiff >= 0 ? 'rgba(38,166,154,0.85)' : 'rgba(239,83,80,0.85)';
+            drawCtx.fillRect(midX - tw / 2, midY - 10, tw, 18);
+            drawCtx.fillStyle = '#fff';
+            drawCtx.textAlign = 'center';
+            drawCtx.fillText(text, midX, midY + 3);
+            drawCtx.textAlign = 'left';
+        } else if (shape.type === 'channel') {
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(b.x, b.y);
+            drawCtx.stroke();
+            const y1b = candleSeries.priceToCoordinate(shape.p1.price + shape.offset);
+            const y2b = candleSeries.priceToCoordinate(shape.p2.price + shape.offset);
+            if (y1b !== null && y2b !== null) {
+                drawCtx.beginPath();
+                drawCtx.moveTo(a.x, y1b);
+                drawCtx.lineTo(b.x, y2b);
+                drawCtx.stroke();
+            }
+        } else if (shape.type === 'pos_long' || shape.type === 'pos_short') {
+            const targetY = candleSeries.priceToCoordinate(shape.target);
+            const xStart = Math.min(a.x, b.x), xEnd = Math.max(a.x, b.x) + 60;
+            const entryY = a.y, stopY = b.y;
+            if (targetY !== null) {
+                drawCtx.fillStyle = 'rgba(38,166,154,0.18)';
+                drawCtx.fillRect(xStart, Math.min(entryY, targetY), xEnd - xStart, Math.abs(entryY - targetY));
+            }
+            drawCtx.fillStyle = 'rgba(239,83,80,0.18)';
+            drawCtx.fillRect(xStart, Math.min(entryY, stopY), xEnd - xStart, Math.abs(entryY - stopY));
+            drawCtx.strokeStyle = COLORS.draw;
+            drawCtx.beginPath();
+            drawCtx.moveTo(xStart, entryY);
+            drawCtx.lineTo(xEnd, entryY);
+            drawCtx.stroke();
+            drawCtx.fillStyle = '#e0e0e0';
+            drawCtx.font = '9px "Fira Code", monospace';
+            drawCtx.fillText('Giriş ₺' + fmtPrice(shape.p1.price), xStart + 4, entryY - 4);
+            if (targetY !== null) drawCtx.fillText('Hedef ₺' + fmtPrice(shape.target), xStart + 4, targetY - 4);
+            drawCtx.fillText('Stop ₺' + fmtPrice(shape.p2.price), xStart + 4, stopY + 12);
         } else if (shape.type === 'fib') {
-            const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-            const rect = drawCanvas.getBoundingClientRect();
-            const xStart = Math.min(a.x, b.x);
-            const xEnd = Math.max(a.x, b.x);
-            const p1 = shape.p1.price, p2 = shape.p2.price;
+            drawFibLevels(a, b, shape, [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
+        } else if (shape.type === 'fib_ext') {
+            drawFibLevels(a, b, shape, [0, 0.618, 1, 1.272, 1.618, 2, 2.618]);
+        } else if (shape.type === 'fib_fan') {
+            const levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1];
             levels.forEach(lvl => {
-                const price = p1 + (p2 - p1) * lvl;
-                const y = candleSeries.priceToCoordinate(price);
-                if (y === null) return;
+                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * lvl;
+                const py = candleSeries.priceToCoordinate(price);
+                if (py === null) return;
+                const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
                 drawCtx.strokeStyle = COLORS.fibLine;
                 drawCtx.beginPath();
-                drawCtx.moveTo(xStart, y);
-                drawCtx.lineTo(xEnd, y);
+                drawCtx.moveTo(a.x, a.y);
+                drawCtx.lineTo(ext.x, ext.y);
+                drawCtx.stroke();
+            });
+        } else if (shape.type === 'fib_time') {
+            const idx1 = indexForTime(shape.p1.time), idx2 = indexForTime(shape.p2.time);
+            const unit = Math.max(1, Math.abs(idx2 - idx1));
+            const fibNums = [1, 2, 3, 5, 8, 13, 21];
+            fibNums.forEach(n => {
+                const idx = idx1 + unit * n;
+                if (idx < 0 || idx >= state.candles.length) return;
+                const lx = chart.timeScale().logicalToCoordinate(idx);
+                if (lx === null) return;
+                drawCtx.strokeStyle = COLORS.fibLine;
+                drawCtx.beginPath();
+                drawCtx.moveTo(lx, 0);
+                drawCtx.lineTo(lx, rect.height);
                 drawCtx.stroke();
                 drawCtx.fillStyle = COLORS.draw;
                 drawCtx.font = '9px "Fira Code", monospace';
-                drawCtx.fillText(`${(lvl * 100).toFixed(1)}%  ₺${fmtPrice(price)}`, xEnd + 4, y + 3);
+                drawCtx.fillText(String(n), lx + 2, 12);
             });
         }
 
@@ -796,24 +1513,49 @@ const TradingChart = (() => {
     }
 
     function hitTestDrawings(x, y) {
+        if (state.drawingsLocked || state.drawingsHidden) return -1;
         const HIT_TOLERANCE = 6;
         for (let i = state.drawings.length - 1; i >= 0; i--) {
             const shape = state.drawings[i];
+
+            if (shape.type === 'brush') {
+                if (!shape.points || shape.points.length < 2) continue;
+                const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
+                for (let j = 0; j < pts.length - 1; j++) {
+                    if (distToSegment(x, y, pts[j].x, pts[j].y, pts[j + 1].x, pts[j + 1].y) <= HIT_TOLERANCE) return i;
+                }
+                continue;
+            }
+
             const a = dataPointToPixel(shape.p1);
             const b = dataPointToPixel(shape.p2);
             if (a.x === null || b.x === null || a.y === null || b.y === null) continue;
 
-            if (shape.type === 'trend') {
+            if (shape.type === 'trend' || shape.type === 'arrow' || shape.type === 'ray' || shape.type === 'extended' || shape.type === 'channel') {
                 if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
-            } else if (shape.type === 'horizontal') {
+            } else if (shape.type === 'horizontal' || shape.type === 'hray') {
                 if (Math.abs(y - a.y) <= HIT_TOLERANCE) return i;
-            } else if (shape.type === 'rect') {
+            } else if (shape.type === 'vline') {
+                if (Math.abs(x - a.x) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'cross') {
+                if (Math.abs(x - a.x) <= HIT_TOLERANCE || Math.abs(y - a.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'text') {
+                if (Math.abs(x - a.x) <= 40 && Math.abs(y - a.y) <= 14) return i;
+            } else if (shape.type === 'rect' || shape.type === 'ellipse' || shape.type === 'pos_long' || shape.type === 'pos_short') {
                 const rx = Math.min(a.x, b.x), ry = Math.min(a.y, b.y);
                 const rw = Math.abs(b.x - a.x), rh = Math.abs(b.y - a.y);
                 if (x >= rx - HIT_TOLERANCE && x <= rx + rw + HIT_TOLERANCE &&
                     y >= ry - HIT_TOLERANCE && y <= ry + rh + HIT_TOLERANCE) return i;
-            } else if (shape.type === 'fib') {
-                const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+            } else if (shape.type === 'triangle') {
+                const c3 = dataPointToPixel(shape.apex);
+                if (c3.x === null) continue;
+                if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE ||
+                    distToSegment(x, y, b.x, b.y, c3.x, c3.y) <= HIT_TOLERANCE ||
+                    distToSegment(x, y, c3.x, c3.y, a.x, a.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'measure') {
+                if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'fib' || shape.type === 'fib_ext') {
+                const levels = shape.type === 'fib' ? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] : [0, 0.618, 1, 1.272, 1.618, 2, 2.618];
                 const xStart = Math.min(a.x, b.x), xEnd = Math.max(a.x, b.x);
                 if (x < xStart - HIT_TOLERANCE || x > xEnd + HIT_TOLERANCE) continue;
                 const p1 = shape.p1.price, p2 = shape.p2.price;
@@ -823,6 +1565,12 @@ const TradingChart = (() => {
                     return ly !== null && Math.abs(y - ly) <= HIT_TOLERANCE;
                 });
                 if (hit) return i;
+            } else if (shape.type === 'fib_fan' || shape.type === 'fib_time') {
+                // Low-value to hit-test precisely (fan rays / time-zone verticals extend to the
+                // canvas edge) — a generous bounding-box check keeps selection usable without
+                // duplicating the render geometry here.
+                const rx = Math.min(a.x, b.x) - 20, rw = Math.abs(b.x - a.x) + 40;
+                if (x >= rx && x <= rx + rw) return i;
             }
         }
         return -1;
@@ -841,16 +1589,25 @@ const TradingChart = (() => {
 
     function pasteDrawing() {
         if (!copiedDrawing || !state.candles.length) return false;
-        const shiftIdx = (point) => {
+        const shiftPoint = (point) => {
+            if (!point) return point;
             const idx = state.candles.findIndex(c => c.date === point.time);
             const newIdx = Math.max(0, Math.min(state.candles.length - 1, (idx >= 0 ? idx : 0) + 3));
             return { time: state.candles[newIdx].date, price: point.price };
         };
-        const clone = {
-            type: copiedDrawing.type,
-            p1: shiftIdx(copiedDrawing.p1),
-            p2: shiftIdx(copiedDrawing.p2)
-        };
+
+        let clone;
+        if (copiedDrawing.type === 'brush') {
+            clone = { type: 'brush', points: (copiedDrawing.points || []).map(shiftPoint) };
+            if (clone.points.length < 2) return false;
+        } else {
+            clone = { type: copiedDrawing.type, p1: shiftPoint(copiedDrawing.p1), p2: shiftPoint(copiedDrawing.p2) };
+            if (copiedDrawing.apex) clone.apex = shiftPoint(copiedDrawing.apex);
+            if (copiedDrawing.offset !== undefined) clone.offset = copiedDrawing.offset;
+            if (copiedDrawing.target !== undefined) clone.target = copiedDrawing.target;
+            if (copiedDrawing.label !== undefined) clone.label = copiedDrawing.label;
+        }
+
         state.drawings.push(clone);
         state.selectedDrawingIndex = state.drawings.length - 1;
         redrawDrawings();
@@ -859,6 +1616,7 @@ const TradingChart = (() => {
 
     function deleteSelectedDrawing() {
         if (state.selectedDrawingIndex < 0) return false;
+        if (state.drawingsLocked) return false;
         state.drawings.splice(state.selectedDrawingIndex, 1);
         state.selectedDrawingIndex = -1;
         redrawDrawings();
@@ -999,6 +1757,8 @@ const TradingChart = (() => {
         renderOscillatorPane,
         getLastClose,
         setTheme,
+        setChartType,
+        setVolumeVisible,
         // Read-only introspection, useful for QA/debugging — no external
         // caller in the app itself relies on this.
         debugGetDrawings: () => JSON.parse(JSON.stringify(state.drawings)),
@@ -1006,7 +1766,9 @@ const TradingChart = (() => {
         debugSelectDrawing: (index) => selectDrawing(index),
         debugCopySelected: () => copySelectedDrawing(),
         debugPaste: () => pasteDrawing(),
-        debugDeleteSelected: () => deleteSelectedDrawing()
+        debugDeleteSelected: () => deleteSelectedDrawing(),
+        debugGetChartType: () => state.chartType,
+        debugGetActiveTool: () => state.activeTool
     });
 })();
 
