@@ -3003,3 +3003,192 @@ body.chart-maximized-active {
     }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FEATURE TOUR / DEMO WIZARD (tanıtım sihirbazı)
+   A small floating step-by-step card, docked below the header. No dark
+   overlay and no element-highlighting — it just narrates while each step
+   drives the real UI (opens the real modal / switches the real tab) behind
+   it, so a live presentation shows the actual app, not screenshots.
+   See tourGuide.js.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.btn-tour {
+    position: relative;
+}
+
+.btn-tour.tour-attention {
+    animation: tourBtnPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tourBtnPulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--gold-glow, rgba(212, 175, 55, 0.45)); }
+    50% { box-shadow: 0 0 0 6px rgba(212, 175, 55, 0); }
+}
+
+.tour-card {
+    position: fixed;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-6px);
+    z-index: 950;
+    width: 380px;
+    max-width: calc(100vw - 32px);
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md, 10px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+    padding: 18px 20px 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.tour-card.tour-visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+}
+
+.tour-card-eyebrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.tour-step-count {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--gold);
+    text-transform: uppercase;
+}
+
+.tour-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-fast);
+    margin: -4px -4px 0 0;
+}
+
+.tour-close-btn:hover {
+    color: #F44336;
+    background-color: rgba(244, 67, 54, 0.1);
+}
+
+.tour-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+}
+
+.tour-card-desc {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 16px;
+}
+
+.tour-progress-track {
+    width: 100px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: var(--tint-14);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.tour-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+    transition: width 0.25s ease;
+}
+
+.tour-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.tour-nav-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.tour-btn {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    border: 1px solid var(--gold-border);
+    background: transparent;
+    color: var(--gold);
+}
+
+.tour-btn:hover {
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
+}
+
+.tour-btn-primary {
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+    border: 1px solid var(--gold);
+    color: var(--text-dark);
+}
+
+.tour-btn-primary:hover {
+    background: linear-gradient(135deg, var(--gold), var(--gold-light));
+}
+
+.tour-btn-skip {
+    border-color: transparent;
+    color: var(--text-muted);
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+.tour-btn-skip:hover {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.tour-card.tour-welcome,
+.tour-card.tour-finish {
+    width: 400px;
+    text-align: center;
+}
+
+.tour-card.tour-welcome .tour-card-title,
+.tour-card.tour-finish .tour-card-title {
+    font-size: 18px;
+}
+
+.tour-card.tour-welcome .tour-card-footer,
+.tour-card.tour-finish .tour-card-footer {
+    justify-content: center;
+}
+
+.tour-card.tour-welcome .tour-progress-track,
+.tour-card.tour-finish .tour-progress-track {
+    display: none;
+}
+
+@media (max-width: 720px) {
+    .tour-card {
+        top: 72px;
+    }
+}

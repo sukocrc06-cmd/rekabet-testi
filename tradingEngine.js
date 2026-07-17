@@ -24,6 +24,7 @@
 const TradingEngine = (() => {
 
     const STORAGE_KEY = 'optipulselab_paper_portfolio_v1';
+    const LAST_SYMBOL_STORAGE_KEY = 'optipulselab_last_symbol_v1';
     const DEFAULT_BALANCE = 100000;
     const TICK_MS = 2000;
 
@@ -925,7 +926,29 @@ const TradingEngine = (() => {
     }
 
     async function selectSymbol(symbol) {
+        // Switching symbols must never leave a leftover quantity / SL-TP price
+        // sitting in the order ticket — otherwise a value typed for one symbol
+        // (e.g. "4769" while buying AEFES) can get silently submitted against
+        // whichever symbol happens to be active later (e.g. after coming back
+        // to a page that defaulted back to THYAO).
+        if (state.activeSymbol !== symbol) {
+            const qtyInput = byId('qt-qty');
+            if (qtyInput) qtyInput.value = '';
+            const limitInput = byId('qt-limit-price');
+            if (limitInput) limitInput.value = '';
+            const sltpToggle = byId('qt-sltp-toggle');
+            if (sltpToggle && sltpToggle.checked) {
+                sltpToggle.checked = false;
+                const sltpRow = byId('qt-sltp-row');
+                if (sltpRow) sltpRow.style.display = 'none';
+            }
+            const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
+            if (slInput) slInput.value = '';
+            if (tpInput) tpInput.value = '';
+        }
+
         state.activeSymbol = symbol;
+        try { localStorage.setItem(LAST_SYMBOL_STORAGE_KEY, symbol); } catch (e) { /* private mode / quota */ }
         openSymbolTab(symbol);
         renderChartTabs();
 
@@ -1230,7 +1253,16 @@ const TradingEngine = (() => {
                 }
                 portfolio.balance -= cost;
             } else {
-                portfolio.balance += price * remainingQty - openCommission;
+                // Açığa satış (short): bu demo motorunda kaldıraç/marj sistemi yok,
+                // bu yüzden açığa satılan tutarın tamamı kadar mevcut bakiye
+                // ("teminat") şart koşuluyor — aksi halde hiç sahip olunmayan bir
+                // miktar "satılarak" bakiyeye yoktan para eklenebilir.
+                const proceeds = price * remainingQty - openCommission;
+                if (portfolio.balance < price * remainingQty) {
+                    savePortfolio();
+                    return { ok: false, msg: 'Yetersiz demo bakiye (açığa satış için teminat gerekli).' };
+                }
+                portfolio.balance += proceeds;
             }
 
             if (!portfolio.positions[symbol]) {
@@ -1626,8 +1658,13 @@ const TradingEngine = (() => {
 
         setInterval(tickPrices, TICK_MS);
 
-        // Select a sensible default symbol on load
-        const first = DC.BIST100.find(s => s.symbol === 'THYAO') || DC.BIST100[0];
+        // Resume on whatever symbol was last being viewed, so a reload/revisit
+        // doesn't silently jump back to a default symbol while old ticket
+        // values (or just user expectations) still refer to a different one.
+        let lastSymbol = null;
+        try { lastSymbol = localStorage.getItem(LAST_SYMBOL_STORAGE_KEY); } catch (e) { /* private mode */ }
+        const restored = lastSymbol && DC.BIST100.find(s => s.symbol === lastSymbol);
+        const first = restored || DC.BIST100.find(s => s.symbol === 'THYAO') || DC.BIST100[0];
         if (first) selectSymbol(first.symbol);
     }
 

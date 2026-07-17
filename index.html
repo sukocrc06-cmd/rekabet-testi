@@ -54,6 +54,10 @@
                     <span class="header-balance-label">Bakiye</span>
                     <span class="header-balance-value" id="header-balance-value">--</span>
                 </div>
+                <button class="btn btn-secondary btn-tour" id="btn-open-tour" title="Uygulama Tanıtım Turu">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                    Tanıtım Turu
+                </button>
                 <button class="btn btn-secondary" id="btn-open-heatmap">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
                     Isı Haritası
@@ -783,6 +787,7 @@
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Açık pencereyi kapat</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">Bu pencereyi aç/kapat</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">Koyu / Açık temayı değiştir</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys">Tanıtım Turu</span><span class="shortcut-desc">Üstteki düğmeyle özellikleri gezen sunum turunu başlat</span></div>
                 </div>
                 <div class="indicator-modal-category" data-category-label="panel">
                     <div class="indicator-subgroup-label">Panel</div>
@@ -825,6 +830,8 @@
     <script src="tradingChart.js"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
     <script src="tradingEngine.js"></script>
+    <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
+    <script src="tourGuide.js"></script>
     <!-- Application Controller -->
     <script src="app.js"></script>
 
@@ -851,6 +858,7 @@
             // Initialize the new TradingView-style chart + demo trading engine
             if (window.TradingChart) window.TradingChart.init();
             if (window.TradingEngine) window.TradingEngine.init();
+            if (window.TourGuide) window.TourGuide.init();
 
             // Collapsible + resizable Analytics drawer (realtime Price Action / Equity /
             // Drawdown panel). Both panes' heights are set explicitly in px during a drag
