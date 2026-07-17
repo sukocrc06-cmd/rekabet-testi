@@ -4,11 +4,11 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * An opt-in, step-by-step walkthrough of the app's key features, meant for
- * live presentations (e.g. showing a professor what changed). It shows a
- * small floating card docked below the header — no dark overlay, no
- * element-highlighting. Behind the card, each step drives the REAL UI (opens
- * the real modal, switches the real panel tab) so the audience sees the
- * actual app working, not screenshots.
+ * live presentations (e.g. showing a professor what changed). Each step
+ * drives the REAL UI (opens the real modal, switches the real panel tab),
+ * draws a gold glow ring around the real element being described, and docks
+ * the narration card right next to it — so the audience sees the actual app
+ * working and knows exactly where to look, not screenshots.
  *
  * Depends on: window.TradingEngine, window.TradingChart already initialized
  * (script is included after both in index.html).
@@ -26,6 +26,9 @@ const TourGuide = (() => {
     let cardEl = null;
     let active = false;
     let currentIndex = -1;
+    let highlightedEl = null;
+    let lastTargetEl = null;
+    let repositionRaf = null;
 
     /* ────────── Step definitions ────────── */
     // Each step optionally has:
@@ -50,27 +53,32 @@ const TourGuide = (() => {
             },
             {
                 setup: async () => { closeAllAppModals(); },
+                selector: '#tv-chart-tabs-bar',
                 title: 'Çoklu Grafik Sekmeleri',
                 desc: 'Grafiğin üstündeki sekme çubuğuna bakın — artık aynı anda birden fazla sembolü açık tutabilirsiniz (en fazla 8 sekme). Sekmeler arası geçiş için 1-9 rakam tuşlarını veya [ / ] kısayollarını kullanabilirsiniz.'
             },
             {
+                selector: '#chart-toolbar',
                 title: 'Çizim Araçları + Kopyala/Yapıştır',
                 desc: 'Grafiğin üstündeki araç çubuğunda trend çizgisi, yatay çizgi, dikdörtgen ve Fibonacci retracement bulunuyor. Çizimleri ve gösterge ayarlarını artık Ctrl+C / Ctrl+V ile kopyalayıp yapıştırabilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-indicators')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
+                selector: '#indicator-modal-backdrop .indicator-modal',
                 title: 'Göstergeler Artık Kenar Çubuğunda Değil',
                 desc: 'Göstergeler eskiden sol paneldeydi; şimdi az önce açılan bu pencerede, kaldırılabilir "chip" etiketleriyle yönetiliyor.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-alerts')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
+                selector: '#alerts-modal-backdrop .indicator-modal',
                 title: 'Fiyat Alarmları',
                 desc: 'Açılan pencereden bir sembol için hedef fiyat belirleyebilirsiniz — fiyat o seviyeye ulaştığında uygulama içinde (isterseniz tarayıcı bildirimi olarak da) haberdar olursunuz.'
             },
             {
                 setup: async () => { closeAllAppModals(); },
+                selector: () => byId('watchlist-body')?.closest('.form-group') || byId('watchlist-body'),
                 title: 'Sadeleştirilmiş İzleme Listesi',
                 desc: 'Sol taraftaki izleme listesine bakın — daha sade bir tasarıma kavuştu, arama kutusuyla semboller arasında hızlıca gezinebilirsiniz.'
             },
@@ -91,43 +99,51 @@ const TourGuide = (() => {
                         chk.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 },
+                selector: '#qt-sltp-row',
                 title: 'Stop-Loss / Take-Profit',
                 desc: 'Sağdaki emir panelinde şimdi açılan alanlara bakın — emir girerken ya da açık bir pozisyonda sonradan Stop-Loss / Take-Profit seviyeleri belirleyebilirsiniz. Fiyat o seviyeye ulaştığında pozisyon otomatik kapanır.'
             },
             {
                 setup: async () => { closeAllAppModals(); switchPanelTab('orderbook'); },
+                selector: '#panel-tab-orderbook',
                 title: 'Emir Defteri (Order Book)',
                 desc: 'Sağdaki panel şimdi "Emir Defteri" sekmesinde — Binance tarzı simüle edilmiş alım/satım derinliği, canlı değişen fiyat kademeleri ve orta fiyat çizgisiyle.'
             },
             {
                 setup: async () => { switchPanelTab('trades'); },
+                selector: '#panel-tab-trades',
                 title: 'Son İşlemler Akışı',
                 desc: 'Şimdi "Son İşlemler" sekmesindesiniz — simüle edilmiş canlı işlem akışı (trade tape), her işlemin fiyatı, miktarı ve saatiyle birlikte akıyor.'
             },
             {
                 setup: async () => { switchPanelTab('performance'); },
+                selector: '#panel-tab-performance',
                 title: 'Portföy Performans Analitiği',
                 desc: '"Performans" sekmesinde toplam K/Z, kazanma oranı, profit factor ve canlı özkaynak eğrisiyle performansınızı tek ekrandan takip edebilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-heatmap')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
+                selector: '.heatmap-modal',
                 title: 'BIST100 Isı Haritası',
                 desc: 'Açılan pencerede tüm BIST100 sembollerinin günlük performansını renk yoğunluğuna göre tek bakışta görebilirsiniz; bir kareye tıklayarak o sembole geçebilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); switchPanelTab('trade'); },
+                selector: '#btn-export-history-csv',
                 title: 'İşlem Geçmişini CSV Olarak İndir',
                 desc: 'Sağ paneldeki "Son Emirler" bölümünün yanındaki CSV düğmesiyle tüm işlem geçmişinizi Excel uyumlu (Türkçe karakter destekli) bir dosya olarak dışa aktarabilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-shortcuts')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
+                selector: '#shortcuts-modal-backdrop .indicator-modal',
                 title: 'Klavye Kısayolları',
                 desc: 'Açılan pencerede tüm kısayolları görebilirsiniz: B/S ile alım-satım yönü, 1-9 ile grafik sekmeleri, T ile tema, ? ile bu pencere... Elinizi klavyeden kaldırmadan uygulamayı kullanabilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); },
+                selector: '#btn-theme-toggle',
                 title: 'Koyu / Açık Tema',
                 desc: 'Sağ üstteki tema düğmesi veya "T" kısayoluyla koyu ve açık tema arasında anında geçiş yapabilirsiniz; tercihiniz tarayıcınızda hatırlanır.'
             },
@@ -172,8 +188,87 @@ const TourGuide = (() => {
         byId('tour-btn-next').addEventListener('click', next);
     }
 
+    /* ────────── Highlight ring ────────── */
+    function clearHighlight() {
+        if (highlightedEl) {
+            highlightedEl.classList.remove('tour-highlight-ring');
+            highlightedEl = null;
+        }
+    }
+    function setHighlight(el) {
+        clearHighlight();
+        if (el) {
+            el.classList.add('tour-highlight-ring');
+            highlightedEl = el;
+        }
+    }
+
+    /* ────────── Positioning: dock the card next to the real target ────────── */
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    function positionNear(rect) {
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const margin = 16;
+        const cardW = cardEl.offsetWidth || 380;
+        const cardH = cardEl.offsetHeight || 160;
+
+        if (!rect) {
+            // Centered bookend steps (welcome / finish) — dock below the header, centered.
+            cardEl.style.top = '80px';
+            cardEl.style.left = clamp(vw / 2 - cardW / 2, margin, vw - cardW - margin) + 'px';
+            return;
+        }
+
+        const spaceBelow = vh - rect.bottom;
+        const spaceAbove = rect.top;
+        const spaceRight = vw - rect.right;
+        const spaceLeft = rect.left;
+        let top, left;
+
+        if (spaceBelow > cardH + 24) {
+            top = rect.bottom + 16;
+            left = clamp(rect.left + rect.width / 2 - cardW / 2, margin, vw - cardW - margin);
+        } else if (spaceRight > cardW + 24) {
+            left = rect.right + 16;
+            top = clamp(rect.top + rect.height / 2 - cardH / 2, margin, vh - cardH - margin);
+        } else if (spaceLeft > cardW + 24) {
+            left = rect.left - cardW - 16;
+            top = clamp(rect.top + rect.height / 2 - cardH / 2, margin, vh - cardH - margin);
+        } else if (spaceAbove > cardH + 24) {
+            top = rect.top - cardH - 16;
+            left = clamp(rect.left + rect.width / 2 - cardW / 2, margin, vw - cardW - margin);
+        } else {
+            // Nothing fits cleanly (e.g. a very large modal) — dock below the
+            // header instead of covering the target's most important area.
+            top = 80;
+            left = clamp(vw / 2 - cardW / 2, margin, vw - cardW - margin);
+        }
+
+        cardEl.style.top = top + 'px';
+        cardEl.style.left = left + 'px';
+    }
+
+    function reposition() {
+        if (!active) return;
+        const rect = lastTargetEl ? lastTargetEl.getBoundingClientRect() : null;
+        positionNear(rect);
+    }
+    function scheduleReposition() {
+        if (repositionRaf) return;
+        repositionRaf = requestAnimationFrame(() => { repositionRaf = null; reposition(); });
+    }
+
+    async function resolveStepEl(step) {
+        if (!step.selector) return null;
+        let el = typeof step.selector === 'function' ? step.selector() : document.querySelector(step.selector);
+        if (!el) return null;
+        try { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch (e) { /* ignore */ }
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return el;
+    }
+
     /* ────────── Step lifecycle ────────── */
-    function renderStep(step, index) {
+    function renderStep(step, index, el) {
         byId('tour-step-count').textContent = (index + 1) + ' / ' + STEPS.length;
         byId('tour-card-title').textContent = step.title || '';
         byId('tour-card-desc').textContent = step.desc || '';
@@ -186,6 +281,11 @@ const TourGuide = (() => {
 
         cardEl.classList.toggle('tour-welcome', !!step.welcome);
         cardEl.classList.toggle('tour-finish', !!step.finish);
+
+        lastTargetEl = el || null;
+        setHighlight(el || null);
+        const rect = el ? el.getBoundingClientRect() : null;
+        positionNear(rect);
 
         cardEl.classList.add('tour-visible');
     }
@@ -201,6 +301,7 @@ const TourGuide = (() => {
     async function goTo(index) {
         if (!active || index < 0 || index >= STEPS.length) return;
         teardownStep(currentIndex);
+        clearHighlight();
         currentIndex = index;
         const step = STEPS[index];
 
@@ -208,7 +309,9 @@ const TourGuide = (() => {
             try { await step.setup(); } catch (e) { console.warn('[TourGuide] setup failed', e); }
         }
         if (!active) return; // tour may have been closed while awaiting
-        renderStep(step, index);
+        const el = await resolveStepEl(step);
+        if (!active) return; // ...or while awaiting the scroll-into-view frame
+        renderStep(step, index, el);
     }
 
     function next() {
@@ -239,15 +342,21 @@ const TourGuide = (() => {
         active = true;
         currentIndex = -1;
         document.addEventListener('keydown', onKeyDown, true);
+        window.addEventListener('resize', scheduleReposition);
+        window.addEventListener('scroll', scheduleReposition, true);
         await goTo(0);
     }
 
     function end() {
         if (!active) return;
         teardownStep(currentIndex);
+        clearHighlight();
         active = false;
         currentIndex = -1;
+        lastTargetEl = null;
         document.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('resize', scheduleReposition);
+        window.removeEventListener('scroll', scheduleReposition, true);
         if (cardEl) cardEl.classList.remove('tour-visible');
     }
 

@@ -3006,10 +3006,11 @@ body.chart-maximized-active {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    FEATURE TOUR / DEMO WIZARD (tanıtım sihirbazı)
-   A small floating step-by-step card, docked below the header. No dark
-   overlay and no element-highlighting — it just narrates while each step
-   drives the real UI (opens the real modal / switches the real tab) behind
-   it, so a live presentation shows the actual app, not screenshots.
+   A small floating step-by-step card. No dark overlay, but each step DOES
+   drive the real UI (opens the real modal / switches the real tab) AND
+   visually highlights the real element being described (gold glow ring),
+   with the card itself docked right next to it — so a live presentation
+   both narrates and points at the actual app, not screenshots.
    See tourGuide.js.
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -3026,11 +3027,22 @@ body.chart-maximized-active {
     50% { box-shadow: 0 0 0 6px rgba(212, 175, 55, 0); }
 }
 
+/* Gold glow ring applied to whatever real element the current tour step is
+   describing (chart toolbar, a modal, a panel tab, ...). Added/removed by
+   tourGuide.js as steps change. */
+.tour-highlight-ring {
+    box-shadow: 0 0 0 3px var(--gold), 0 0 22px 4px var(--gold-glow, rgba(212, 175, 55, 0.5));
+    border-radius: 8px;
+    animation: tourHighlightPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tourHighlightPulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--gold), 0 0 22px 4px var(--gold-glow, rgba(212, 175, 55, 0.5)); }
+    50% { box-shadow: 0 0 0 3px var(--gold), 0 0 34px 8px var(--gold-glow, rgba(212, 175, 55, 0.5)); }
+}
+
 .tour-card {
     position: fixed;
-    top: 80px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-6px);
     z-index: 950;
     width: 380px;
     max-width: calc(100vw - 32px);
@@ -3041,12 +3053,11 @@ body.chart-maximized-active {
     padding: 18px 20px 16px;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.22s ease, transform 0.22s ease;
+    transition: top 0.28s cubic-bezier(0.4, 0, 0.2, 1), left 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
 }
 
 .tour-card.tour-visible {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
     pointer-events: auto;
 }
 
@@ -3189,6 +3200,6 @@ body.chart-maximized-active {
 
 @media (max-width: 720px) {
     .tour-card {
-        top: 72px;
+        width: calc(100vw - 32px);
     }
 }
