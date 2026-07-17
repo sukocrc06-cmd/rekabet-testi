@@ -214,13 +214,20 @@ const DataController = (() => {
 
         const candles = [];
         let prevClose = profile.basePrice;
-        const startDate = new Date('2026-06-01T00:00:00');
+        // Anchor day 0 to 2026-06-01 using UTC field math (Date.UTC), not a
+        // local-time Date — this keeps candle timestamps 100% independent of
+        // whatever timezone this code happens to run in (sandbox vs. the
+        // user's own machine), which matters now that `date` is a unix-second
+        // timestamp consumed directly by Lightweight Charts' UTC-based axis
+        // formatting (see synthesizeIntradayCandles()'s comment for the full
+        // "treat UTC fields as TRT wall-clock" convention this app uses).
+        const startMs = Date.UTC(2026, 5, 1); // 2026-06-01T00:00:00Z
 
         for (let i = 0; i < days; i++) {
-            const date = new Date(startDate);
-            date.setDate(startDate.getDate() + i);
+            const dayMs = startMs + i * 86400000;
+            const dow = new Date(dayMs).getUTCDay();
             // Skip weekends
-            if (date.getDay() === 0 || date.getDay() === 6) {
+            if (dow === 0 || dow === 6) {
                 days++;        // extend iteration so we get 30 *trading* days
                 continue;
             }
@@ -237,7 +244,7 @@ const DataController = (() => {
             const volume = Math.round(profile.avgVolume * volumeNoise);
 
             candles.push({
-                date: date.toISOString().slice(0, 10),
+                date: Math.floor(dayMs / 1000), // unix seconds (UTC midnight of this trading day)
                 open, high, low, close, volume
             });
 
@@ -257,6 +264,137 @@ const DataController = (() => {
             result[ticker] = generateOHLCV(ticker);
         }
         return result;
+    }
+
+    /* ──────────────── 1b. Timeframe Resolution Engine ────────────────
+     * Everything in this app is DAILY-bar data (real fetched OHLCV or the
+     * synthetic generator above) — there is no real intraday feed. To make
+     * the TradingView-style "15m / 1H / 4H / 1D / 1W" resolution selector on
+     * the chart genuinely functional rather than a decorative dead button,
+     * each daily bar is deterministically exploded into sub-bars (intraday)
+     * or grouped with its trading-week neighbors (weekly). Deterministic =
+     * seeded per-bar, so switching resolutions back and forth always
+     * reproduces the same synthetic shape instead of jittering randomly.
+     *
+     * Convention: every candle's `date` field across this whole app is a
+     * unix-second timestamp whose UTC calendar/clock fields are meant to be
+     * read AS IF they were TRT (Europe/Istanbul, UTC+3) wall-clock fields —
+     * e.g. a bar tagged 07:00 UTC represents "10:00 TRT", the BIST session
+     * open. This is a deliberate simplification (real UTC offset is never
+     * applied) so Lightweight Charts' UTC-based axis formatting and this
+     * module's own display formatting always agree without needing timezone
+     * conversion anywhere. */
+
+    const BIST_SESSION_START_UTC_SECONDS = 7 * 3600;  // "10:00 TRT" -> 07:00 on the UTC-labeled clock
+    const BIST_SESSION_MINUTES = 480;                  // "10:00-18:00 TRT" 8-hour session
+
+    /**
+     * Explode each daily candle into N deterministic intraday sub-bars that
+     * respect the parent bar's open/high/low/close exactly (first sub-bar's
+     * open == daily open, last sub-bar's close == daily close, and the
+     * min/max across all sub-bars reproduces the daily low/high).
+     * @param {Array} dailyCandles — daily candles as produced by generateOHLCV
+     *   or the /api/v1/ohlcv backend parser (each needs date/open/high/low/close/volume)
+     * @param {number} resolutionMinutes — e.g. 15, 60, 240
+     * @returns {Array} intraday candles, same shape, many more of them
+     */
+    function synthesizeIntradayCandles(dailyCandles, resolutionMinutes) {
+        if (!Array.isArray(dailyCandles) || !dailyCandles.length) return [];
+        const barsPerDay = Math.max(1, Math.round(BIST_SESSION_MINUTES / resolutionMinutes));
+        const secondsPerBar = (BIST_SESSION_MINUTES * 60) / barsPerDay;
+        const out = [];
+
+        dailyCandles.forEach(day => {
+            const { date, open, high, low, close } = day;
+            const volume = day.volume || 0;
+            const dayStart = date + BIST_SESSION_START_UTC_SECONDS;
+            const range = Math.max(high - low, 0.01);
+
+            // Deterministic per-day seed (no external ticker param needed —
+            // the bar's own values already make it unique).
+            const seed = Math.abs(Math.round(date * 2654435761 + open * 977 + close * 613)) % 2147483647;
+            const rng = mulberry32(seed || 1);
+
+            // Brownian-bridge control points: points[0]=open ... points[n]=close,
+            // with noise tapering to 0 at both ends so the bridge lands exactly
+            // on the daily open/close.
+            const points = [open];
+            for (let i = 1; i < barsPerDay; i++) {
+                const t = i / barsPerDay;
+                const drift = open + (close - open) * t;
+                const noise = (rng() - 0.5) * range * 0.7 * Math.sin(Math.PI * t);
+                points.push(drift + noise);
+            }
+            points.push(close);
+            for (let i = 0; i <= barsPerDay; i++) {
+                points[i] = Math.min(high, Math.max(low, points[i]));
+            }
+            points[0] = open;
+            points[barsPerDay] = close;
+
+            // Force the daily low/high to actually appear somewhere in the
+            // interior of the path, so the sub-bars reconstruct the exact
+            // daily range instead of just approximating it.
+            if (barsPerDay >= 3) {
+                const lowIdx = 1 + Math.floor(rng() * (barsPerDay - 1));
+                let highIdx = 1 + Math.floor(rng() * (barsPerDay - 1));
+                if (highIdx === lowIdx) highIdx = (lowIdx % (barsPerDay - 1)) + 1;
+                points[lowIdx] = low;
+                points[highIdx] = high;
+            }
+
+            const volPerBar = volume / barsPerDay;
+            for (let i = 0; i < barsPerDay; i++) {
+                const o = points[i], c = points[i + 1];
+                const wick = range * 0.05 * rng();
+                const hi = Math.min(high, Math.max(o, c) + wick);
+                const lo = Math.max(low, Math.min(o, c) - wick);
+                out.push({
+                    date: Math.round(dayStart + i * secondsPerBar),
+                    open: +o.toFixed(2),
+                    high: +hi.toFixed(2),
+                    low: +lo.toFixed(2),
+                    close: +c.toFixed(2),
+                    volume: Math.round(volPerBar * (0.6 + rng() * 0.8))
+                });
+            }
+        });
+
+        return out;
+    }
+
+    /**
+     * Aggregate daily candles into one bar per trading week (Mon-anchored),
+     * OHLC-rolled up (open=first day's open, close=last day's close,
+     * high/low = week's extremes, volume = week's sum).
+     * @param {Array} dailyCandles
+     * @returns {Array} weekly candles, same shape as daily
+     */
+    function aggregateWeeklyCandles(dailyCandles) {
+        if (!Array.isArray(dailyCandles) || !dailyCandles.length) return [];
+        const weeks = new Map();
+
+        dailyCandles.forEach(c => {
+            const d = new Date(c.date * 1000);
+            const dow = d.getUTCDay(); // 0=Sun..6=Sat
+            const diffToMonday = dow === 0 ? -6 : 1 - dow;
+            const mondayMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diffToMonday);
+            const key = Math.floor(mondayMs / 1000);
+            if (!weeks.has(key)) weeks.set(key, []);
+            weeks.get(key).push(c);
+        });
+
+        return Array.from(weeks.keys()).sort((a, b) => a - b).map(key => {
+            const bucket = weeks.get(key);
+            return {
+                date: key,
+                open: bucket[0].open,
+                high: Math.max(...bucket.map(c => c.high)),
+                low: Math.min(...bucket.map(c => c.low)),
+                close: bucket[bucket.length - 1].close,
+                volume: bucket.reduce((s, c) => s + (c.volume || 0), 0)
+            };
+        });
     }
 
     /* ──────────────── 2. Strategy Engine (SMA Crossover) ──────────────── */
@@ -1274,6 +1412,8 @@ const DataController = (() => {
         // Data generation
         generateOHLCV,
         generateAllOHLCV,
+        synthesizeIntradayCandles,
+        aggregateWeeklyCandles,
 
         // Strategy
         runStrategy,

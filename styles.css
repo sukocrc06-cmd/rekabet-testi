@@ -448,210 +448,6 @@ body {
     appearance: none;
 }
 
-/* Presets (Button Groups) */
-.timeframe-presets {
-    display: flex;
-    gap: 8px;
-}
-
-.preset-btn {
-    flex: 1;
-    background-color: var(--bg-input);
-    border: 1px solid var(--gold-border);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    padding: 6px 0;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    transition: var(--transition-fast);
-}
-
-.preset-btn:hover {
-    border-color: var(--gold);
-    color: var(--text-primary);
-}
-
-.preset-btn.active {
-    background-color: var(--gold-dim);
-    border-color: var(--gold);
-    color: var(--gold);
-}
-
-/* Date Range Inputs */
-.date-range-inputs {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.date-input-wrapper {
-    display: flex;
-    align-items: center;
-    background-color: var(--bg-input);
-    border: 1px solid var(--gold-border);
-    border-radius: var(--radius-md);
-    padding-left: 12px;
-}
-
-.date-label {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-weight: 700;
-    width: 40px;
-}
-
-.date-input-wrapper input {
-    background: transparent;
-    border: none;
-    width: 100%;
-    color: var(--text-primary);
-    padding: 8px 12px 8px 0;
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
-
-.date-input-wrapper input:focus {
-    outline: none;
-}
-
-/* Custom Engine Selection (Radio List) */
-.engine-options {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.engine-radio-label {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    background-color: var(--bg-input);
-    border: 1px solid var(--gold-border);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    cursor: pointer;
-    transition: var(--transition-fast);
-}
-
-.engine-radio-label:hover {
-    border-color: var(--gold);
-    background-color: rgba(212, 175, 55, 0.03);
-}
-
-.engine-radio-label input {
-    display: none;
-}
-
-.custom-radio {
-    width: 16px;
-    height: 16px;
-    border: 1.5px solid var(--gold-border);
-    border-radius: 50%;
-    display: inline-block;
-    position: relative;
-    margin-top: 2px;
-    flex-shrink: 0;
-    transition: var(--transition-fast);
-}
-
-.engine-radio-label input:checked + .custom-radio {
-    border-color: var(--gold);
-}
-
-.engine-radio-label input:checked + .custom-radio::after {
-    content: "";
-    width: 8px;
-    height: 8px;
-    background-color: var(--gold);
-    border-radius: 50%;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-}
-
-.engine-details {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.engine-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.engine-radio-label input:checked ~ .engine-details .engine-name {
-    color: var(--gold);
-}
-
-.engine-desc {
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-/* Collapsible Settings Group */
-.collapsible-group {
-    border-top: 1px solid var(--tint-05);
-    padding-top: 16px;
-    margin-top: 12px;
-}
-
-.collapsible-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    user-select: none;
-}
-
-.collapsible-header:hover {
-    color: var(--gold);
-}
-
-.chevron-icon {
-    transition: transform 0.3s ease;
-    color: var(--gold);
-}
-
-.collapsible-group.open .chevron-icon {
-    transform: rotate(180deg);
-}
-
-.collapsible-content {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease-out;
-}
-
-.collapsible-group.open .collapsible-content {
-    max-height: 500px;
-    margin-top: 12px;
-}
-
-.form-group-sub {
-    margin-bottom: 12px;
-}
-
-.form-group-sub label {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    margin-bottom: 4px;
-}
-
-.form-input-sub {
-    padding: 8px 10px;
-    font-size: 12px;
-}
-
 /* Custom Checkboxes */
 .indicator-checkbox-group {
     display: flex;
@@ -1399,9 +1195,23 @@ body {
     color: var(--gold);
 }
 
-/* --- Watchlist --- */
+/* --- Watchlist ---
+ * Now that the Geriye Dönük Test Ayarları panel below it is gone, the
+ * watchlist is the sidebar's only remaining content below the search box —
+ * it flex-grows to fill all remaining sidebar height instead of stopping at
+ * a fixed 260px, with its own internal scroll once the list outgrows that. */
+.watchlist-form-group {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-bottom: 0;
+}
+
 .watchlist-container {
-    max-height: 260px;
+    flex: 1 1 auto;
+    min-height: 160px;
+    max-height: none;
     overflow-y: auto;
     border: 1px solid var(--gold-border);
     border-radius: var(--radius-md);
@@ -1871,6 +1681,36 @@ body {
 
 .tv-indicators-btn.alert-flash {
     animation: alertFlashPulse 0.8s ease-out 2;
+}
+
+.tv-scale-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--gold-border);
+    color: var(--text-secondary);
+    width: 32px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.tv-scale-toggle-btn:hover {
+    color: var(--gold-light);
+    border-color: var(--gold);
+    background-color: var(--gold-dim);
+}
+
+.tv-scale-toggle-btn.active {
+    color: var(--gold);
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
 }
 
 .tv-overlay-legend {
@@ -2446,6 +2286,41 @@ body {
 .drawing-context-item.disabled {
     opacity: 0.35;
     pointer-events: none;
+}
+
+/* Zaman dilimi (resolution) şeridi — gerçek TradingView konumu: ana araç
+ * çubuğunun hemen altında, mum grafiğinin üstünde. */
+.tv-resolution-bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 14px;
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+}
+
+.tv-res-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    padding: 3px 9px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.tv-res-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--tint-05);
+}
+
+.tv-res-btn.active {
+    color: var(--gold);
+    background-color: var(--gold-dim);
+    border-color: var(--gold-border);
 }
 
 .tv-chart-area {

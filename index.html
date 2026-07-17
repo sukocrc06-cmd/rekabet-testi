@@ -102,100 +102,14 @@
                     <input type="text" id="watchlist-search" class="form-input" placeholder="Sembol veya şirket adı...">
                 </div>
 
-                <!-- Watchlist -->
-                <div class="form-group" style="margin-bottom: 12px;">
+                <!-- Watchlist: fills all remaining sidebar height now that the
+                     Geriye Dönük Test Ayarları panel below it is gone. -->
+                <div class="form-group watchlist-form-group">
                     <label>İzleme Listesi</label>
                     <div class="watchlist-container" id="watchlist-body">
                         <!-- Populated dynamically by tradingEngine.js -->
                     </div>
                 </div>
-
-                <!-- Hidden legacy select kept for backtest pipeline compatibility -->
-                <select id="stock-select" style="display:none;" aria-hidden="true" tabindex="-1"></select>
-
-                <!-- Backtest Settings (collapsed by default) -->
-                <form id="parameters-form" onsubmit="event.preventDefault();">
-                    <div class="form-group collapsible-group">
-                        <div class="collapsible-header" id="advanced-settings-toggle">
-                            <span>Geriye Dönük Test Ayarları</span>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron-icon"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        </div>
-                        <div class="collapsible-content" id="advanced-settings-content">
-                            <div class="form-group-sub">
-                                <label>Zaman Dilimi</label>
-                                <div class="timeframe-presets" role="group" aria-label="Timeframe resolution presets">
-                                    <button type="button" class="preset-btn active" data-res="1m">1m</button>
-                                    <button type="button" class="preset-btn" data-res="5m">5m</button>
-                                    <button type="button" class="preset-btn" data-res="1h">1h</button>
-                                    <button type="button" class="preset-btn" data-res="1d">1d</button>
-                                </div>
-                            </div>
-
-                            <div class="form-group-sub">
-                                <label for="start-date">Tarih Aralığı</label>
-                                <div class="date-range-inputs">
-                                    <div class="date-input-wrapper">
-                                        <span class="date-label">FROM</span>
-                                        <input type="date" id="start-date" class="form-input" value="2026-01-01">
-                                    </div>
-                                    <div class="date-input-wrapper">
-                                        <span class="date-label">TO</span>
-                                        <input type="date" id="end-date" class="form-input" value="2026-07-01">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="form-group-sub">
-                                <label>Yürütme Motoru</label>
-                                <div class="engine-options">
-                                    <label class="engine-radio-label">
-                                        <input type="radio" name="engine-select" value="optipulse" checked>
-                                        <span class="custom-radio"></span>
-                                        <div class="engine-details">
-                                            <span class="engine-name">OptiPulse Core</span>
-                                            <span class="engine-desc">Ultra-low latency C++ runner</span>
-                                        </div>
-                                    </label>
-
-                                    <label class="engine-radio-label">
-                                        <input type="radio" name="engine-select" value="backtrader">
-                                        <span class="custom-radio"></span>
-                                        <div class="engine-details">
-                                            <span class="engine-name">Backtrader Engine</span>
-                                            <span class="engine-desc">Python standard backtest module</span>
-                                        </div>
-                                    </label>
-
-                                    <label class="engine-radio-label">
-                                        <input type="radio" name="engine-select" value="custom">
-                                        <span class="custom-radio"></span>
-                                        <div class="engine-details">
-                                            <span class="engine-name">Custom Sandbox</span>
-                                            <span class="engine-desc">Isolated JS script environment</span>
-                                        </div>
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div class="form-group-sub">
-                                <label for="initial-capital">Initial Capital (₺)</label>
-                                <input type="number" id="initial-capital" class="form-input form-input-sub" value="100000" min="1000">
-                            </div>
-                            <div class="form-group-sub">
-                                <label for="commission-rate">Slippage & Commission (%)</label>
-                                <input type="number" id="commission-rate" class="form-input form-input-sub" value="0.05" step="0.01" min="0">
-                            </div>
-                            <div class="form-group-sub" style="margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 12px;">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="chk-oos-validation">
-                                    <span class="custom-checkbox"></span>
-                                    <span class="checkbox-text" style="font-weight: 600;">Out-of-Sample (OOS)</span>
-                                </label>
-                                <span style="display: block; font-size: 10px; color: var(--text-muted); margin-top: 4px;">Splits data: 70% Training / 30% Validation</span>
-                            </div>
-                        </div>
-                    </div>
-                </form>
             </aside>
 
             <!-- MAIN CONTENT AREA -->
@@ -229,6 +143,10 @@
 
                         <div class="tv-drawing-toolbar" id="chart-toolbar" role="group" aria-label="Çizim araçları"></div>
 
+                        <button type="button" class="tv-scale-toggle-btn" id="btn-price-scale-toggle" title="Fiyat Ölçeği: Doğrusal / Logaritmik">
+                            <span id="price-scale-mode-label">Lin</span>
+                        </button>
+
                         <button type="button" class="tv-indicators-btn" id="btn-open-indicators" title="Göstergeler">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18.7 8a3 3 0 1 1-3.4-3"></path><path d="M7 15l3-3 3 3 4-5"></path></svg>
                             <span>Göstergeler</span>
@@ -241,6 +159,16 @@
                         </button>
 
                         <div class="tv-overlay-legend" id="tv-overlay-legend"></div>
+                    </div>
+
+                    <!-- Zaman dilimi şeridi: TradingView'daki gerçek konumu — ana araç
+                         çubuğunun hemen altında, mum grafiğinin üstünde. -->
+                    <div class="tv-resolution-bar" id="tv-resolution-bar" role="group" aria-label="Zaman dilimi">
+                        <button type="button" class="tv-res-btn" data-res="15m">15m</button>
+                        <button type="button" class="tv-res-btn" data-res="1h">1H</button>
+                        <button type="button" class="tv-res-btn" data-res="4h">4H</button>
+                        <button type="button" class="tv-res-btn active" data-res="1d">1D</button>
+                        <button type="button" class="tv-res-btn" data-res="1w">1W</button>
                     </div>
 
                     <div class="tv-chart-area">

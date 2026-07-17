@@ -66,8 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
         metricsPanels:$$('.metrics-section .tab-panel'),
 
         // Collapsible
-        advToggle: $('#advanced-settings-toggle'),
-        advGroup:  $('#advanced-settings-toggle') ? $('#advanced-settings-toggle').closest('.collapsible-group') : null,
         indToggle: $('#indicators-settings-toggle'),
         indGroup:  $('#indicators-settings-toggle') ? $('#indicators-settings-toggle').closest('.collapsible-group') : null,
 
@@ -78,16 +76,13 @@ document.addEventListener('DOMContentLoaded', () => {
         chkBollinger: $('#chk-bollinger'),
         chkVwap:      $('#chk-vwap'),
 
-        // Timeframe presets
-        tfBtns: $$('.timeframe-presets .preset-btn'),
-
-        // Form controls
+        // Form controls (legacy — most of these target elements removed
+        // along with the Geriye Dönük Test Ayarları panel; kept only where
+        // still referenced by already-unreachable legacy pipeline functions
+        // below, all of which are null-guarded)
         stockSelect:    $('#stock-select'),
-        startDate:      $('#start-date'),
-        endDate:        $('#end-date'),
         capitalInput:   $('#initial-capital'),
         commissionInput:$('#commission-rate'),
-        engineRadios:   document.getElementsByName('engine-select'),
 
         // Action buttons
         btnRun:   $('#btn-run-backtest'),
@@ -229,89 +224,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ────────────── Collapsible Toggles ────────────── */
 
-    if (el.advToggle && el.advGroup) {
-        el.advToggle.addEventListener('click', () => {
-            el.advGroup.classList.toggle('open');
-        });
-    }
-
     if (el.indToggle && el.indGroup) {
         el.indToggle.addEventListener('click', () => {
             el.indGroup.classList.toggle('open');
         });
     }
 
-    /* ────────────── Resolution Presets ────────────── */
-
-    el.tfBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            el.tfBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.resolution = btn.dataset.res;
-            showNotice(`Resolution → ${state.resolution}`);
-        });
-    });
-
-    /* ────────────── Asset Selector (AUTO-RUN) ────────────── */
-
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
-
-    if (el.stockSelect) {
-        el.stockSelect.addEventListener('change', debounce((e) => {
-            state.selectedAsset = e.target.value;
-            showNotice(`Asset → ${state.selectedAsset} — streaming live rates…`);
-            if (window.runAnalysis) {
-                window.runAnalysis();
-            }
-        }, 300));
-    }
-
-    /* ────────────── Reset ────────────── */
-
+    /* ────────────── Reset ──────────────
+     * This used to reset the (now-removed) Geriye Dönük Test Ayarları form
+     * fields — start/end date, initial capital, commission, engine choice —
+     * none of which exist in the DOM anymore. In a live trading terminal
+     * "Reset" most usefully means resetting the paper-trading account, so it
+     * now delegates to that instead of leaving a dead button behind. */
     if (el.btnReset) {
         el.btnReset.addEventListener('click', () => {
-            if (el.stockSelect && el.stockSelect.options.length > 0) {
-                el.stockSelect.selectedIndex = 0;
-                state.selectedAsset = el.stockSelect.value;
-            }
-
-            el.tfBtns.forEach(b => b.classList.remove('active'));
-            el.tfBtns[0].classList.add('active');
-            state.resolution = '1m';
-
-            el.startDate.value  = '2026-01-01';
-            el.endDate.value    = '2026-07-01';
-            el.capitalInput.value   = '100000';
-            el.commissionInput.value = '0.05';
-
-            if (el.chkSma20) el.chkSma20.checked = true;
-            if (el.chkSma50) el.chkSma50.checked = false;
-            if (el.chkSma200) el.chkSma200.checked = false;
-            if (el.chkBollinger) el.chkBollinger.checked = true;
-            if (el.chkVwap) el.chkVwap.checked = false;
-
-            if (el.chkEngineOpti) el.chkEngineOpti.checked = true;
-            if (el.chkEngineBacktrader) el.chkEngineBacktrader.checked = true;
-            if (el.chkEngineCustom) el.chkEngineCustom.checked = true;
-
-            if (el.chkOosValidation) el.chkOosValidation.checked = false;
-
-            el.engineRadios.forEach(r => { if (r.value === 'optipulse') r.checked = true; });
-            state.engine = 'optipulse';
-
-            showNotice('Parameters reset to defaults');
-
-            // Keep the watchlist / trading chart in sync with the reset asset
-            if (window.TradingEngine && state.selectedAsset) {
-                window.TradingEngine.selectSymbol(state.selectedAsset);
-            } else if (window.executePipelinePromise) {
-                window.executePipelinePromise();
+            if (window.TradingEngine && typeof window.TradingEngine.resetPortfolio === 'function') {
+                window.TradingEngine.resetPortfolio();
+            } else {
+                const portfolioResetBtn = document.getElementById('qt-reset-portfolio');
+                if (portfolioResetBtn) portfolioResetBtn.click();
             }
         });
     }

@@ -55,6 +55,19 @@ const TradingChart = (() => {
         { id: 'heikin_ashi',  label: 'Heikin Ashi' }
     ];
 
+    // Resolution selector (functional, not decorative) — the underlying data
+    // is always daily bars, so 'intraday' entries are synthesized client-side
+    // via DataController.synthesizeIntradayCandles() and 'weekly' is an
+    // OHLC roll-up via aggregateWeeklyCandles(). See dataController.js's
+    // "Timeframe Resolution Engine" section for the full explanation.
+    const RESOLUTIONS = [
+        { id: '15m', kind: 'intraday', minutes: 15 },
+        { id: '1h',  kind: 'intraday', minutes: 60 },
+        { id: '4h',  kind: 'intraday', minutes: 240 },
+        { id: '1d',  kind: 'daily' },
+        { id: '1w',  kind: 'weekly' }
+    ];
+
     // Lightweight Charts renders to <canvas> internally, so its background/
     // text/grid colors are set via JS options, not CSS — this mirrors the
     // page's [data-theme] attribute (read once at load; kept in sync by
@@ -83,7 +96,10 @@ const TradingChart = (() => {
 
     let state = {
         ticker: null,
-        candles: [],
+        candles: [],           // the currently DISPLAYED resolution's candles (derived)
+        dailyCandles: [],      // source-of-truth daily candles (fetched or generated)
+        resolution: '1d',      // '15m' | '1h' | '4h' | '1d' | '1w'
+        priceScaleMode: 'normal', // 'normal' | 'log'
         indicators: null,
         oscillator: 'rsi',
         chartType: 'candles',
@@ -157,6 +173,8 @@ const TradingChart = (() => {
         setupDrawCanvas();
         setupToolbar();
         setupChartTypeMenu();
+        setupResolutionBar();
+        setupPriceScaleToggle();
         setupOscillatorSelect();
         setupOverlayCheckboxes();
         setupIndicatorModal();
@@ -227,13 +245,13 @@ const TradingChart = (() => {
                 const json = await res.json();
                 if (json && Array.isArray(json.data) && json.data.length > 5) {
                     candles = json.data.map(r => ({
-                        date: String(r.Date || '').slice(0, 10),
+                        date: parseBackendDate(r.Date),
                         open: Number(r.Open || 0),
                         high: Number(r.High || 0),
                         low: Number(r.Low || 0),
                         close: Number(r.Close || 0),
                         volume: Number(r.Volume || 0)
-                    })).filter(c => c.date);
+                    })).filter(c => c.date !== null);
                 }
             }
         } catch (err) {
@@ -250,18 +268,15 @@ const TradingChart = (() => {
             if (seen.has(c.date)) return false;
             seen.add(c.date);
             return true;
-        }).sort((a, b) => (a.date < b.date ? -1 : 1));
+        }).sort((a, b) => a.date - b.date);
 
-        state.candles = candles;
+        // `state.dailyCandles` is the permanent source of truth; `state.candles`
+        // (set inside applyResolution()) is whatever the active resolution
+        // derives from it — daily/weekly reuse it as-is, intraday explodes it.
+        state.dailyCandles = candles;
         state.dayOpenPrice = candles.length ? candles[candles.length - 1].open : null;
 
-        applyChartType();
-
-        state.indicators = window.DataController.calculateIndicators(candles);
-        renderOverlays();
-        renderOscillatorPane();
-
-        chart.timeScale().fitContent();
+        applyResolution();
 
         const last = candles[candles.length - 1];
         const prev = candles.length > 1 ? candles[candles.length - 2] : last;
@@ -280,9 +295,118 @@ const TradingChart = (() => {
     }
 
     function getLastClose() {
-        if (!state.candles.length) return null;
-        const last = state.candles[state.candles.length - 1];
+        // Read from state.dailyCandles (not the resolution-derived
+        // state.candles) so this stays correct no matter which resolution is
+        // currently on screen — the last daily bar's close/open is always
+        // the real "today" seed value the live-tick engine should anchor to.
+        if (!state.dailyCandles.length) return null;
+        const last = state.dailyCandles[state.dailyCandles.length - 1];
         return { ticker: state.ticker, lastClose: last.close, dayOpen: last.open };
+    }
+
+    /* ────────── Resolution engine (functional 15m/1H/4H/1D/1W selector) ────────── */
+
+    function parseBackendDate(rawDate) {
+        // Backend /api/v1/ohlcv rows carry an ISO-ish date/datetime string
+        // (e.g. "2026-06-26T00:00:00"). Parse just the date portion via
+        // Date.UTC (not `new Date(string)`) so the resulting unix timestamp
+        // is 100% independent of the browser's local timezone, matching the
+        // UTC-as-TRT convention documented in dataController.js.
+        const dateStr = String(rawDate || '').slice(0, 10);
+        const parts = dateStr.split('-').map(Number);
+        if (parts.length !== 3 || parts.some(isNaN)) return null;
+        return Math.floor(Date.UTC(parts[0], parts[1] - 1, parts[2]) / 1000);
+    }
+
+    function deriveCandlesForResolution() {
+        const res = RESOLUTIONS.find(r => r.id === state.resolution) || RESOLUTIONS[3];
+        if (res.kind === 'intraday') {
+            return window.DataController.synthesizeIntradayCandles(state.dailyCandles, res.minutes);
+        } else if (res.kind === 'weekly') {
+            return window.DataController.aggregateWeeklyCandles(state.dailyCandles);
+        }
+        return state.dailyCandles;
+    }
+
+    function isIntradayResolution() {
+        const res = RESOLUTIONS.find(r => r.id === state.resolution);
+        return !!(res && res.kind === 'intraday');
+    }
+
+    function applyResolution() {
+        if (!state.dailyCandles.length) return;
+        state.candles = deriveCandlesForResolution();
+
+        const intraday = isIntradayResolution();
+        if (chart) chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+        if (subChart) subChart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+
+        applyChartType();
+
+        state.indicators = window.DataController.calculateIndicators(state.candles);
+        renderOverlays();
+        renderOscillatorPane();
+
+        if (chart) chart.timeScale().fitContent();
+
+        // Drawings anchored to a different resolution's time axis simply
+        // won't line up with any bar in the new series — dataPointToPixel()
+        // already no-ops (returns null coords) for an unmatched time, so
+        // they just don't render rather than throwing. They reappear as soon
+        // as the user switches back to the resolution they were drawn on.
+        redrawDrawings();
+    }
+
+    function setResolution(id) {
+        if (!RESOLUTIONS.some(r => r.id === id) || id === state.resolution) return;
+        state.resolution = id;
+        applyResolution();
+    }
+
+    function setupResolutionBar() {
+        const bar = byId('tv-resolution-bar');
+        if (!bar) return;
+        bar.querySelectorAll('.tv-res-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                bar.querySelectorAll('.tv-res-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                setResolution(btn.dataset.res);
+            });
+        });
+    }
+
+    function formatCandleDate(ts) {
+        if (ts === null || ts === undefined || isNaN(ts)) return '--';
+        const d = new Date(ts * 1000);
+        const dateStr = d.toLocaleDateString('tr-TR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+        if (isIntradayResolution()) {
+            const timeStr = d.toLocaleTimeString('tr-TR', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
+            return dateStr + ' ' + timeStr;
+        }
+        return dateStr;
+    }
+
+    /* ────────── Price scale mode (Linear / Logarithmic) ────────── */
+
+    function setPriceScaleMode(mode) {
+        if (!chart) return;
+        state.priceScaleMode = mode === 'log' ? 'log' : 'normal';
+        const isLog = state.priceScaleMode === 'log';
+        chart.priceScale('right').applyOptions({
+            mode: isLog ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal
+        });
+        const label = byId('price-scale-mode-label');
+        if (label) label.textContent = isLog ? 'Log' : 'Lin';
+        const btn = byId('btn-price-scale-toggle');
+        if (btn) btn.classList.toggle('active', isLog);
+    }
+
+    function setupPriceScaleToggle() {
+        const btn = byId('btn-price-scale-toggle');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            setPriceScaleMode(state.priceScaleMode === 'log' ? 'normal' : 'log');
+        });
     }
 
     /* ────────── Chart type engine (Tier 1: Candles/Hollow/Bars/Line/StepLine/Area/Baseline/HeikinAshi) ────────── */
@@ -423,6 +547,17 @@ const TradingChart = (() => {
     function updateLastPrice(ticker, price) {
         if (!chart || !candleSeries) return;
         if (ticker !== state.ticker || !state.candles.length) return;
+
+        // Keep the underlying daily source-of-truth candle in sync too, so a
+        // mid-session resolution switch (e.g. 1D -> 1H) re-derives from the
+        // latest live price instead of snapping back to the pre-tick close.
+        if (state.dailyCandles.length) {
+            const lastDaily = state.dailyCandles[state.dailyCandles.length - 1];
+            lastDaily.close = price;
+            if (price > lastDaily.high) lastDaily.high = price;
+            if (price < lastDaily.low) lastDaily.low = price;
+        }
+
         const last = state.candles[state.candles.length - 1];
         last.close = price;
         if (price > last.high) last.high = price;
@@ -751,7 +886,7 @@ const TradingChart = (() => {
         const isUp = candle.close >= candle.open;
         legend.style.display = 'flex';
         legend.innerHTML = `
-            <span class="ohlc-date">${candle.date}</span>
+            <span class="ohlc-date">${formatCandleDate(candle.date)}</span>
             <span>O <b class="${isUp ? 'profit-text' : 'loss-text'}">${fmtPrice(candle.open)}</b></span>
             <span>H <b class="${isUp ? 'profit-text' : 'loss-text'}">${fmtPrice(candle.high)}</b></span>
             <span>L <b class="${isUp ? 'profit-text' : 'loss-text'}">${fmtPrice(candle.low)}</b></span>
@@ -1281,6 +1416,41 @@ const TradingChart = (() => {
             state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
         }
         if (state.pendingShape) drawShape(state.pendingShape, false);
+
+        renderSessionCloseMarker(rect);
+    }
+
+    // Thin dashed vertical marker + label at the most recent bar, shown only
+    // while the market is closed (ties directly into the shared
+    // DataController.isMarketOpenNow() market-hours engine) — makes it
+    // visually obvious where "live" data stopped instead of leaving the
+    // frozen last bar looking indistinguishable from an open session.
+    function renderSessionCloseMarker(rect) {
+        const DC = window.DataController;
+        if (!DC || !DC.isMarketOpenNow || DC.isMarketOpenNow()) return;
+        if (!chart || !state.candles.length) return;
+
+        const idx = state.candles.length - 1;
+        const x = chart.timeScale().logicalToCoordinate(idx);
+        if (x === null || x === undefined || isNaN(x)) return;
+
+        drawCtx.save();
+        drawCtx.strokeStyle = 'rgba(255,167,38,0.55)'; // matches the header's CLOSED badge color
+        drawCtx.lineWidth = 1;
+        drawCtx.setLineDash([4, 4]);
+        drawCtx.beginPath();
+        drawCtx.moveTo(x, 0);
+        drawCtx.lineTo(x, rect.height);
+        drawCtx.stroke();
+        drawCtx.setLineDash([]);
+
+        drawCtx.fillStyle = 'rgba(255,167,38,0.9)';
+        drawCtx.font = '10px "Fira Code", monospace';
+        const label = 'Son Kapanış';
+        const labelWidth = drawCtx.measureText(label).width;
+        const labelX = Math.min(x + 4, Math.max(0, rect.width - labelWidth - 4));
+        drawCtx.fillText(label, labelX, 12);
+        drawCtx.restore();
     }
 
     function drawShape(shape, isSelected) {
@@ -1759,6 +1929,8 @@ const TradingChart = (() => {
         setTheme,
         setChartType,
         setVolumeVisible,
+        setResolution,
+        setPriceScaleMode,
         // Read-only introspection, useful for QA/debugging — no external
         // caller in the app itself relies on this.
         debugGetDrawings: () => JSON.parse(JSON.stringify(state.drawings)),
@@ -1768,7 +1940,9 @@ const TradingChart = (() => {
         debugPaste: () => pasteDrawing(),
         debugDeleteSelected: () => deleteSelectedDrawing(),
         debugGetChartType: () => state.chartType,
-        debugGetActiveTool: () => state.activeTool
+        debugGetActiveTool: () => state.activeTool,
+        debugGetResolution: () => state.resolution,
+        debugGetCandleCount: () => state.candles.length
     });
 })();
 
