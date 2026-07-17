@@ -416,12 +416,9 @@ const TradingChart = (() => {
 
         const open = () => {
             // Only one modal at a time — close any other modal that's open.
-            const alertsBackdrop = byId('alerts-modal-backdrop');
-            if (alertsBackdrop) alertsBackdrop.classList.remove('open');
-            const sltpBackdrop = byId('sltp-modal-backdrop');
-            if (sltpBackdrop) sltpBackdrop.classList.remove('open');
-            const heatmapBackdrop = byId('heatmap-modal-backdrop');
-            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
+            if (window.__optipulseCloseOtherModals) {
+                window.__optipulseCloseOtherModals('indicator-modal-backdrop');
+            }
 
             backdrop.classList.add('open');
             if (searchInput) { searchInput.value = ''; filterIndicatorList(''); searchInput.focus(); }

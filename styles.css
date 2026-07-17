@@ -2220,6 +2220,46 @@ body.chart-maximized-active {
     opacity: 0.9;
 }
 
+/* ────────── Keyboard shortcuts help modal ────────── */
+
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 2px;
+    font-size: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.shortcut-row:last-child {
+    border-bottom: none;
+}
+
+.shortcut-desc {
+    color: var(--text-secondary);
+}
+
+.shortcut-keys {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.shortcut-keys kbd {
+    display: inline-block;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--gold-light);
+}
+
 /* ────────── Drawing right-click context menu ────────── */
 
 .drawing-context-menu {

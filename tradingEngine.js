@@ -41,6 +41,18 @@ const TradingEngine = (() => {
     /* ────────── DOM helpers ────────── */
     function byId(id) { return document.getElementById(id); }
 
+    // All full-screen modal backdrop ids in the app — used so opening one
+    // reliably closes any other that might already be open.
+    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop'];
+    function closeOtherModals(exceptId) {
+        ALL_MODAL_BACKDROP_IDS.forEach(id => {
+            if (id === exceptId) return;
+            const el = byId(id);
+            if (el) el.classList.remove('open');
+        });
+    }
+    window.__optipulseCloseOtherModals = closeOtherModals; // used by tradingChart.js's indicator modal
+
     function fmtTRY(v) {
         const sign = v < 0 ? '-' : '';
         return sign + '₺' + Math.abs(v).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -564,13 +576,7 @@ const TradingEngine = (() => {
         if (!backdrop || !openBtn) return;
 
         const open = () => {
-            // Only one modal at a time — close any other modal that's open.
-            const indBackdrop = byId('indicator-modal-backdrop');
-            if (indBackdrop) indBackdrop.classList.remove('open');
-            const sltpBackdrop = byId('sltp-modal-backdrop');
-            if (sltpBackdrop) sltpBackdrop.classList.remove('open');
-            const heatmapBackdrop = byId('heatmap-modal-backdrop');
-            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
+            closeOtherModals('alerts-modal-backdrop');
 
             populateAlertSymbolSelect();
             if (priceInput && state.activeSymbol) {
@@ -670,11 +676,7 @@ const TradingEngine = (() => {
         if (!backdrop || !openBtn) return;
 
         const open = () => {
-            // Only one modal at a time — close any other modal that's open.
-            ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop'].forEach(id => {
-                const el = byId(id);
-                if (el) el.classList.remove('open');
-            });
+            closeOtherModals('heatmap-modal-backdrop');
             renderHeatmap();
             backdrop.classList.add('open');
         };
@@ -685,6 +687,123 @@ const TradingEngine = (() => {
         backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+    }
+
+    /* ════════════════════════════════════════════════
+       Keyboard shortcuts
+       ════════════════════════════════════════════════ */
+
+    function setupShortcutsModal() {
+        const backdrop = byId('shortcuts-modal-backdrop');
+        const openBtn = byId('btn-open-shortcuts');
+        const closeBtn = byId('btn-close-shortcuts');
+        if (!backdrop || !openBtn) return;
+
+        const open = () => {
+            closeOtherModals('shortcuts-modal-backdrop');
+            backdrop.classList.add('open');
+        };
+        const close = () => backdrop.classList.remove('open');
+        window.__optipulseToggleShortcuts = () => {
+            if (backdrop.classList.contains('open')) close(); else open();
+        };
+
+        openBtn.addEventListener('click', open);
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+    }
+
+    function switchToTradeSubtab() {
+        const tab = document.querySelector('.panel-subtab[data-panel-tab="trade"]');
+        if (tab && !tab.classList.contains('active')) tab.click();
+    }
+
+    function setupGlobalShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            const target = e.target;
+            const isTyping = !!(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable));
+
+            // '?' toggles the shortcuts help modal.
+            if (e.key === '?' && !isTyping) {
+                e.preventDefault();
+                window.__optipulseToggleShortcuts?.();
+                return;
+            }
+
+            // Ctrl/Cmd+K or '/' focuses the symbol search box.
+            if ((e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !isTyping)) {
+                e.preventDefault();
+                byId('watchlist-search')?.focus();
+                return;
+            }
+
+            if (isTyping) return; // everything below is a bare-key shortcut — don't hijack text input
+
+            // Don't let bare-key shortcuts fire while a modal is open (except '?', handled above,
+            // which needs to work to close the shortcuts modal itself).
+            const anyModalOpen = ALL_MODAL_BACKDROP_IDS.some(id => byId(id)?.classList.contains('open'));
+            if (anyModalOpen) return;
+
+            // Digits 1-9: jump to that open chart tab.
+            if (/^[1-9]$/.test(e.key)) {
+                const idx = parseInt(e.key, 10) - 1;
+                if (openTabs[idx] && openTabs[idx] !== state.activeSymbol) {
+                    e.preventDefault();
+                    selectSymbol(openTabs[idx]);
+                }
+                return;
+            }
+
+            // [ / ] : previous / next chart tab.
+            if (e.key === '[' || e.key === ']') {
+                if (openTabs.length < 2) return;
+                e.preventDefault();
+                const curIdx = openTabs.indexOf(state.activeSymbol);
+                if (curIdx === -1) return;
+                const delta = e.key === ']' ? 1 : -1;
+                const nextIdx = (curIdx + delta + openTabs.length) % openTabs.length;
+                selectSymbol(openTabs[nextIdx]);
+                return;
+            }
+
+            if (e.ctrlKey || e.metaKey || e.altKey) {
+                // Ctrl+Z: undo last drawing. (Ctrl+C/V/Delete for drawings are
+                // already handled inside tradingChart.js's own listener.)
+                if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    document.querySelector('#chart-toolbar [data-tool="undo"]')?.click();
+                }
+                return;
+            }
+
+            switch (e.key.toLowerCase()) {
+                case 'b':
+                    e.preventDefault();
+                    setSide('BUY');
+                    switchToTradeSubtab();
+                    break;
+                case 's':
+                    e.preventDefault();
+                    setSide('SELL');
+                    switchToTradeSubtab();
+                    break;
+                case 'g':
+                    e.preventDefault();
+                    byId('btn-open-indicators')?.click();
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    byId('btn-open-alerts')?.click();
+                    break;
+                case 'h':
+                    e.preventDefault();
+                    byId('btn-open-heatmap')?.click();
+                    break;
+            }
         });
     }
 
@@ -1209,12 +1328,7 @@ const TradingEngine = (() => {
             if (tpInput) tpInput.value = pos.tp ? pos.tp : '';
 
             // Close other modals so only one is open at a time.
-            const indBackdrop = byId('indicator-modal-backdrop');
-            if (indBackdrop) indBackdrop.classList.remove('open');
-            const alertsBackdrop = byId('alerts-modal-backdrop');
-            if (alertsBackdrop) alertsBackdrop.classList.remove('open');
-            const heatmapBackdrop = byId('heatmap-modal-backdrop');
-            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
+            closeOtherModals('sltp-modal-backdrop');
 
             backdrop.classList.add('open');
         };
@@ -1406,6 +1520,8 @@ const TradingEngine = (() => {
         setupAlertsModal();
         setupSltpModal();
         setupHeatmapModal();
+        setupShortcutsModal();
+        setupGlobalShortcuts();
         renderPositions();
         renderOrders();
         renderAccountSummary();
