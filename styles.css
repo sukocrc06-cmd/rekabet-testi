@@ -2082,6 +2082,87 @@ body.chart-maximized-active {
     color: #FFC107;
 }
 
+/* ────────── BIST100 Heatmap ────────── */
+
+.heatmap-modal {
+    width: min(1180px, 94vw);
+    max-height: 86vh;
+}
+
+.heatmap-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    gap: 4px;
+}
+
+.heatmap-legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+}
+
+.heatmap-legend-swatch.heatmap-legend-neg {
+    background-color: #F44336;
+}
+
+.heatmap-legend-swatch.heatmap-legend-pos {
+    background-color: #4CAF50;
+    margin-left: 10px;
+}
+
+.heatmap-body {
+    max-height: calc(86vh - 60px);
+    overflow-y: auto;
+}
+
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 4px;
+}
+
+.heatmap-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 4px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    color: #fff;
+    text-align: center;
+}
+
+.heatmap-tile:hover {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+    z-index: 2;
+}
+
+.heatmap-tile-symbol {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.heatmap-tile-chg {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    opacity: 0.9;
+}
+
 /* ────────── Drawing right-click context menu ────────── */
 
 .drawing-context-menu {

@@ -45,6 +45,10 @@
                     <span class="header-balance-label">Bakiye</span>
                     <span class="header-balance-value" id="header-balance-value">--</span>
                 </div>
+                <button class="btn btn-secondary" id="btn-open-heatmap">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                    Isı Haritası
+                </button>
                 <button class="btn btn-secondary" id="btn-reset-params">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
                     Reset
@@ -711,6 +715,27 @@
                         <button type="button" class="btn-chip-action" id="btn-sltp-save">Kaydet</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BIST100 Heatmap modal -->
+    <div class="indicator-modal-backdrop" id="heatmap-modal-backdrop">
+        <div class="indicator-modal heatmap-modal" role="dialog" aria-modal="true" aria-label="BIST100 Isı Haritası">
+            <div class="indicator-modal-header">
+                <h3>BIST100 Isı Haritası</h3>
+                <div class="heatmap-header-right">
+                    <span class="heatmap-legend">
+                        <span class="heatmap-legend-swatch heatmap-legend-neg"></span>Düşüş
+                        <span class="heatmap-legend-swatch heatmap-legend-pos"></span>Yükseliş
+                    </span>
+                    <button type="button" class="indicator-modal-close" id="btn-close-heatmap" aria-label="Kapat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="indicator-modal-body heatmap-body">
+                <div class="heatmap-grid" id="heatmap-grid"></div>
             </div>
         </div>
     </div>

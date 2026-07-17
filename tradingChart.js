@@ -409,6 +409,8 @@ const TradingChart = (() => {
             if (alertsBackdrop) alertsBackdrop.classList.remove('open');
             const sltpBackdrop = byId('sltp-modal-backdrop');
             if (sltpBackdrop) sltpBackdrop.classList.remove('open');
+            const heatmapBackdrop = byId('heatmap-modal-backdrop');
+            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
 
             backdrop.classList.add('open');
             if (searchInput) { searchInput.value = ''; filterIndicatorList(''); searchInput.focus(); }

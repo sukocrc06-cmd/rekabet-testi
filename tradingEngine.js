@@ -130,6 +130,7 @@ const TradingEngine = (() => {
 
         sampleEquity();
         if (byId('panel-tab-performance')?.classList.contains('active')) renderPerformanceTab();
+        if (byId('heatmap-modal-backdrop')?.classList.contains('open')) renderHeatmap();
     }
 
     function getPrice(symbol) {
@@ -568,6 +569,8 @@ const TradingEngine = (() => {
             if (indBackdrop) indBackdrop.classList.remove('open');
             const sltpBackdrop = byId('sltp-modal-backdrop');
             if (sltpBackdrop) sltpBackdrop.classList.remove('open');
+            const heatmapBackdrop = byId('heatmap-modal-backdrop');
+            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
 
             populateAlertSymbolSelect();
             if (priceInput && state.activeSymbol) {
@@ -613,6 +616,76 @@ const TradingEngine = (() => {
                 showToast(`Alarm oluşturuldu: ${symbol} ${condition === 'above' ? '≥' : '≤'} ₺${fmtPrice(targetPrice)}`);
             });
         }
+    }
+
+    /* ════════════════════════════════════════════════
+       BIST100 Heatmap
+       ════════════════════════════════════════════════ */
+
+    function computeHeatmapData() {
+        return DC.BIST100.map(({ symbol }) => {
+            const p = priceProfiles[symbol];
+            if (!p) return null;
+            const chgPct = ((p.price - p.dayOpen) / p.dayOpen) * 100;
+            return { symbol, price: p.price, chgPct };
+        }).filter(Boolean);
+    }
+
+    function heatmapColor(chgPct) {
+        const maxAbs = 5; // % magnitude at which the color reaches full saturation
+        const t = Math.min(1, Math.abs(chgPct) / maxAbs);
+        const base = [40, 42, 47];   // neutral dark tile (near 0% change)
+        const pos = [46, 143, 78];   // green
+        const neg = [176, 58, 58];   // red
+        const target = chgPct >= 0 ? pos : neg;
+        const rgb = base.map((c, i) => Math.round(c + (target[i] - c) * t));
+        return 'rgb(' + rgb.join(',') + ')';
+    }
+
+    function renderHeatmap() {
+        const grid = byId('heatmap-grid');
+        if (!grid) return;
+        const data = computeHeatmapData().sort((a, b) => b.chgPct - a.chgPct);
+        grid.innerHTML = data.map(d => {
+            const sign = d.chgPct >= 0 ? '+' : '';
+            return '<div class="heatmap-tile" style="background-color:' + heatmapColor(d.chgPct) + '" data-symbol="' + d.symbol + '" title="' + d.symbol + ' ' + sign + d.chgPct.toFixed(2) + '% · ₺' + fmtPrice(d.price) + '">' +
+                '<span class="heatmap-tile-symbol">' + d.symbol + '</span>' +
+                '<span class="heatmap-tile-chg">' + sign + d.chgPct.toFixed(2) + '%</span>' +
+                '</div>';
+        }).join('');
+
+        grid.querySelectorAll('.heatmap-tile').forEach(tile => {
+            tile.addEventListener('click', () => {
+                const symbol = tile.dataset.symbol;
+                byId('heatmap-modal-backdrop')?.classList.remove('open');
+                selectSymbol(symbol);
+            });
+        });
+    }
+
+    function setupHeatmapModal() {
+        const backdrop = byId('heatmap-modal-backdrop');
+        const openBtn = byId('btn-open-heatmap');
+        const closeBtn = byId('btn-close-heatmap');
+        if (!backdrop || !openBtn) return;
+
+        const open = () => {
+            // Only one modal at a time — close any other modal that's open.
+            ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop'].forEach(id => {
+                const el = byId(id);
+                if (el) el.classList.remove('open');
+            });
+            renderHeatmap();
+            backdrop.classList.add('open');
+        };
+        const close = () => backdrop.classList.remove('open');
+
+        openBtn.addEventListener('click', open);
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
     }
 
     /* ════════════════════════════════════════════════
@@ -1081,6 +1154,8 @@ const TradingEngine = (() => {
             if (indBackdrop) indBackdrop.classList.remove('open');
             const alertsBackdrop = byId('alerts-modal-backdrop');
             if (alertsBackdrop) alertsBackdrop.classList.remove('open');
+            const heatmapBackdrop = byId('heatmap-modal-backdrop');
+            if (heatmapBackdrop) heatmapBackdrop.classList.remove('open');
 
             backdrop.classList.add('open');
         };
@@ -1271,6 +1346,7 @@ const TradingEngine = (() => {
         setupPanelSubtabs();
         setupAlertsModal();
         setupSltpModal();
+        setupHeatmapModal();
         renderPositions();
         renderOrders();
         renderAccountSummary();
