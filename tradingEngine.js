@@ -76,6 +76,9 @@ const TradingEngine = (() => {
         renderPositions();
         renderOrders();
         renderAccountSummary();
+        equityHistory.length = 0;
+        sampleEquity();
+        renderPerformanceTab();
         showToast('Portföy sıfırlandı: ' + fmtTRY(DEFAULT_BALANCE));
     }
 
@@ -124,6 +127,9 @@ const TradingEngine = (() => {
 
         checkStopLossTakeProfit();
         checkAlerts();
+
+        sampleEquity();
+        if (byId('panel-tab-performance')?.classList.contains('active')) renderPerformanceTab();
     }
 
     function getPrice(symbol) {
@@ -248,8 +254,152 @@ const TradingEngine = (() => {
                 // than waiting for the next 2s price tick.
                 if (tab.dataset.panelTab === 'orderbook' && state.activeSymbol) renderOrderBook(state.activeSymbol);
                 if (tab.dataset.panelTab === 'trades' && state.activeSymbol) renderRecentTrades(state.activeSymbol);
+                if (tab.dataset.panelTab === 'performance') renderPerformanceTab();
             });
         });
+    }
+
+    /* ════════════════════════════════════════════════
+       Portfolio performance analytics
+       ════════════════════════════════════════════════ */
+
+    const equityHistory = [];
+    const MAX_EQUITY_POINTS = 150;
+
+    function currentEquity() {
+        let longValue = 0, shortValue = 0;
+        Object.keys(portfolio.positions).forEach(symbol => {
+            const pos = portfolio.positions[symbol];
+            const current = getPrice(symbol) || pos.avgPrice;
+            if (pos.side === 'LONG') longValue += pos.qty * current;
+            else shortValue += pos.qty * current;
+        });
+        return portfolio.balance + longValue - shortValue;
+    }
+
+    function sampleEquity() {
+        equityHistory.push({ ts: Date.now(), value: currentEquity() });
+        if (equityHistory.length > MAX_EQUITY_POINTS) equityHistory.shift();
+    }
+
+    function computePerformanceStats() {
+        const closed = portfolio.history.filter(h => h.type === 'CLOSE' && h.pnl !== null);
+        const wins = closed.filter(h => h.pnl > 0);
+        const losses = closed.filter(h => h.pnl < 0);
+        const grossProfit = wins.reduce((s, h) => s + h.pnl, 0);
+        const grossLoss = Math.abs(losses.reduce((s, h) => s + h.pnl, 0));
+        const totalPnl = closed.reduce((s, h) => s + h.pnl, 0);
+        const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
+        const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : 0);
+        const best = closed.reduce((m, h) => (m === null || h.pnl > m.pnl) ? h : m, null);
+        const worst = closed.reduce((m, h) => (m === null || h.pnl < m.pnl) ? h : m, null);
+
+        const bySymbol = {};
+        closed.forEach(h => { bySymbol[h.symbol] = (bySymbol[h.symbol] || 0) + h.pnl; });
+
+        return { closed, wins, losses, grossProfit, grossLoss, totalPnl, winRate, profitFactor, best, worst, bySymbol };
+    }
+
+    function renderPerformanceTab() {
+        const totalPnlEl = byId('perf-total-pnl');
+        if (!totalPnlEl) return; // tab markup not present
+
+        const stats = computePerformanceStats();
+        const winRateEl = byId('perf-win-rate');
+        const tradeCountEl = byId('perf-trade-count');
+        const pfEl = byId('perf-profit-factor');
+        const bestEl = byId('perf-best-trade');
+        const worstEl = byId('perf-worst-trade');
+        const listEl = byId('perf-symbol-list');
+
+        totalPnlEl.textContent = (stats.totalPnl >= 0 ? '+' : '') + fmtTRY(stats.totalPnl);
+        totalPnlEl.className = 'perf-stat-val ' + (stats.totalPnl >= 0 ? 'profit-text' : 'loss-text');
+
+        if (winRateEl) winRateEl.textContent = stats.closed.length ? stats.winRate.toFixed(1) + '%' : '--';
+        if (tradeCountEl) tradeCountEl.textContent = String(stats.closed.length);
+        if (pfEl) pfEl.textContent = stats.closed.length ? (stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)) : '--';
+        if (bestEl) {
+            bestEl.textContent = stats.best ? (stats.best.pnl >= 0 ? '+' : '') + fmtTRY(stats.best.pnl) + ' (' + stats.best.symbol + ')' : '--';
+            bestEl.className = 'perf-stat-val ' + (stats.best && stats.best.pnl < 0 ? 'loss-text' : 'profit-text');
+        }
+        if (worstEl) {
+            worstEl.textContent = stats.worst ? fmtTRY(stats.worst.pnl) + ' (' + stats.worst.symbol + ')' : '--';
+            worstEl.className = 'perf-stat-val ' + (stats.worst && stats.worst.pnl >= 0 ? 'profit-text' : 'loss-text');
+        }
+
+        if (listEl) {
+            const symbols = Object.keys(stats.bySymbol).sort((a, b) => stats.bySymbol[b] - stats.bySymbol[a]);
+            if (!symbols.length) {
+                listEl.innerHTML = '<div class="alerts-empty">Henüz kapatılmış işlem yok.</div>';
+            } else {
+                listEl.innerHTML = symbols.map(sym => {
+                    const pnl = stats.bySymbol[sym];
+                    return '<div class="perf-symbol-row"><span>' + sym + '</span><span class="' +
+                        (pnl >= 0 ? 'profit-text' : 'loss-text') + '">' + (pnl >= 0 ? '+' : '') + fmtTRY(pnl) + '</span></div>';
+                }).join('');
+            }
+        }
+
+        drawEquityCurve();
+    }
+
+    function drawEquityCurve() {
+        const canvas = byId('perf-equity-canvas');
+        const currentEl = byId('perf-equity-current');
+        if (!canvas) return;
+        if (currentEl) currentEl.textContent = fmtTRY(currentEquity());
+
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return; // hidden tab, skip draw
+
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, rect.width, rect.height);
+
+        if (equityHistory.length < 2) {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '11px Outfit, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Veri toplanıyor...', rect.width / 2, rect.height / 2);
+            return;
+        }
+
+        const values = equityHistory.map(p => p.value);
+        const min = Math.min(...values), max = Math.max(...values);
+        const range = (max - min) || 1;
+        const padY = rect.height * 0.12;
+        const plotH = rect.height - padY * 2;
+
+        const pts = equityHistory.map((p, i) => ({
+            x: (i / (equityHistory.length - 1)) * rect.width,
+            y: padY + plotH - ((p.value - min) / range) * plotH
+        }));
+
+        const up = values[values.length - 1] >= values[0];
+        const lineColor = up ? '#4CAF50' : '#F44336';
+
+        const grad = ctx.createLinearGradient(0, 0, 0, rect.height);
+        grad.addColorStop(0, up ? 'rgba(76,175,80,0.22)' : 'rgba(244,67,54,0.22)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        pts.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.lineTo(pts[pts.length - 1].x, rect.height);
+        ctx.lineTo(pts[0].x, rect.height);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        pts.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
     }
 
     /* ════════════════════════════════════════════════
@@ -1125,6 +1275,7 @@ const TradingEngine = (() => {
         renderOrders();
         renderAccountSummary();
         updateAlertBadge();
+        sampleEquity();
 
         setInterval(tickPrices, TICK_MS);
 

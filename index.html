@@ -363,6 +363,7 @@
                     <button type="button" class="panel-subtab active" data-panel-tab="trade">Alım-Satım</button>
                     <button type="button" class="panel-subtab" data-panel-tab="orderbook">Emir Defteri</button>
                     <button type="button" class="panel-subtab" data-panel-tab="trades">Son İşlemler</button>
+                    <button type="button" class="panel-subtab" data-panel-tab="performance">Performans</button>
                 </div>
 
                 <div class="panel-subtab-content active" id="panel-tab-trade">
@@ -441,6 +442,49 @@
                         <span>Saat</span>
                     </div>
                     <div class="recent-trades-list" id="recent-trades-list"></div>
+                </div>
+
+                <!-- Portfolio performance analytics -->
+                <div class="panel-subtab-content" id="panel-tab-performance">
+                    <div class="perf-stats-grid">
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">Toplam K/Z</span>
+                            <span class="perf-stat-val" id="perf-total-pnl">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">Kazanma Oranı</span>
+                            <span class="perf-stat-val" id="perf-win-rate">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">İşlem Sayısı</span>
+                            <span class="perf-stat-val" id="perf-trade-count">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">Profit Factor</span>
+                            <span class="perf-stat-val" id="perf-profit-factor">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">En İyi İşlem</span>
+                            <span class="perf-stat-val profit-text" id="perf-best-trade">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">En Kötü İşlem</span>
+                            <span class="perf-stat-val loss-text" id="perf-worst-trade">--</span>
+                        </div>
+                    </div>
+
+                    <div class="perf-equity-wrap">
+                        <div class="perf-equity-header">
+                            <span>Özkaynak Eğrisi (canlı)</span>
+                            <span id="perf-equity-current">--</span>
+                        </div>
+                        <canvas id="perf-equity-canvas" class="perf-equity-canvas"></canvas>
+                    </div>
+
+                    <div class="perf-symbol-breakdown">
+                        <div class="perf-equity-header"><span>Sembol Bazında K/Z</span></div>
+                        <div id="perf-symbol-list" class="perf-symbol-list"></div>
+                    </div>
                 </div>
 
                 <!-- Account summary (balance now lives in the header only) -->
