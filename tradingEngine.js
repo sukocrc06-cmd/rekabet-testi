@@ -744,8 +744,67 @@ const TradingEngine = (() => {
         });
     }
 
+    /* ════════════════════════════════════════════════
+       Multi-chart tab bar (open several symbols as tabs
+       above the chart, TradingView-style)
+       ════════════════════════════════════════════════ */
+
+    const openTabs = [];
+    const MAX_CHART_TABS = 8;
+
+    function openSymbolTab(symbol) {
+        if (openTabs.indexOf(symbol) === -1) {
+            openTabs.push(symbol);
+            if (openTabs.length > MAX_CHART_TABS) {
+                // Evict the oldest tab that isn't the one we're about to show.
+                const evictIdx = openTabs[0] === symbol ? 1 : 0;
+                openTabs.splice(evictIdx, 1);
+            }
+        }
+    }
+
+    function closeSymbolTab(symbol) {
+        if (openTabs.length <= 1) return; // always keep at least one tab open
+        const idx = openTabs.indexOf(symbol);
+        if (idx === -1) return;
+        openTabs.splice(idx, 1);
+        if (symbol === state.activeSymbol) {
+            const newIdx = Math.min(idx, openTabs.length - 1);
+            selectSymbol(openTabs[newIdx]);
+        } else {
+            renderChartTabs();
+        }
+    }
+
+    function renderChartTabs() {
+        const bar = byId('tv-chart-tabs-bar');
+        if (!bar) return;
+        bar.innerHTML = openTabs.map(sym => {
+            const isActive = sym === state.activeSymbol;
+            return '<div class="tv-chart-tab ' + (isActive ? 'active' : '') + '" data-symbol="' + sym + '" role="tab" aria-selected="' + isActive + '">' +
+                '<span>' + sym + '</span>' +
+                (openTabs.length > 1 ? '<button type="button" class="tv-chart-tab-close" data-symbol="' + sym + '" title="Sekmeyi kapat">×</button>' : '') +
+                '</div>';
+        }).join('');
+
+        bar.querySelectorAll('.tv-chart-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                if (e.target.classList.contains('tv-chart-tab-close')) return;
+                if (tab.dataset.symbol !== state.activeSymbol) selectSymbol(tab.dataset.symbol);
+            });
+        });
+        bar.querySelectorAll('.tv-chart-tab-close').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeSymbolTab(btn.dataset.symbol);
+            });
+        });
+    }
+
     async function selectSymbol(symbol) {
         state.activeSymbol = symbol;
+        openSymbolTab(symbol);
+        renderChartTabs();
 
         document.querySelectorAll('.watchlist-row').forEach(row => {
             row.classList.toggle('active', row.dataset.symbol === symbol);

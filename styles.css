@@ -1566,6 +1566,63 @@ body.chart-maximized-active {
     overflow-x: auto;
 }
 
+.tv-chart-tabs-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: var(--bg-panel);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 6px 10px;
+    flex-shrink: 0;
+    overflow-x: auto;
+}
+
+.tv-chart-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px 5px 12px;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: var(--transition-fast);
+}
+
+.tv-chart-tab:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary, #eaeaea);
+}
+
+.tv-chart-tab.active {
+    color: var(--gold-light);
+    background-color: var(--gold-dim);
+    border-color: var(--gold-border);
+    border-bottom-color: var(--gold);
+}
+
+.tv-chart-tab-close {
+    background: transparent;
+    border: none;
+    color: inherit;
+    opacity: 0.55;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 3px;
+}
+
+.tv-chart-tab-close:hover {
+    opacity: 1;
+    color: #F44336;
+}
+
 .tv-symbol-block {
     display: flex;
     align-items: baseline;

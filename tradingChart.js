@@ -61,6 +61,10 @@ const TradingChart = (() => {
 
     let copiedDrawing = null;
 
+    // Per-symbol drawing persistence so switching between multi-chart tabs
+    // doesn't discard a symbol's trend lines / fib levels / rectangles.
+    const drawingsBySymbol = {};
+
     /* ────────── Utilities ────────── */
 
     function $(sel) { return document.querySelector(sel); }
@@ -164,6 +168,13 @@ const TradingChart = (() => {
             console.warn('[TradingChart] Chart not initialized (library failed to load?) — skipping loadSymbol.');
             return;
         }
+
+        // Persist the outgoing symbol's drawings so multi-tab switching
+        // doesn't wipe a user's trend lines / fib levels on that symbol.
+        if (state.ticker && state.ticker !== ticker) {
+            drawingsBySymbol[state.ticker] = state.drawings;
+        }
+
         state.ticker = ticker;
         setSymbolHeader(ticker, null, null);
 
@@ -215,7 +226,7 @@ const TradingChart = (() => {
         const prev = candles.length > 1 ? candles[candles.length - 2] : last;
         setSymbolHeader(ticker, last ? last.close : null, prev ? prev.close : null);
 
-        state.drawings = [];
+        state.drawings = drawingsBySymbol[ticker] ? drawingsBySymbol[ticker].slice() : [];
         state.selectedDrawingIndex = -1;
         redrawDrawings();
 
