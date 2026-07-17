@@ -803,6 +803,10 @@ const TradingEngine = (() => {
                     e.preventDefault();
                     byId('btn-open-heatmap')?.click();
                     break;
+                case 't':
+                    e.preventDefault();
+                    byId('btn-theme-toggle')?.click();
+                    break;
             }
         });
     }
@@ -1496,6 +1500,46 @@ const TradingEngine = (() => {
         if (btn) btn.addEventListener('click', exportTradeHistoryCSV);
     }
 
+    /* ════════════════════════════════════════════════
+       Dark / Light theme
+       ════════════════════════════════════════════════ */
+
+    const THEME_STORAGE_KEY = 'optipulselab_theme';
+
+    function getCurrentTheme() {
+        return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    }
+
+    function applyTheme(theme) {
+        if (theme === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* private mode / quota — theme just won't persist */ }
+
+        const moonIcon = byId('theme-icon-moon');
+        const sunIcon = byId('theme-icon-sun');
+        if (moonIcon) moonIcon.style.display = theme === 'light' ? 'none' : 'block';
+        if (sunIcon) sunIcon.style.display = theme === 'light' ? 'block' : 'none';
+
+        // The chart canvas paints its own background/grid/text via JS options,
+        // not CSS, so it needs to be told about the theme change explicitly.
+        if (window.TradingChart && window.TradingChart.setTheme) window.TradingChart.setTheme(theme);
+    }
+
+    function toggleTheme() {
+        applyTheme(getCurrentTheme() === 'light' ? 'dark' : 'light');
+    }
+
+    function setupThemeToggle() {
+        const btn = byId('btn-theme-toggle');
+        // Sync icons/chart to whatever the early <head> script already applied
+        // (it runs before any other JS to avoid a dark/light flash on load).
+        applyTheme(getCurrentTheme());
+        if (btn) btn.addEventListener('click', toggleTheme);
+    }
+
     function renderAccountSummary() {
         let longValue = 0, shortValue = 0, openPnl = 0;
         Object.keys(portfolio.positions).forEach(symbol => {
@@ -1573,6 +1617,7 @@ const TradingEngine = (() => {
         setupShortcutsModal();
         setupGlobalShortcuts();
         setupCsvExport();
+        setupThemeToggle();
         renderPositions();
         renderOrders();
         renderAccountSummary();

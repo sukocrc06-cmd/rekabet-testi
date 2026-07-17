@@ -38,6 +38,16 @@ const TradingChart = (() => {
         fibLine: 'rgba(212, 175, 55, 0.5)'
     };
 
+    // Lightweight Charts renders to <canvas> internally, so its background/
+    // text/grid colors are set via JS options, not CSS — this mirrors the
+    // page's [data-theme] attribute (read once at load; kept in sync by
+    // setTheme() whenever the user toggles the theme).
+    const THEME_CHART_COLORS = {
+        dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
+        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' }
+    };
+    let currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+
     let chart = null;
     let subChart = null;
     let candleSeries = null;
@@ -129,17 +139,18 @@ const TradingChart = (() => {
     }
 
     function baseChartOptions(container, isSub) {
+        const c = THEME_CHART_COLORS[currentTheme];
         return {
             width: container.clientWidth,
             height: container.clientHeight,
             layout: {
-                background: { color: '#1E1E1E' },
-                textColor: COLORS.text,
+                background: { color: c.bg },
+                textColor: c.text,
                 fontFamily: "'Fira Code', monospace"
             },
             grid: {
-                vertLines: { color: COLORS.grid },
-                horzLines: { color: COLORS.grid }
+                vertLines: { color: c.grid },
+                horzLines: { color: c.grid }
             },
             crosshair: {
                 mode: LightweightCharts.CrosshairMode.Normal,
@@ -147,11 +158,11 @@ const TradingChart = (() => {
                 horzLine: { color: 'rgba(212,175,55,0.35)', width: 1, style: 3, labelBackgroundColor: '#D4AF37' }
             },
             rightPriceScale: {
-                borderColor: 'rgba(212,175,55,0.15)',
+                borderColor: c.border,
                 scaleMargins: isSub ? { top: 0.15, bottom: 0.05 } : { top: 0.08, bottom: 0.02 }
             },
             timeScale: {
-                borderColor: 'rgba(212,175,55,0.15)',
+                borderColor: c.border,
                 timeVisible: false,
                 secondsVisible: false,
                 visible: !isSub ? false : true // main chart hides its own time axis; sub-chart shows the shared axis
@@ -967,6 +978,19 @@ const TradingChart = (() => {
 
     /* ────────── Public API ────────── */
 
+    function setTheme(theme) {
+        currentTheme = theme === 'light' ? 'light' : 'dark';
+        const c = THEME_CHART_COLORS[currentTheme];
+        const opts = {
+            layout: { background: { color: c.bg }, textColor: c.text },
+            grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+            rightPriceScale: { borderColor: c.border },
+            timeScale: { borderColor: c.border }
+        };
+        if (chart) chart.applyOptions(opts);
+        if (subChart) subChart.applyOptions(opts);
+    }
+
     return Object.freeze({
         init,
         loadSymbol,
@@ -974,6 +998,7 @@ const TradingChart = (() => {
         renderOverlays,
         renderOscillatorPane,
         getLastClose,
+        setTheme,
         // Read-only introspection, useful for QA/debugging — no external
         // caller in the app itself relies on this.
         debugGetDrawings: () => JSON.parse(JSON.stringify(state.drawings)),
