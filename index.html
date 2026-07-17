@@ -531,7 +531,13 @@
 
                 <!-- Recent orders -->
                 <div class="form-group" style="margin-top: 16px;">
-                    <label>Son Emirler</label>
+                    <div class="form-group-label-row">
+                        <label style="margin-bottom:0;">Son Emirler</label>
+                        <button type="button" class="btn-csv-export" id="btn-export-history-csv" title="Tüm işlem geçmişini CSV olarak indir">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            CSV
+                        </button>
+                    </div>
                     <div class="table-container qt-mini-table">
                         <table class="data-table" style="font-size: 11px;">
                             <thead>

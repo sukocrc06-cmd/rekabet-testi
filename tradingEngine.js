@@ -1422,6 +1422,8 @@ const TradingEngine = (() => {
 
     function renderOrders() {
         const body = byId('qt-orders-body');
+        const csvBtn = byId('btn-export-history-csv');
+        if (csvBtn) csvBtn.disabled = !portfolio.history.length;
         if (!body) return;
         if (!portfolio.history.length) {
             body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:16px; font-size:11px;">Emir geçmişi yok</td></tr>`;
@@ -1444,6 +1446,54 @@ const TradingEngine = (() => {
             `;
         });
         body.innerHTML = html;
+    }
+
+    /* ════════════════════════════════════════════════
+       Trade history CSV export
+       ════════════════════════════════════════════════ */
+
+    function csvEscape(val) {
+        const s = String(val);
+        return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
+    function exportTradeHistoryCSV() {
+        if (!portfolio.history.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }
+
+        const headers = ['Tarih', 'Saat', 'Sembol', 'Yön', 'Tip', 'Adet', 'Fiyat (₺)', 'Komisyon (₺)', 'K/Z (₺)'];
+        const rows = portfolio.history.slice().reverse().map(h => { // chronological order, oldest first
+            const d = new Date(h.ts);
+            return [
+                d.toLocaleDateString('tr-TR'),
+                d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                h.symbol,
+                h.side === 'BUY' ? 'AL' : 'SAT',
+                h.type === 'OPEN' ? 'AÇILIŞ' : 'KAPANIŞ',
+                h.qty,
+                h.price.toFixed(2),
+                (h.commission || 0).toFixed(2),
+                h.pnl !== null && h.pnl !== undefined ? h.pnl.toFixed(2) : ''
+            ];
+        });
+
+        const csvBody = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
+        const csvContent = '\uFEFF' + csvBody; // UTF-8 BOM so Excel renders Turkish characters correctly
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `optipulselab_islem_gecmisi_${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`İşlem geçmişi CSV olarak indirildi (${portfolio.history.length} kayıt).`);
+    }
+
+    function setupCsvExport() {
+        const btn = byId('btn-export-history-csv');
+        if (btn) btn.addEventListener('click', exportTradeHistoryCSV);
     }
 
     function renderAccountSummary() {
@@ -1522,6 +1572,7 @@ const TradingEngine = (() => {
         setupHeatmapModal();
         setupShortcutsModal();
         setupGlobalShortcuts();
+        setupCsvExport();
         renderPositions();
         renderOrders();
         renderAccountSummary();

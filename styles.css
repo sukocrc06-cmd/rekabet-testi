@@ -302,6 +302,40 @@ body {
     letter-spacing: 0.5px;
 }
 
+.form-group-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.btn-csv-export {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid var(--gold-border);
+    color: var(--text-secondary);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-csv-export:hover:not(:disabled) {
+    color: var(--gold-light);
+    border-color: var(--gold);
+    background-color: var(--gold-dim);
+}
+
+.btn-csv-export:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
 .form-input {
     width: 100%;
     background-color: var(--bg-input);
