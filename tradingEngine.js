@@ -113,17 +113,22 @@ const TradingEngine = (() => {
        Price simulation
        ════════════════════════════════════════════════ */
 
+    // Watchlist mini-sparkline'ları için tutulan kısa fiyat geçmişi — her
+    // tick'te bir örnek eklenir, SPARK_HISTORY_LEN'i aşınca en eski örnek
+    // atılır (TICK_MS=2000ms × 60 ≈ son 2 dakika).
+    const SPARK_HISTORY_LEN = 60;
+
     function buildPriceProfiles() {
         const profiles = {};
         DC.BIST100.forEach(({ symbol }) => {
             const known = DC.STOCK_PROFILES[symbol];
             if (known) {
-                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, volatility: known.volatility, name: known.name };
+                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, volatility: known.volatility, name: known.name, history: [known.basePrice] };
                 return;
             }
             const hash = Array.from(symbol).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
             const base = +(15 + Math.abs(hash % 400) + (Math.abs(hash) % 100) / 100).toFixed(2);
-            profiles[symbol] = { price: base, dayOpen: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000 };
+            profiles[symbol] = { price: base, dayOpen: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000, history: [base] };
         });
         return profiles;
     }
@@ -143,6 +148,10 @@ const TradingEngine = (() => {
             const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
             next = Math.max(capDown, Math.min(capUp, next));
             p.price = +next.toFixed(2);
+
+            if (!Array.isArray(p.history)) p.history = [p.price];
+            p.history.push(p.price);
+            if (p.history.length > SPARK_HISTORY_LEN) p.history.shift();
         });
 
         renderWatchlistPrices();
@@ -170,6 +179,106 @@ const TradingEngine = (() => {
 
     function getPrice(symbol) {
         return priceProfiles[symbol] ? priceProfiles[symbol].price : null;
+    }
+
+    /* ════════════════════════════════════════════════
+       Canlı veri akışı (WebSocket) — sadece aktif sembol
+       ════════════════════════════════════════════════ */
+    // (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi)
+    // Backend'deki /ws/live/{ticker} ucu artık periyodik olarak GERÇEK
+    // yfinance fiyatı push ediyor (bkz. main.py). Burada sadece o an
+    // ekranda açık olan TEK sembol için bağlanıyoruz — 97 sembolün hepsi
+    // için ayrı soket açmak hem tarayıcı hem backend kaynaklarını gereksiz
+    // yere tüketirdi. Gelen her gerçek fiyat, mevcut 2 saniyelik client-
+    // side rastgele-yürüyüş simülasyonuna bir "çıpa" olarak besleniyor
+    // (fiyatı doğrudan o değere ayarlıyoruz) — böylece simülasyon periyodik
+    // olarak gerçeğe demirleniyor ama aradaki saniyelerde akıcı görünmeye
+    // devam ediyor. Bağlantı hiç kurulamazsa veya koparsa (ör. kullanıcı
+    // backend'i kapatmışsa, ya da HTTPS/Vercel ortamında Local Network
+    // Access izni yoksa) sessizce sadece mevcut simülasyona devam edilir —
+    // hiçbir hata kullanıcıya sızmaz, işlevsellik bozulmaz.
+    const LIVE_FEED_URL_BASE = 'ws://127.0.0.1:8000/ws/live/';
+    let liveSocket = null;
+    let liveFeedSymbol = null;
+    let liveFeedActive = false;   // en az bir gerçek 'tick' mesajı alındı mı
+    let liveFeedLastTickAt = null;
+
+    function updateEngineFeedStatus() {
+        if (typeof window.__optipulseSetLiveFeedStatus === 'function') {
+            window.__optipulseSetLiveFeedStatus({
+                active: liveFeedActive,
+                symbol: liveFeedSymbol,
+                lastTickAt: liveFeedLastTickAt
+            });
+        }
+    }
+
+    function disconnectLiveFeed() {
+        if (liveSocket) {
+            try { liveSocket.onclose = null; liveSocket.onmessage = null; liveSocket.onerror = null; liveSocket.close(); } catch (e) { /* ignore */ }
+            liveSocket = null;
+        }
+        liveFeedSymbol = null;
+        liveFeedActive = false;
+        liveFeedLastTickAt = null;
+        updateEngineFeedStatus();
+    }
+
+    function connectLiveFeed(symbol) {
+        disconnectLiveFeed();
+        if (!symbol || typeof WebSocket === 'undefined') return;
+        liveFeedSymbol = symbol;
+        let socket;
+        try {
+            socket = new WebSocket(LIVE_FEED_URL_BASE + symbol);
+        } catch (e) {
+            // Tarayıcı WebSocket kurulumunu reddetti (ör. mixed-content
+            // güvenlik politikası) — sessizce mevcut simülasyona devam.
+            liveFeedSymbol = null;
+            return;
+        }
+        liveSocket = socket;
+
+        socket.onmessage = (event) => {
+            if (liveSocket !== socket) return; // sembol bu arada değişmiş, bu artık eski bir soket
+            let msg;
+            try { msg = JSON.parse(event.data); } catch (e) { return; }
+            if (!msg || msg.type !== 'tick' || msg.source !== 'live' || typeof msg.price !== 'number' || !(msg.price > 0)) return;
+
+            const p = priceProfiles[symbol];
+            if (p) {
+                // Gerçek fiyata demirle. Normalde dayOpen'a dokunmuyoruz
+                // (gün içi ±%6 bandı gerçek gün açılışına göre hesaplanmaya
+                // devam etsin) — ama gelen gerçek fiyat mevcut bandın çok
+                // dışındaysa (ör. dayOpen tohumu bir şekilde bayatsa, ya da
+                // gün içinde büyük bir hareket olduysa), bandı da gerçeğe
+                // göre yeniden merkezliyoruz. Aksi halde bir sonraki 2
+                // saniyelik simülasyon tick'i bu gerçek fiyatı hatalı
+                // şekilde eski banda geri "kelepçeler" — tıpkı sembol ilk
+                // seçildiğinde selectSymbol()'ün yaptığı ilk çıpalama gibi.
+                const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
+                if (msg.price > capUp || msg.price < capDown) {
+                    p.dayOpen = msg.price;
+                }
+                p.price = +msg.price.toFixed(2);
+                renderWatchlistPrices();
+                updateActiveSymbolTicket();
+                if (window.TradingChart) window.TradingChart.updateLastPrice(symbol, p.price);
+                renderPositions();
+                renderAccountSummary();
+            }
+            liveFeedActive = true;
+            liveFeedLastTickAt = Date.now();
+            updateEngineFeedStatus();
+        };
+        socket.onerror = () => { /* sessizce yut — onclose zaten tetiklenecek */ };
+        socket.onclose = () => {
+            if (liveSocket === socket) {
+                liveSocket = null;
+                liveFeedActive = false;
+                updateEngineFeedStatus();
+            }
+        };
     }
 
     /* ════════════════════════════════════════════════
@@ -899,6 +1008,7 @@ const TradingEngine = (() => {
                         <span class="wl-symbol">${symbol}</span>
                         <span class="wl-name">${name}</span>
                     </div>
+                    <span class="wl-spark-wrap"><canvas class="wl-spark" id="wl-spark-${symbol}" width="46" height="18"></canvas></span>
                     <div class="wl-price-col">
                         <span class="wl-price" id="wl-price-${symbol}">--</span>
                         <span class="wl-change" id="wl-change-${symbol}">--</span>
@@ -920,6 +1030,35 @@ const TradingEngine = (() => {
         });
     }
 
+    // Watchlist satırındaki küçük sparkline'ı p.history dizisinden çizer —
+    // son ~2 dakikanın fiyat YÖNÜNÜ gösteren kaba bir çizgi (eksen/etiket
+    // yok, kasıtlı olarak minimal). Geçmişin ilk ve son noktası arasındaki
+    // farka göre yeşil/kırmızı renklendirilir (günlük % değişimden bağımsız
+    // — bu kısa vadeli, "az önce ne oldu" sinyali).
+    function drawSparkline(canvas, history) {
+        if (!canvas || !history || history.length < 2) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const min = Math.min(...history), max = Math.max(...history);
+        const range = (max - min) || (max * 0.001) || 1;
+        const stepX = w / (history.length - 1);
+        const up = history[history.length - 1] >= history[0];
+
+        ctx.beginPath();
+        history.forEach((v, i) => {
+            const x = i * stepX;
+            const y = h - 2 - ((v - min) / range) * (h - 4);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = up ? '#4CAF50' : '#F44336';
+        ctx.lineWidth = 1.25;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+    }
+
     function renderWatchlistPrices() {
         DC.BIST100.forEach(({ symbol }) => {
             const p = priceProfiles[symbol];
@@ -931,6 +1070,9 @@ const TradingEngine = (() => {
             priceEl.textContent = '₺' + fmtPrice(p.price);
             changeEl.textContent = (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
             changeEl.className = 'wl-change ' + (chgPct >= 0 ? 'profit-text' : 'loss-text');
+
+            const sparkEl = byId('wl-spark-' + symbol);
+            if (sparkEl) drawSparkline(sparkEl, p.history);
         });
     }
 
@@ -980,7 +1122,12 @@ const TradingEngine = (() => {
     }
 
     function renderChartTabs() {
-        const bar = byId('tv-chart-tabs-bar');
+        // (17-18 Temmuz 2026, sekizinci oturum) #tv-chart-tabs-bar'ın kendisi
+        // yerine içindeki #tv-chart-tabs-list sarmalayıcısı hedefleniyor —
+        // bar'ın artık kalıcı bir kardeş öğesi de var (ızgara görünümü
+        // düğmesi), innerHTML ile tüm bar'ı değiştirmek onu her sembol
+        // değişiminde yok ederdi.
+        const bar = byId('tv-chart-tabs-list') || byId('tv-chart-tabs-bar');
         if (!bar) return;
         bar.innerHTML = openTabs.map(sym => {
             const isActive = sym === state.activeSymbol;
@@ -1072,6 +1219,14 @@ const TradingEngine = (() => {
                 renderOrderBook(symbol);
             }
         }
+
+        // WebSocket canlı veri bağlantısı, bu ilk (gerçek OHLCV fetch'inden
+        // ya da onun simüle yedeğinden gelen) "temel çıpa" kurulduktan SONRA
+        // açılıyor — aksi halde erken gelebilecek bir canlı tick, hemen
+        // ardından çalışan yukarıdaki re-anchor mantığı tarafından sessizce
+        // ezilebilirdi. Bağlantı sembol değişince zaten yeniden kuruluyor,
+        // bu yüzden burada, fonksiyonun en sonunda açmak güvenli.
+        connectLiveFeed(symbol);
     }
 
     /* ════════════════════════════════════════════════

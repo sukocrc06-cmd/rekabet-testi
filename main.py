@@ -486,9 +486,50 @@ async def get_status(task_id: str):
         }
     }
 
+def _extract_fast_price(stock: "yf.Ticker"):
+    """
+    yfinance'in fast_info nesnesi sürüme göre hem attribute (.last_price)
+    hem mapping (['lastPrice']) tarzı erişimi destekleyebiliyor, ve bazen
+    hiçbirini (ağ hatası, sembol geçici olarak sağlanamıyor vb.) — bu yüzden
+    birden fazla erişim yolunu sırayla, hepsi sessizce başarısız olabilecek
+    şekilde deniyoruz. Hiçbiri çalışmazsa None döner (çağıran taraf bunu
+    "bu turda gerçek fiyat yok" olarak yorumlayıp bir sonraki turu bekliyor).
+    """
+    try:
+        fast = stock.fast_info
+    except Exception:
+        return None
+    for accessor in (
+        lambda f: f["lastPrice"],
+        lambda f: f["last_price"],
+        lambda f: f.last_price,
+    ):
+        try:
+            val = accessor(fast)
+            if val is not None:
+                return float(val)
+        except Exception:
+            continue
+    return None
+
+
 @app.websocket("/ws/live/{ticker}")
 async def websocket_endpoint(websocket: WebSocket, ticker: str):
     await websocket.accept()
+    # (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi) Bu uç
+    # önceden `random.uniform` ile TAMAMEN sahte/simüle tick üretiyordu ve
+    # frontend tarafından hiç kullanılmıyordu. Artık geçmiş mumlardan sonra,
+    # her LIVE_POLL_INTERVAL_SEC saniyede bir yfinance'ten GERÇEK güncel
+    # fiyatı çekip push ediyor. yfinance ücretsiz API'si saniyelik tick-by-
+    # tick veri sağlamıyor (sadece periyodik "son fiyat" anlık görüntüsü) —
+    # bu yüzden "canlı" burada "periyodik olarak tazelenen gerçek fiyat"
+    # anlamına geliyor. Frontend (tradingEngine.js → connectLiveFeed) bu
+    # gerçek fiyatı kendi 2 saniyelik mikro-simülasyonuna bir "çıpa" olarak
+    # besliyor — böylece hem akış görsel olarak akıcı kalıyor hem de
+    # periyodik olarak gerçeğe demirleniyor. Aralık kısa tutulmuyor (1sn
+    # değil, 12sn) çünkü amaç yfinance'i saniyede bir yormak değil, makul bir
+    # kaynakla gerçek veriye düzenli aralıklarla "check-in" yapmak.
+    LIVE_POLL_INTERVAL_SEC = 12
     try:
         # Fetch initial historical candles to populate the chart
         formatted = format_ticker(ticker)
@@ -497,11 +538,11 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
         data = hist.reset_index().to_dict(orient="records")
-        
+
         for record in data:
             if "Date" in record:
                 record["Date"] = str(record["Date"])
-                
+
         formatted_candles = []
         for record in data:
             formatted_candles.append({
@@ -512,25 +553,40 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
                 "close": float(record.get("Close", 0.0)),
                 "volume": float(record.get("Volume", 0.0))
             })
-            
+
         # Push historical data as first payload
         await websocket.send_json({
             "type": "history",
             "candles": formatted_candles
         })
-        
-        # Stream simulated real-time tick updates every 1 second
-        last_price = formatted_candles[-1]["close"] if formatted_candles else 100.0
+
         while True:
-            await asyncio.sleep(1.0)
-            change_pct = random.uniform(-0.005, 0.005)
-            tick_price = last_price * (1 + change_pct)
-            last_price = tick_price
-            
+            await asyncio.sleep(LIVE_POLL_INTERVAL_SEC)
+
+            real_price = _extract_fast_price(stock)
+            if real_price is None:
+                # Yedek yol: son 1 günlük/1 dakikalık barın kapanışı.
+                try:
+                    recent = stock.history(period="1d", interval="1m", timeout=8)
+                    if not recent.empty:
+                        real_price = float(recent["Close"].iloc[-1])
+                except Exception as e:
+                    print(f"[WebSocket] fallback history fetch failed for {ticker}: {e}")
+
+            if real_price is None or real_price <= 0:
+                # Gerçek fiyat bu turda alınamadı (ağ/yfinance geçici sorunu
+                # olabilir) — bağlantıyı koparmıyoruz, sadece bu turu
+                # sessizce atlayıp bir sonrakini deniyoruz. Frontend zaten
+                # kendi simülasyonuna kesintisiz devam ediyor (REST OHLCV
+                # fetch'teki yedek-yola-düşme mantığıyla aynı defense-in-
+                # depth prensibi).
+                continue
+
             await websocket.send_json({
                 "type": "tick",
                 "ticker": ticker,
-                "price": round(tick_price, 2)
+                "price": round(real_price, 2),
+                "source": "live"
             })
     except WebSocketDisconnect:
         pass

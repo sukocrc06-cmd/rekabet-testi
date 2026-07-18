@@ -34,7 +34,7 @@
                 <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: ---</span>
             </div>
             <div class="header-status">
-                <div class="status-item">
+                <div class="status-item" id="engine-status-item">
                     <span class="status-label">Engine:</span>
                     <span class="status-value status-online" id="engine-status">ONLINE</span>
                 </div>
@@ -129,7 +129,28 @@
             <main class="main-content-panel">
                 <!-- NEW: BIG TRADINGVIEW-STYLE TRADING CHART -->
                 <section class="content-card trading-chart-section" aria-label="Trading Chart">
-                    <div class="tv-chart-tabs-bar" id="tv-chart-tabs-bar" role="tablist" aria-label="Açık grafik sekmeleri"></div>
+                    <div class="tv-chart-tabs-bar" id="tv-chart-tabs-bar" role="tablist" aria-label="Açık grafik sekmeleri">
+                        <!-- Sekmelerin kendisi tradingEngine.js tarafından #tv-chart-tabs-list
+                             içine innerHTML ile yazılıyor (her sembol değişiminde tamamen
+                             yeniden üretiliyor) — düğme bu iç sarmalayıcının DIŞINDA, bar'ın
+                             doğrudan çocuğu olarak durduğu için o yeniden üretimlerden
+                             etkilenmiyor. -->
+                        <div class="tv-chart-tabs-list" id="tv-chart-tabs-list"></div>
+                        <!-- (17-18 Temmuz 2026, sekizinci oturum) Bu düğme önceden aşağıdaki
+                             #chart-toolbar sırasındaydı; o sıra artık grafik tipi menüsü +
+                             çizim araç grupları + fiyat ölçeği + göstergeler/alarmlar
+                             düğmeleriyle birlikte 1600px genişlikte bile taşıyor ve bu da
+                             #tv-overlay-legend'daki gösterge chip'lerini varsayılan görünümde
+                             erişilemez hale getiriyordu (kaydırmadan görünmüyorlardı — bkz.
+                             üçüncü oturumdaki benzer düzeltme). Bu sekme çubuğunda genellikle
+                             çok daha fazla boş alan olduğundan (1-3 sekme açıkken), düğme
+                             buraya, sağa yaslanmış olarak taşındı — hem sıkışıklığı azaltıyor
+                             hem de "görünüm modu" anlamsal olarak sekmelerin yanında durmak
+                             daha mantıklı. -->
+                        <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-grid-view" title="Çoklu Grafik Düzeni (2x2 Izgara)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                        </button>
+                    </div>
 
                     <div class="tv-toolbar">
                         <div class="tv-symbol-block">
@@ -158,10 +179,6 @@
 
                         <button type="button" class="tv-scale-toggle-btn" id="btn-price-scale-toggle" title="Fiyat Ölçeği: Doğrusal / Logaritmik">
                             <span id="price-scale-mode-label">Lin</span>
-                        </button>
-
-                        <button type="button" class="tv-scale-toggle-btn" id="btn-toggle-grid-view" title="Çoklu Grafik Düzeni (2x2 Izgara)">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
                         </button>
 
                         <button type="button" class="tv-indicators-btn" id="btn-open-indicators" title="Göstergeler">

@@ -1488,6 +1488,25 @@ body {
     max-width: 120px;
 }
 
+/* (17-18 Temmuz 2026, sekizinci oturum) Watchlist mini-sparkline — her
+   satırda son ~2 dakikalık fiyat yönünü tek bakışta gösteren küçük bir
+   çizgi grafik. Sembol adı ile fiyat sütunu arasında, satırın orta
+   sütununda duruyor (bkz. .watchlist-row'un justify-content:space-between
+   davranışı — üç çocuk öğeyi otomatik olarak baştan/ortadan/sondan
+   dağıtıyor, ek bir flex ayarı gerekmiyor). */
+.wl-spark-wrap {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0.85;
+}
+
+.wl-spark {
+    display: block;
+    width: 46px;
+    height: 18px;
+}
+
 .wl-price-col {
     display: flex;
     flex-direction: column;
@@ -1532,10 +1551,17 @@ body {
 .tv-toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
+    /* (17-18 Temmuz 2026, sekizinci oturum) 12px -> 8px, 14px -> 10px: bu
+       sıra art arda eklenen düğmelerle (grafik tipi menüsü, çizim araç
+       grupları, fiyat ölçeği, göstergeler/alarmlar) zamanla kalabalıklaştı;
+       ızgara düğmesi yukarıdaki sekme çubuğuna taşındıktan sonra bile
+       1600px gibi yaygın bir masaüstü genişliğinde gösterge chip'lerini
+       (#tv-overlay-legend) varsayılan görünümde kaydırmasız erişilemez
+       bırakıyordu — bkz. üçüncü oturumdaki aynı sınıf düzeltme. */
+    gap: 8px;
     background-color: var(--bg-sidebar);
     border-bottom: 1px solid var(--gold-border);
-    padding: 0 14px;
+    padding: 0 10px;
     height: 48px;
     flex-shrink: 0;
     overflow-x: auto;
@@ -1549,7 +1575,29 @@ body {
     border-bottom: 1px solid var(--tint-06);
     padding: 6px 10px;
     flex-shrink: 0;
+}
+
+/* (17-18 Temmuz 2026, sekizinci oturum) Kaydırma artık bar'ın tamamında
+   değil, yalnızca sekme listesinde — böylece sağa yaslanan ızgara düğmesi
+   (bkz. .tv-tabsbar-append-btn) sekmeler taşsa/kaydırılsa bile sabit ve
+   her zaman görünür/tıklanabilir kalıyor. min-width:0, flex öğelerinin
+   varsayılan "içeriğe göre büzülmeme" davranışını geçersiz kılıp gerçek
+   kaydırmayı mümkün kılıyor. */
+.tv-chart-tabs-list {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow-x: auto;
+}
+
+/* Işzgara-görünümü düğmesini bu satırda sağa yaslar — sekmeler çubuğunda
+   normalde bolca boş alan var, bu yüzden düğme kaydırma gerekmeden hep
+   görünür/tıklanabilir kalıyor. */
+.tv-tabsbar-append-btn {
+    margin-left: 8px;
+    flex-shrink: 0;
 }
 
 .tv-chart-tab {
@@ -1857,18 +1905,18 @@ body {
 .tv-indicators-btn {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     background: transparent;
     border: 1px solid var(--gold-border);
     color: var(--text-secondary);
-    padding: 0 8px;
+    padding: 0 6px;
     height: 28px;
     border-radius: var(--radius-sm);
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
-    margin-left: 4px;
+    margin-left: 2px;
     transition: var(--transition-fast);
 }
 
@@ -1951,7 +1999,7 @@ body {
        width, but letting it hit 0 makes its own chips unreachable — they'd
        sit past the *outer* toolbar's scroll edge, behind the sidebar,
        instead of being reachable via this element's own internal scroll. */
-    min-width: 90px;
+    min-width: 56px;
     scrollbar-width: none;
 }
 

@@ -1075,6 +1075,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         el.engineStatus.style.color = 'var(--profit)'; // Green
                     }
                 }
+                updateEngineTooltip();
             })
             .catch(err => {
                 console.warn('[Heartbeat] Backend server connection failed:', err);
@@ -1082,8 +1083,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     el.engineStatus.innerText = 'OFFLINE';
                     el.engineStatus.style.color = '#F44336'; // Red
                 }
+                updateEngineTooltip();
             });
     }
+
+    // (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi) Aktif
+    // sembol için kurulan WebSocket canlı veri akışının durumunu, mevcut
+    // ENGINE rozetine YENİ bir panel/metin eklemeden, sadece üzerine
+    // gelince görünen bir ipucuyla (native tooltip) gösteriyoruz — rozetin
+    // görünür metni hâlâ sadece backend'in ayakta olup olmadığını (REST
+    // heartbeat) yansıtıyor, ayrıntı isteyen fare ile üzerine gelip bakıyor.
+    let lastLiveFeedStatus = { active: false, symbol: null, lastTickAt: null };
+    function updateEngineTooltip() {
+        if (!el.engineStatus) return;
+        const target = safeGetElement('engine-status-item') || el.engineStatus;
+        const backendUp = el.engineStatus.innerText === 'ONLINE';
+        if (!backendUp) {
+            target.title = 'Backend sunucusuna ulaşılamıyor — fiyatlar tamamen yerel simülasyondan geliyor.';
+            return;
+        }
+        if (lastLiveFeedStatus.active && lastLiveFeedStatus.symbol) {
+            const secsAgo = lastLiveFeedStatus.lastTickAt ? Math.round((Date.now() - lastLiveFeedStatus.lastTickAt) / 1000) : null;
+            target.title = lastLiveFeedStatus.symbol + ' için gerçek zamanlı yfinance verisi akıyor' +
+                (secsAgo !== null ? ' (son güncelleme ' + secsAgo + 'sn önce).' : '.');
+        } else {
+            target.title = 'Backend çalışıyor. Şu an gösterilen fiyatlar yerel simülasyon — canlı veri akışı henüz bağlanmadı veya bu sembol için kullanılamıyor.';
+        }
+    }
+    window.__optipulseSetLiveFeedStatus = (status) => {
+        lastLiveFeedStatus = status || { active: false, symbol: null, lastTickAt: null };
+        updateEngineTooltip();
+    };
 
     setInterval(updateClock, 1000);
     updateClock();

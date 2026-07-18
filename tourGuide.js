@@ -49,13 +49,28 @@ const TourGuide = (() => {
             {
                 welcome: true,
                 title: 'OptiPulseLab Özellik Turu',
-                desc: 'Son güncellemede eklenen 13 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
+                desc: 'Eklenen 16 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); },
                 selector: '#tv-chart-tabs-bar',
                 title: 'Çoklu Grafik Sekmeleri',
                 desc: 'Grafiğin üstündeki sekme çubuğuna bakın — artık aynı anda birden fazla sembolü açık tutabilirsiniz (en fazla 8 sekme). Sekmeler arası geçiş için 1-9 rakam tuşlarını veya [ / ] kısayollarını kullanabilirsiniz.'
+            },
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    const gridBtn = byId('btn-toggle-grid-view');
+                    if (gridBtn && window.MultiChartGrid && !window.MultiChartGrid.isActive()) gridBtn.click();
+                    await wait(150);
+                },
+                teardown: () => {
+                    const gridBtn = byId('btn-toggle-grid-view');
+                    if (gridBtn && window.MultiChartGrid && window.MultiChartGrid.isActive()) gridBtn.click();
+                },
+                selector: '#tv-grid-view',
+                title: '2x2 Çoklu Grafik Izgarası',
+                desc: 'Sekmelerin yanı sıra artık dört sembolü aynı anda küçük ızgara halinde de izleyebilirsiniz — her hücrenin sembolünü ayrı ayrı değiştirebilir, sağ üstteki ⤢ ile bir hücreyi tek tıkla ana (tam özellikli) grafiğe büyütebilirsiniz.'
             },
             {
                 selector: '#chart-toolbar',
@@ -104,6 +119,36 @@ const TourGuide = (() => {
                 desc: 'Sağdaki emir panelinde şimdi açılan alanlara bakın — emir girerken ya da açık bir pozisyonda sonradan Stop-Loss / Take-Profit seviyeleri belirleyebilirsiniz. Fiyat o seviyeye ulaştığında pozisyon otomatik kapanır.'
             },
             {
+                setup: async () => {
+                    closeAllAppModals();
+                    switchPanelTab('trade');
+                    const btn5x = document.querySelector('.leverage-btn[data-leverage="5"]');
+                    if (btn5x && !btn5x.classList.contains('active')) btn5x.click();
+                },
+                teardown: () => {
+                    const btn1x = document.querySelector('.leverage-btn[data-leverage="1"]');
+                    if (btn1x && !btn1x.classList.contains('active')) btn1x.click();
+                },
+                selector: '.leverage-selector',
+                title: 'Kaldıraç / Marj Sistemi',
+                desc: 'Emir panelinde 1x-10x arası kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir, kalan kısım işlem büyüklüğünü büyütür. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
+            },
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    switchPanelTab('trade');
+                    const ocoTab = byId('qt-order-oco');
+                    if (ocoTab && !ocoTab.classList.contains('active')) ocoTab.click();
+                },
+                teardown: () => {
+                    const marketTab = byId('qt-order-market');
+                    if (marketTab && !marketTab.classList.contains('active')) marketTab.click();
+                },
+                selector: '#qt-oco-row',
+                title: 'Gelişmiş Emirler: OCO / Trailing Stop',
+                desc: '"OCO" sekmesinde üst ve alt tetikleyici fiyat girerek bekleyen bir emir çifti oluşturabilirsiniz — biri gerçekleşince diğeri otomatik iptal olur. SL/TP alanında ise sabit bir stop yerine fiyatı lehte takip eden "Trailing Stop" seçilebiliyor.'
+            },
+            {
                 setup: async () => { closeAllAppModals(); switchPanelTab('orderbook'); },
                 selector: '#panel-tab-orderbook',
                 title: 'Emir Defteri (Order Book)',
@@ -126,7 +171,7 @@ const TourGuide = (() => {
                 teardown: () => closeAllAppModals(),
                 selector: '.heatmap-modal',
                 title: 'BIST100 Isı Haritası',
-                desc: 'Açılan pencerede tüm BIST100 sembollerinin günlük performansını renk yoğunluğuna göre tek bakışta görebilirsiniz; bir kareye tıklayarak o sembole geçebilirsiniz.'
+                desc: 'Açılan pencerede tüm BIST100 sembollerinin günlük performansını renk yoğunluğuna göre tek bakışta görebilirsiniz; bir kareye tıklayarak o sembole geçebilirsiniz. Üstteki "Sektöre Göre" düğmesiyle hisseleri gerçek sektörlerine (Bankacılık, Enerji, Ulaştırma vb.) göre gruplanmış olarak da görüntüleyebilirsiniz.'
             },
             {
                 setup: async () => { closeAllAppModals(); switchPanelTab('trade'); },
@@ -150,7 +195,7 @@ const TourGuide = (() => {
             {
                 finish: true,
                 title: 'Tur Tamamlandı',
-                desc: 'Bu turda 13 yeni özelliği gördünüz: çoklu grafik sekmeleri, çizim kopyala/yapıştır, taşınan göstergeler paneli, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, emir defteri, son işlemler, performans analitiği, ısı haritası, CSV dışa aktarma, klavye kısayolları ve koyu/açık tema. Turu istediğiniz an "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
+                desc: 'Bu turda 16 özelliği gördünüz: çoklu grafik sekmeleri, 2x2 grafik ızgarası, çizim kopyala/yapıştır, taşınan göstergeler paneli, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi, OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, klavye kısayolları ve koyu/açık tema. Turu istediğiniz an "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
             }
         ];
     }
