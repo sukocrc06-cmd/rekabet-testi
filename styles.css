@@ -1660,6 +1660,34 @@ body {
     letter-spacing: 0.3px;
 }
 
+/* (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük görsel
+   gösterge") Sembol adının yanında, o an ekrandaki fiyatın backend'in
+   gerçek yfinance verisinden mi (yeşil, yanıp sönen nokta) yoksa yerel
+   simülasyondan mı (gri, sabit nokta) geldiğini bir bakışta gösteren küçük
+   bir işaret. Yeni bir "motor paneli" DEĞİL — sadece mevcut sembol
+   başlığının yanına eklenen minik bir durum noktası. */
+.live-data-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--text-muted);
+    opacity: 0.5;
+    flex-shrink: 0;
+    transition: background-color 0.3s ease;
+}
+
+.live-data-dot.is-live {
+    background-color: #2ECC71;
+    opacity: 1;
+    animation: live-dot-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes live-dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55); }
+    50% { box-shadow: 0 0 0 4px rgba(46, 204, 113, 0); }
+}
+
 .tv-last-price {
     font-family: var(--font-mono);
     font-size: 15px;
@@ -2161,6 +2189,28 @@ body {
 
 .indicator-modal-category {
     margin-bottom: 8px;
+}
+
+/* Yardım/Hakkında modalının düz metin paragrafları (18 Temmuz 2026,
+   dokuzuncu oturum). */
+.help-text {
+    margin: 4px 0 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.help-text strong {
+    color: var(--text-primary);
+}
+
+.help-text kbd {
+    background-color: var(--tint-06);
+    border: 1px solid var(--tint-12);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
 }
 
 .indicator-oscillator-list {

@@ -51,7 +51,7 @@ const TradingEngine = (() => {
 
     // All full-screen modal backdrop ids in the app — used so opening one
     // reliably closes any other that might already be open.
-    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop'];
+    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop'];
     function closeOtherModals(exceptId) {
         ALL_MODAL_BACKDROP_IDS.forEach(id => {
             if (id === exceptId) return;
@@ -198,10 +198,19 @@ const TradingEngine = (() => {
     // Access izni yoksa) sessizce sadece mevcut simülasyona devam edilir —
     // hiçbir hata kullanıcıya sızmaz, işlevsellik bozulmaz.
     const LIVE_FEED_URL_BASE = 'ws://127.0.0.1:8000/ws/live/';
+    // (18 Temmuz 2026, dokuzuncu oturum) Otomatik yeniden bağlanma: sabit
+    // bir aralık yerine küçük bir üstel geri çekilme (backoff) kullanılıyor
+    // (3sn → 6sn → 12sn → 24sn, 30sn'de tavan) — backend gerçekten kapalıysa
+    // (kullanıcı sunucuyu hiç çalıştırmıyorsa) saniyede bir boşuna deneyip
+    // konsolu/ağı yormamak için. Bir tick başarıyla alınınca sayaç sıfırlanır.
+    const RECONNECT_BASE_DELAY_MS = 3000;
+    const RECONNECT_MAX_DELAY_MS = 30000;
     let liveSocket = null;
     let liveFeedSymbol = null;
     let liveFeedActive = false;   // en az bir gerçek 'tick' mesajı alındı mı
     let liveFeedLastTickAt = null;
+    let liveReconnectTimer = null;
+    let liveReconnectAttempt = 0;
 
     function updateEngineFeedStatus() {
         if (typeof window.__optipulseSetLiveFeedStatus === 'function') {
@@ -213,7 +222,16 @@ const TradingEngine = (() => {
         }
     }
 
+    function cancelLiveReconnect() {
+        if (liveReconnectTimer) {
+            clearTimeout(liveReconnectTimer);
+            liveReconnectTimer = null;
+        }
+        liveReconnectAttempt = 0;
+    }
+
     function disconnectLiveFeed() {
+        cancelLiveReconnect();
         if (liveSocket) {
             try { liveSocket.onclose = null; liveSocket.onmessage = null; liveSocket.onerror = null; liveSocket.close(); } catch (e) { /* ignore */ }
             liveSocket = null;
@@ -224,17 +242,14 @@ const TradingEngine = (() => {
         updateEngineFeedStatus();
     }
 
-    function connectLiveFeed(symbol) {
-        disconnectLiveFeed();
+    function openLiveSocket(symbol) {
         if (!symbol || typeof WebSocket === 'undefined') return;
-        liveFeedSymbol = symbol;
         let socket;
         try {
             socket = new WebSocket(LIVE_FEED_URL_BASE + symbol);
         } catch (e) {
             // Tarayıcı WebSocket kurulumunu reddetti (ör. mixed-content
             // güvenlik politikası) — sessizce mevcut simülasyona devam.
-            liveFeedSymbol = null;
             return;
         }
         liveSocket = socket;
@@ -269,16 +284,95 @@ const TradingEngine = (() => {
             }
             liveFeedActive = true;
             liveFeedLastTickAt = Date.now();
+            liveReconnectAttempt = 0; // gerçek veri akıyor, geri çekilme sayacı sıfırlanır
             updateEngineFeedStatus();
         };
         socket.onerror = () => { /* sessizce yut — onclose zaten tetiklenecek */ };
         socket.onclose = () => {
-            if (liveSocket === socket) {
-                liveSocket = null;
-                liveFeedActive = false;
-                updateEngineFeedStatus();
+            if (liveSocket !== socket) return; // zaten değiştirilmiş/kapatılmış eski bir soket
+            liveSocket = null;
+            liveFeedActive = false;
+            updateEngineFeedStatus();
+            // Sembol hâlâ aktifse (kullanıcı bilerek disconnectLiveFeed()
+            // çağırmadıysa, ör. başka bir sembole geçmediyse) bağlantı
+            // beklenmedik şekilde koptu demektir — otomatik tekrar dene.
+            if (liveFeedSymbol === symbol) {
+                const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, liveReconnectAttempt), RECONNECT_MAX_DELAY_MS);
+                liveReconnectAttempt++;
+                liveReconnectTimer = setTimeout(() => {
+                    liveReconnectTimer = null;
+                    if (liveFeedSymbol === symbol) openLiveSocket(symbol);
+                }, delay);
             }
         };
+    }
+
+    function connectLiveFeed(symbol) {
+        disconnectLiveFeed();
+        if (!symbol || typeof WebSocket === 'undefined') return;
+        liveFeedSymbol = symbol;
+        openLiveSocket(symbol);
+    }
+
+    // (18 Temmuz 2026, dokuzuncu oturum — "tüm watchlist için periyodik
+    // gerçek fiyat senkronizasyonu") Canlı WebSocket akışı yukarıda sadece
+    // o an ekranda seçili TEK sembol için çalışıyor; watchlist'teki diğer
+    // ~96 sembol her zaman client-side simülasyonda kal(ıyor)dı. Bu
+    // fonksiyon periyodik olarak (her WATCHLIST_SYNC_INTERVAL_MS'de bir)
+    // backend'in toplu /api/v1/quotes endpoint'inden TÜM watchlist için
+    // gerçek son kapanış fiyatlarını çekip uyguluyor — WS akışının aksine
+    // bu "anlık tick" değil, periyodik bir "gerçeğe demirleme" turu.
+    // Backend'e ulaşılamazsa (kapalıysa, LNA izni yoksa, ağ hatası vb.)
+    // sessizce hiçbir şey yapmadan bir sonraki turu bekliyor — mevcut
+    // simülasyon kesintisiz devam ediyor, hiçbir hata kullanıcıya sızmıyor.
+    const WATCHLIST_SYNC_INTERVAL_MS = 90000;
+    const WATCHLIST_SYNC_URL = 'http://127.0.0.1:8000/api/v1/quotes';
+
+    async function syncWatchlistPrices() {
+        if (!DC || !Array.isArray(DC.BIST100) || !DC.BIST100.length) return;
+        const tickers = DC.BIST100.map(s => s.symbol);
+        let json;
+        try {
+            const res = await fetch(WATCHLIST_SYNC_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers }),
+                signal: AbortSignal.timeout(15000),
+                targetAddressSpace: 'loopback'
+            });
+            if (!res.ok) return;
+            json = await res.json();
+        } catch (e) {
+            return; // backend'e ulaşılamadı — sessizce vazgeç, simülasyon kesintisiz sürüyor
+        }
+        if (!json || !json.quotes || typeof json.quotes !== 'object') return;
+
+        let anyUpdated = false;
+        Object.keys(json.quotes).forEach((symbol) => {
+            const price = json.quotes[symbol];
+            const p = priceProfiles[symbol];
+            if (!p || typeof price !== 'number' || !(price > 0)) return;
+            // Aynı re-merkezleme mantığı burada da geçerli (bkz.
+            // connectLiveFeed'in onmessage'ı): gerçek fiyat mevcut günlük
+            // banttan çok uzaksa dayOpen'ı da yeniden merkezle, aksi halde
+            // bir sonraki simüle tick bu gerçek fiyatı geri "kelepçeler".
+            const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
+            if (price > capUp || price < capDown) {
+                p.dayOpen = price;
+            }
+            p.price = +price.toFixed(2);
+            anyUpdated = true;
+        });
+
+        if (anyUpdated) {
+            renderWatchlistPrices();
+            updateActiveSymbolTicket();
+            if (state.activeSymbol && priceProfiles[state.activeSymbol] && window.TradingChart) {
+                window.TradingChart.updateLastPrice(state.activeSymbol, priceProfiles[state.activeSymbol].price);
+            }
+            renderPositions();
+            renderAccountSummary();
+        }
     }
 
     /* ════════════════════════════════════════════════
@@ -612,6 +706,7 @@ const TradingEngine = (() => {
 
             const dirLabel = a.condition === 'above' ? 'üzerine çıktı' : 'altına indi';
             showToast(`🔔 ${a.symbol} hedef fiyatı ₺${fmtPrice(a.targetPrice)} seviyesinin ${dirLabel} (şu an ₺${fmtPrice(price)})`);
+            playAlertChime();
             flashAlertBadge();
 
             if (window.Notification && Notification.permission === 'granted') {
@@ -899,6 +994,28 @@ const TradingEngine = (() => {
         });
     }
 
+    // (18 Temmuz 2026, dokuzuncu oturum — "Yardım / Hakkında modalı")
+    // Kısayollar modalıyla birebir aynı aç/kapat/backdrop/Escape deseni.
+    function setupHelpModal() {
+        const backdrop = byId('help-modal-backdrop');
+        const openBtn = byId('btn-open-help');
+        const closeBtn = byId('btn-close-help');
+        if (!backdrop || !openBtn) return;
+
+        const open = () => {
+            closeOtherModals('help-modal-backdrop');
+            backdrop.classList.add('open');
+        };
+        const close = () => backdrop.classList.remove('open');
+
+        openBtn.addEventListener('click', open);
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+    }
+
     function switchToTradeSubtab() {
         const tab = document.querySelector('.panel-subtab[data-panel-tab="trade"]');
         if (tab && !tab.classList.contains('active')) tab.click();
@@ -1028,6 +1145,49 @@ const TradingEngine = (() => {
                 }
             });
         });
+
+        setupSparkVisibilityObserver(body);
+    }
+
+    // (18 Temmuz 2026, dokuzuncu oturum — "watchlist performans
+    // optimizasyonu") 97 satırlık watchlist'te her 2 saniyelik tick'te 97
+    // sparkline canvas'ının hepsini yeniden çizmek (ekranda sadece ~8-10
+    // satır görünürken) gereksiz CPU harcıyordu. IntersectionObserver ile
+    // sadece o an watchlist konteynerinin görünür alanında olan satırların
+    // sembolleri izleniyor; renderWatchlistPrices() sparkline'ı SADECE bu
+    // sette olan semboller için çiziyor. Fiyat/yüzde metni ve p.history
+    // dizisi her zaman güncelleniyor (ucuz) — sadece pahalı canvas çizimi
+    // atlanıyor. Bir satır tekrar görünüme girdiğinde en güncel geçmişle
+    // hemen yeniden çiziliyor, "eski/donmuş" bir sparkline kalmıyor.
+    let visibleSparkSymbols = new Set();
+    let sparkObserver = null;
+
+    function setupSparkVisibilityObserver(root) {
+        if (sparkObserver) { sparkObserver.disconnect(); sparkObserver = null; }
+        visibleSparkSymbols = new Set();
+        if (!root || typeof IntersectionObserver === 'undefined') {
+            // IntersectionObserver desteklenmiyorsa (çok eski tarayıcı):
+            // güvenli taraf hepsini "görünür" saymak — optimizasyon devre
+            // dışı kalır ama sparkline'lar yine de doğru çizilmeye devam eder.
+            DC.BIST100.forEach(({ symbol }) => visibleSparkSymbols.add(symbol));
+            return;
+        }
+        sparkObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                const symbol = entry.target.dataset.symbol;
+                if (!symbol) return;
+                if (entry.isIntersecting) {
+                    visibleSparkSymbols.add(symbol);
+                    const p = priceProfiles[symbol];
+                    const sparkEl = byId('wl-spark-' + symbol);
+                    if (p && sparkEl) drawSparkline(sparkEl, p.history);
+                } else {
+                    visibleSparkSymbols.delete(symbol);
+                }
+            });
+        }, { root, rootMargin: '100px 0px' });
+
+        root.querySelectorAll('.watchlist-row').forEach(row => sparkObserver.observe(row));
     }
 
     // Watchlist satırındaki küçük sparkline'ı p.history dizisinden çizer —
@@ -1071,8 +1231,10 @@ const TradingEngine = (() => {
             changeEl.textContent = (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
             changeEl.className = 'wl-change ' + (chgPct >= 0 ? 'profit-text' : 'loss-text');
 
-            const sparkEl = byId('wl-spark-' + symbol);
-            if (sparkEl) drawSparkline(sparkEl, p.history);
+            if (visibleSparkSymbols.has(symbol)) {
+                const sparkEl = byId('wl-spark-' + symbol);
+                if (sparkEl) drawSparkline(sparkEl, p.history);
+            }
         });
     }
 
@@ -1754,6 +1916,8 @@ const TradingEngine = (() => {
                             ? `⚠️ ${symbol} marj çağrısı — kaldıraçlı pozisyon zarar sınırını aştığı için ₺${fmtPrice(price)} seviyesinden otomatik likide edildi.`
                             : `${symbol} pozisyonu kapatıldı.`;
             showToast(msg);
+            if (reason === 'LIQUIDATION') playLiquidationChime();
+            else if (reason === 'SL' || reason === 'TP' || reason === 'TRAILING') playSltpChime();
         }
     }
     window.__optipulseClosePosition = closePosition; // used by inline onclick in rendered rows
@@ -2071,6 +2235,94 @@ const TradingEngine = (() => {
         if (btn) btn.addEventListener('click', toggleTheme);
     }
 
+    /* ════════════════════════════════════════════════
+       Sesli bildirimler (Alarm / SL-TP / Marj Çağrısı)
+       ════════════════════════════════════════════════ */
+    // (18 Temmuz 2026, dokuzuncu oturum) Fiyat alarmı, Stop-Loss/Take-
+    // Profit/Trailing Stop tetiklenmesi ve marj çağrısı (liquidation) daha
+    // önce sadece görsel bir toast bırakıyordu — kullanıcı o an ekrana
+    // bakmıyorsa fark etmiyordu. Harici bir ses dosyasına bağımlı olmamak
+    // için Web Audio API ile anlık, kısa bir "bip" üretiliyor (osilatör
+    // tabanlı, hiçbir asset indirmeye gerek yok, offline da çalışır).
+    // Tarayıcıların otomatik-sesi engelleme politikası bir kullanıcı
+    // etkileşimi (tıklama vb.) gerektirir — bu olaylar zaten kullanıcının
+    // sayfada aktif olduğu bir sırada (bir emir açmışken, bir modal
+    // açıkken vb.) gerçekleştiği için pratikte sorun çıkarmıyor; yine de
+    // AudioContext oluşturma/çalma her ihtimale karşı try/catch içinde.
+    const SOUND_STORAGE_KEY = 'optipulselab_sound_enabled_v1';
+    let soundEnabled = true;
+    let sharedAudioCtx = null;
+
+    function loadSoundPreference() {
+        try {
+            const raw = localStorage.getItem(SOUND_STORAGE_KEY);
+            if (raw !== null) soundEnabled = raw !== 'false';
+        } catch (e) { /* private mode */ }
+    }
+
+    function saveSoundPreference() {
+        try { localStorage.setItem(SOUND_STORAGE_KEY, String(soundEnabled)); } catch (e) { /* private mode / quota */ }
+    }
+
+    // freq/duration'ı olay tipine göre hafifçe farklılaştırıyoruz — alarm
+    // tek kısa bip, SL/TP iki kısa bip, marj çağrısı (en ciddi olay) üç bip
+    // ve daha pes bir ton — kullanıcı sesi duyduğunda gözünü ekrana atmadan
+    // bile kabaca "ne tür" bir olay olduğunu ayırt edebilsin diye.
+    function playChime(pattern) {
+        if (!soundEnabled) return;
+        if (typeof window.AudioContext === 'undefined' && typeof window.webkitAudioContext === 'undefined') return;
+        try {
+            if (!sharedAudioCtx) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                sharedAudioCtx = new Ctx();
+            }
+            if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(() => {});
+            const ctx = sharedAudioCtx;
+            let t = ctx.currentTime;
+            pattern.forEach(({ freq, dur }) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.0001, t);
+                gain.gain.exponentialRampToValueAtTime(0.18, t + 0.015);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(t);
+                osc.stop(t + dur + 0.02);
+                t += dur + 0.06;
+            });
+        } catch (e) { /* ses çalınamadı — sessizce yut, işlevselliği bozma */ }
+    }
+
+    function playAlertChime() { playChime([{ freq: 880, dur: 0.14 }]); }
+    function playSltpChime() { playChime([{ freq: 740, dur: 0.11 }, { freq: 740, dur: 0.11 }]); }
+    function playLiquidationChime() { playChime([{ freq: 440, dur: 0.13 }, { freq: 440, dur: 0.13 }, { freq: 330, dur: 0.22 }]); }
+
+    function updateMuteButtonIcon() {
+        const onIcon = byId('mute-icon-on');
+        const offIcon = byId('mute-icon-off');
+        if (onIcon) onIcon.style.display = soundEnabled ? 'block' : 'none';
+        if (offIcon) offIcon.style.display = soundEnabled ? 'none' : 'block';
+        const btn = byId('btn-mute-toggle');
+        if (btn) btn.title = soundEnabled ? 'Sesli Bildirimleri Kapat' : 'Sesli Bildirimleri Aç';
+    }
+
+    function setupMuteToggle() {
+        loadSoundPreference();
+        updateMuteButtonIcon();
+        const btn = byId('btn-mute-toggle');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                saveSoundPreference();
+                updateMuteButtonIcon();
+                if (soundEnabled) playAlertChime(); // açılınca kısa bir onay bipi
+            });
+        }
+    }
+
     // Kaldıraç/marj modeliyle (bkz. placeOrder) uyumlu özkaynak formülü:
     // `portfolio.balance` artık pozisyon açılırken kilitlenen marjı
     // İÇERMİYOR (o tutar bakiyeden düşülüp pozisyona kilitleniyor), bu
@@ -2170,9 +2422,11 @@ const TradingEngine = (() => {
         setupSltpModal();
         setupHeatmapModal();
         setupShortcutsModal();
+        setupHelpModal();
         setupGlobalShortcuts();
         setupCsvExport();
         setupThemeToggle();
+        setupMuteToggle();
         renderPositions();
         renderOrders();
         renderAccountSummary();
@@ -2181,6 +2435,10 @@ const TradingEngine = (() => {
         sampleEquity();
 
         setInterval(tickPrices, TICK_MS);
+        setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);
+        // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve
+        // canlı akış (WS) bağlantısı önce kurulsun, ağ istekleri çakışmasın.
+        setTimeout(syncWatchlistPrices, 8000);
 
         // Resume on whatever symbol was last being viewed, so a reload/revisit
         // doesn't silently jump back to a default symbol while old ticket

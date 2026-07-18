@@ -3,12 +3,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
+from typing import List
 import yfinance as yf
 import io
 import gc
 import requests
 import pandas as pd
 import numpy as np
+import time
 
 # Keep FPDF import as was
 from fpdf import FPDF
@@ -54,9 +56,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# (18 Temmuz 2026, dokuzuncu oturum — "yfinance hata/rate-limit dayanıklılığı")
+# Yahoo Finance'in ücretsiz/resmi-olmayan API'si sık ve art arda isteklerde
+# geçici olarak 429 (Too Many Requests) benzeri bir sınırlama uygulayabiliyor.
+# Aynı sembol için kısa süre içinde (ör. kullanıcı sık sembol değiştirirken,
+# birden fazla sekme açıkken, ya da watchlist toplu senkronizasyonu ile aynı
+# anda bireysel bir istek geldiğinde) tekrar tekrar ağa gitmemek için basit
+# bir in-memory TTL önbelleği kullanılıyor. Kalıcı/dağıtık bir cache değil —
+# tek process içinde, süreç yeniden başlayınca sıfırlanır; bu demo/tek-
+# kullanıcılı bir kurulum için yeterli.
+_HISTORY_CACHE_TTL_SEC = 60
+_history_cache = {}  # key: (formatted_ticker, period, interval) -> (timestamp, DataFrame)
+
+
+def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: str, timeout: int = 10):
+    key = (formatted, period, interval)
+    now = time.time()
+    cached = _history_cache.get(key)
+    if cached and (now - cached[0]) < _HISTORY_CACHE_TTL_SEC:
+        return cached[1]
+    df = stock.history(period=period, interval=interval, timeout=timeout)
+    if df is not None and not df.empty:
+        _history_cache[key] = (now, df)
+    return df
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in ("429", "too many requests", "rate limit", "rate-limited"))
+
+
+def _friendly_fetch_error(exc: Exception) -> str:
+    if _is_rate_limit_error(exc):
+        return (
+            "Veri sağlayıcıya (Yahoo Finance) şu anda çok sık istek gönderildi ve geçici bir "
+            "sınırlamaya takıldık. Birkaç dakika sonra tekrar deneyin — bu arada arayüz "
+            "otomatik olarak gerçekçi simülasyon fiyatlarını gösterecek."
+        )
+    return f"Data fetch timed out or failed: {str(exc)}"
+
+
 class BacktestRequest(BaseModel):
     engine_id: str
     ticker: str
+
+
+class QuotesRequest(BaseModel):
+    tickers: List[str]
 
 class PDFRequest(BaseModel):
     ticker: str
@@ -98,8 +144,8 @@ def analyze_stock_logic(ticker: str) -> dict:
     try:
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
-        df = stock.history(period="6mo", interval="1d", timeout=5)
-        
+        df = _cached_history(stock, formatted, "6mo", "1d", timeout=5)
+
         if df.empty:
             return {}
             
@@ -371,22 +417,22 @@ async def list_stocks():
 def get_data(ticker: str):
     try:
         formatted = format_ticker(ticker)
-        stock = yf.Ticker(formatted, session=session) 
-        hist = stock.history(period="3mo", interval="1d", timeout=10)
+        stock = yf.Ticker(formatted, session=session)
+        hist = _cached_history(stock, formatted, "3mo", "1d", timeout=10)
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
         data = hist.reset_index().to_dict(orient="records")
-        
+
         # Convert Timestamp values to string for serialization
         for record in data:
             if "Date" in record:
                 record["Date"] = str(record["Date"])
-                
+
         return {"ticker": ticker, "data": data}
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": f"Data fetch timed out or failed: {str(e)}"}
+            content={"status": "error", "message": _friendly_fetch_error(e)}
         )
 
 # Global task cache to simulate asynchronous queues
@@ -408,6 +454,68 @@ def format_ticker(ticker: str) -> str:
         ticker = ticker + ".IS"
     return ticker
 
+
+# (18 Temmuz 2026, dokuzuncu oturum — "tüm watchlist için periyodik gerçek
+# fiyat senkronizasyonu") Canlı WebSocket akışı (bkz. /ws/live/{ticker})
+# sadece o an ekranda seçili TEK sembol için çalışıyor; watchlist'teki diğer
+# ~96 sembol her zaman client-side simülasyonda kalıyor. Bu endpoint,
+# frontend'in periyodik olarak (tradingEngine.js → syncWatchlistPrices())
+# TÜM watchlist'i tek bir toplu istekle gerçek son kapanış fiyatıyla
+# senkronize etmesini sağlıyor. 97 sembolü tek tek yf.Ticker(...).fast_info
+# ile çekmek yerine yf.download(...) ile TEK bir fonksiyon çağrısında toplu
+# çekiyoruz — hem daha hızlı hem Yahoo Finance'i gereksiz yere yormuyor.
+# Kısa süreli TTL önbellek (_QUOTE_CACHE_TTL_SEC), aynı sembol seti kısa
+# aralıklarla tekrar istenirse (ör. birden fazla açık sekme) yeniden ağa
+# gitmeyi önlüyor.
+_QUOTE_CACHE_TTL_SEC = 45
+_quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}}
+
+
+@app.post("/api/v1/quotes")
+def get_quotes(request: QuotesRequest):
+    tickers = [t.upper().strip() for t in request.tickers if t and t.strip()]
+    tickers = tickers[:150]  # makul bir üst sınır (watchlist zaten ~97 sembol)
+    if not tickers:
+        return {"quotes": {}, "asOf": None}
+
+    cache_key = ",".join(sorted(tickers))
+    now = time.time()
+    if _quote_cache["tickers_key"] == cache_key and (now - _quote_cache["ts"]) < _QUOTE_CACHE_TTL_SEC:
+        return {"quotes": _quote_cache["data"], "asOf": _quote_cache["ts"], "cached": True}
+
+    formatted_map = {}
+    for t in tickers:
+        formatted_map[format_ticker(t)] = t
+
+    quotes = {}
+    try:
+        raw = yf.download(
+            tickers=list(formatted_map.keys()),
+            period="1d",
+            interval="1d",
+            group_by="ticker",
+            threads=True,
+            progress=False,
+            session=session,
+        )
+        single = len(formatted_map) == 1
+        for formatted, original in formatted_map.items():
+            try:
+                close_series = raw["Close"] if single else raw[formatted]["Close"]
+                close_series = close_series.dropna()
+                if len(close_series) > 0:
+                    quotes[original] = round(float(close_series.iloc[-1]), 2)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[quotes] Batch download failed ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
+
+    _quote_cache["ts"] = now
+    _quote_cache["tickers_key"] = cache_key
+    _quote_cache["data"] = quotes
+    return {"quotes": quotes, "asOf": now, "cached": False}
+
+
 @app.post("/api/v1/backtest/run")
 def run_backtest(request: BacktestRequest):
     try:
@@ -416,8 +524,8 @@ def run_backtest(request: BacktestRequest):
         
         print("2: Starting data fetch")
         stock = yf.Ticker(ticker, session=session)
-        df = stock.history(period="3mo", interval="1d", timeout=5)
-        
+        df = _cached_history(stock, ticker, "3mo", "1d", timeout=5)
+
         print("3: Data fetch successful")
         if df.empty:
             raise ValueError("No historical data found for this ticker")
@@ -465,7 +573,7 @@ def run_backtest(request: BacktestRequest):
         gc.collect()
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": f"Data fetch timed out or failed: {str(e)}"}
+            content={"status": "error", "message": _friendly_fetch_error(e)}
         )
 
 @app.get("/api/v1/backtest/status/{task_id}")
@@ -534,7 +642,7 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         # Fetch initial historical candles to populate the chart
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
-        hist = stock.history(period="3mo", interval="1d", timeout=10)
+        hist = _cached_history(stock, formatted, "3mo", "1d", timeout=10)
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
         data = hist.reset_index().to_dict(orient="records")
@@ -606,7 +714,7 @@ def export_report(request: PDFRequest):
             # Fallback dynamic calculation
             formatted = format_ticker(request.ticker)
             stock = yf.Ticker(formatted, session=session)
-            hist = stock.history(period="3mo", interval="1d", timeout=10)
+            hist = _cached_history(stock, formatted, "3mo", "1d", timeout=10)
             if hist.empty:
                 raise ValueError("No historical data found for this ticker")
             data = hist.reset_index().to_dict(orient="records")
@@ -624,7 +732,14 @@ def export_report(request: PDFRequest):
         max_dd = max(drawdown_curve) if drawdown_curve else 8.45
         sharpe = 1.85 if total_profit > 0 else 0.45
         
-        # Establish sector averages for comparison
+        # (18 Temmuz 2026, dokuzuncu oturum — "PDF raporundaki kozmetik
+        # verilerin etiketlenmesi") Bu sözlük CANLI bir sektör ortalaması
+        # API'sinden gelmiyor — sadece 5 sembol için elle girilmiş SABİT
+        # referans değerler, geri kalan semboller için de tek bir jenerik
+        # yedek satır kullanılıyor. Raporu tamamen görsel/karşılaştırmalı
+        # zenginlikten yoksun bırakmamak için kaldırmadık, ama aşağıdaki PDF
+        # başlığında ve tablo sütun adında bunun "Illustrative" (örnek/
+        # gösterim amaçlı) olduğu artık açıkça belirtiliyor.
         peer_averages = {
             "THYAO": {"profit": 14.50, "win_rate": 58.00, "trades": 10, "sharpe": 1.35, "max_dd": 7.50},
             "ASELS": {"profit": 9.20, "win_rate": 54.00, "trades": 12, "sharpe": 1.10, "max_dd": 9.00},
@@ -666,7 +781,7 @@ def export_report(request: PDFRequest):
         pdf.set_text_color(212, 175, 55)
         pdf.cell(70, 8, "Metric Parameter", border=1, fill=True)
         pdf.cell(55, 8, "Asset Value", border=1, fill=True)
-        pdf.cell(0, 8, "BIST Sector Peer Average", border=1, fill=True, ln=True)
+        pdf.cell(0, 8, "BIST Sector Peer Average (Illustrative)", border=1, fill=True, ln=True)
         
         pdf.set_font("helvetica", "", 9)
         pdf.set_text_color(220, 220, 220)
@@ -725,10 +840,16 @@ def export_report(request: PDFRequest):
         # Section 2: Technical Performance Module (The "Developer" View)
         pdf.set_font("helvetica", "B", 11)
         pdf.set_text_color(212, 175, 55)
-        pdf.cell(0, 8, "2. TECHNICAL PERFORMANCE & INFRASTRUCTURE MODULE (DEVELOPER VIEW)", ln=True)
+        pdf.cell(0, 8, "2. TECHNICAL PERFORMANCE & INFRASTRUCTURE MODULE (SIMULATED / ILLUSTRATIVE)", ln=True)
+        pdf.set_text_color(150, 150, 150)
+        pdf.set_font("helvetica", "I", 7.5)
+        pdf.multi_cell(0, 3.8, (
+            "The figures below (latency, CPU, RAM, data-integrity) are illustrative placeholder values "
+            "for demo/presentation purposes and are not measured from an actual production runtime."
+        ))
         pdf.set_text_color(220, 220, 220)
         pdf.ln(1)
-        
+
         if request.engine_id == "optipulse":
             latency = "45ms"
             cpu_usage = "2.1%"
@@ -748,7 +869,7 @@ def export_report(request: PDFRequest):
         pdf.set_font("helvetica", "B", 8)
         pdf.set_fill_color(30, 30, 30)
         pdf.cell(60, 7, "Parameter Class", border=1, fill=True)
-        pdf.cell(0, 7, "Diagnostic Log / Allocation Status", border=1, fill=True, ln=True)
+        pdf.cell(0, 7, "Diagnostic Log / Allocation Status (Illustrative)", border=1, fill=True, ln=True)
         
         pdf.set_font("helvetica", "", 8)
         diagnostics = [
@@ -812,7 +933,9 @@ def export_report(request: PDFRequest):
         pdf.multi_cell(0, 4, (
             "OptiPulseLab simulations operate in a sandbox environment using historical BIST asset pricing data. "
             "Calculated metrics are purely hypothetical, do not represent actual trading, and do not account for "
-            "full market slippage, exchange liquidity, or broker execution latency. Past performance is not indicative of future results."
+            "full market slippage, exchange liquidity, or broker execution latency. Past performance is not indicative "
+            "of future results. The infrastructure diagnostics in Section 2 and the sector peer averages in Section 1 "
+            "are illustrative placeholder values included for presentation purposes, not live measurements."
         ))
         
         pdf_bytes = pdf.output()

@@ -1095,6 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // heartbeat) yansıtıyor, ayrıntı isteyen fare ile üzerine gelip bakıyor.
     let lastLiveFeedStatus = { active: false, symbol: null, lastTickAt: null };
     function updateEngineTooltip() {
+        updateLiveDataDot();
         if (!el.engineStatus) return;
         const target = safeGetElement('engine-status-item') || el.engineStatus;
         const backendUp = el.engineStatus.innerText === 'ONLINE';
@@ -1109,6 +1110,29 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             target.title = 'Backend çalışıyor. Şu an gösterilen fiyatlar yerel simülasyon — canlı veri akışı henüz bağlanmadı veya bu sembol için kullanılamıyor.';
         }
+    }
+    // (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük
+    // görsel gösterge") Grafik başlığındaki sembol adının yanına, o an
+    // ekrandaki fiyatın gerçek WebSocket akışından mı yoksa yerel
+    // simülasyondan mı geldiğini gösteren küçük bir nokta. Ayrı bir "motor
+    // paneli" değil — mevcut sembol başlığının yanına eklenen minik bir
+    // durum işareti (kullanıcının seçtiği "arayüz" özelliği).
+    function updateLiveDataDot() {
+        const dot = safeGetElement('live-data-dot');
+        if (!dot) return;
+        const symbolEl = safeGetElement('tv-symbol-name');
+        // tv-symbol-name metni "THYAO.IS" gibi ".IS" sonekli gösteriliyor
+        // (bkz. tradingChart.js → setSymbolHeader), ama lastLiveFeedStatus
+        // yalın sembolü ("THYAO") taşıyor — karşılaştırmadan önce soneği at.
+        const currentSymbol = symbolEl ? symbolEl.textContent.trim().replace(/\.IS$/i, '') : null;
+        const isLiveForCurrentSymbol = lastLiveFeedStatus.active &&
+            lastLiveFeedStatus.symbol &&
+            currentSymbol &&
+            lastLiveFeedStatus.symbol === currentSymbol;
+        dot.classList.toggle('is-live', !!isLiveForCurrentSymbol);
+        dot.title = isLiveForCurrentSymbol
+            ? 'Gerçek zamanlı yfinance verisi akıyor'
+            : 'Yerel simülasyon fiyatı';
     }
     window.__optipulseSetLiveFeedStatus = (status) => {
         lastLiveFeedStatus = status || { active: false, symbol: null, lastTickAt: null };

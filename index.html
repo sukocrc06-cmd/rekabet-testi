@@ -72,6 +72,14 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path></svg>
                     <span class="btn-label">Kısayollar</span>
                 </button>
+                <button class="btn btn-secondary" id="btn-open-help" title="Yardım / Hakkında">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    <span class="btn-label">Yardım</span>
+                </button>
+                <button class="btn btn-icon" id="btn-mute-toggle" title="Sesli Bildirimleri Aç/Kapat">
+                    <svg id="mute-icon-on" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                    <svg id="mute-icon-off" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                </button>
                 <button class="btn btn-secondary" id="btn-theme-toggle" title="Koyu / Açık Tema (T)">
                     <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                     <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
@@ -155,6 +163,7 @@
                     <div class="tv-toolbar">
                         <div class="tv-symbol-block">
                             <span id="tv-symbol-name" class="tv-symbol-name">---</span>
+                            <span id="live-data-dot" class="live-data-dot" title="Simülasyon fiyatı"></span>
                             <span id="tv-last-price" class="tv-last-price">---</span>
                             <span id="tv-price-change" class="tv-price-change"></span>
                         </div>
@@ -773,6 +782,56 @@
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>C</kbd></span><span class="shortcut-desc">Seçili çizimi kopyala</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>V</kbd></span><span class="shortcut-desc">Çizimi yapıştır</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Delete</kbd></span><span class="shortcut-desc">Seçili çizimi sil</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Yardım / Hakkında modalı (18 Temmuz 2026, dokuzuncu oturum) -->
+    <div class="indicator-modal-backdrop" id="help-modal-backdrop">
+        <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Yardım / Hakkında">
+            <div class="indicator-modal-header">
+                <h3>Yardım / Hakkında</h3>
+                <button type="button" class="indicator-modal-close" id="btn-close-help" aria-label="Kapat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="indicator-modal-body">
+                <div class="indicator-modal-category">
+                    <div class="indicator-subgroup-label">Bu Uygulama Nedir?</div>
+                    <p class="help-text">
+                        OptiPulseLab, BIST hisseleri üzerinde <strong>demo/simülasyon</strong> amaçlı bir alım-satım
+                        terminalidir. Grafikler ve fiyat geçmişi gerçek yfinance verisine dayanır, ancak
+                        <strong>hiçbir gerçek emir gönderilmez, gerçek bir borsa/aracı kurum bağlantısı yoktur</strong>.
+                        Bakiye, pozisyonlar ve işlem geçmişi yalnızca bu tarayıcıda (localStorage) saklanır.
+                    </p>
+                </div>
+                <div class="indicator-modal-category">
+                    <div class="indicator-subgroup-label">Temel Özellikler</div>
+                    <p class="help-text">
+                        Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı,
+                        özelleştirilebilir teknik göstergeler, fiyat alarmları, Stop-Loss/Take-Profit ve OCO/Trailing
+                        Stop emirleri, kaldıraç/marj sistemi, sektörel BIST100 ısı haritası, 2x2 çoklu grafik
+                        ızgarası ve portföy performans takibi.
+                    </p>
+                </div>
+                <div class="indicator-modal-category">
+                    <div class="indicator-subgroup-label">Nereden Başlamalı?</div>
+                    <p class="help-text">
+                        Üstteki <strong>"Tanıtım Turu"</strong> butonu, tüm özellikleri sırayla gezen kısa bir
+                        sunum başlatır — özellikle ilk kez kullanıyorsanız veya birine göstereceksek buradan
+                        başlamanızı öneririz. Klavye kısayolları için <kbd>?</kbd> tuşuna basın.
+                    </p>
+                </div>
+                <div class="indicator-modal-category">
+                    <div class="indicator-subgroup-label">Veri Kaynağı Notu</div>
+                    <p class="help-text">
+                        Sembol adının yanındaki küçük nokta, o an ekrandaki fiyatın gerçek zamanlı yfinance
+                        akışından mı (yeşil, yanıp sönen) yoksa yerel simülasyondan mı (gri) geldiğini gösterir.
+                        Backend sunucusu çalışmıyorsa veya bir sembol için canlı veri geçici olarak
+                        alınamıyorsa, uygulama otomatik olarak gerçekçi bir simülasyona döner — bu bir hata
+                        değildir, kasıtlı bir tasarım kararıdır.
+                    </p>
                 </div>
             </div>
         </div>
