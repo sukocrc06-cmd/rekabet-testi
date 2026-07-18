@@ -155,8 +155,22 @@
                              buraya, sağa yaslanmış olarak taşındı — hem sıkışıklığı azaltıyor
                              hem de "görünüm modu" anlamsal olarak sekmelerin yanında durmak
                              daha mantıklı. -->
+                        <!-- (18 Temmuz 2026, onuncu oturum) Dual-Chart: aynı sembolü, aynı
+                             ekranda, biri çizim araçlı/tam özellikli biri de bağımsız
+                             çözünürlük seçebilen sade bir "karşılaştırma" paneli olmak üzere
+                             iki grafik yan yana gösterir. 2x2 ızgaradan farkı: orada 4 FARKLI
+                             sembol var, burada TEK sembolün iki farklı zaman dilimi/karşılaştırması. -->
+                        <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-dual-chart" title="Dual-Chart (Aynı Sembol, İki Grafik)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="8" height="16" rx="1"></rect><rect x="13" y="4" width="8" height="16" rx="1"></rect></svg>
+                        </button>
                         <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-grid-view" title="Çoklu Grafik Düzeni (2x2 Izgara)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                        </button>
+                        <!-- Tam Ekran: header + izleme listesi + işlem panelini gizleyip
+                             grafiği (tekli ya da dual-chart) tüm viewport'a büyütür. -->
+                        <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-fullscreen" title="Tam Ekran Grafik (Esc ile çık)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-enter"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-exit" style="display:none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>
                         </button>
                     </div>
 
@@ -215,9 +229,31 @@
                     </div>
 
                     <div class="tv-chart-area" id="tv-chart-area-single">
-                        <div id="tv-main-chart" class="tv-main-chart"></div>
-                        <canvas id="tv-draw-overlay" class="tv-draw-overlay"></canvas>
-                        <div id="tv-ohlc-legend" class="tv-ohlc-legend" style="display:none;"></div>
+                        <div class="tv-chart-pane tv-chart-pane-1" id="tv-chart-pane-1">
+                            <div id="tv-main-chart" class="tv-main-chart"></div>
+                            <canvas id="tv-draw-overlay" class="tv-draw-overlay"></canvas>
+                            <div id="tv-ohlc-legend" class="tv-ohlc-legend" style="display:none;"></div>
+                        </div>
+                        <!-- Dual-Chart ikinci panel (18 Temmuz 2026, onuncu oturum): SADE ve
+                             SALT-OKUNUR — ana panelin çizim araçları / gösterge motorunu
+                             ikinci bir kopyaya çıkarmak (2x2 ızgaradaki gibi) çok daha riskli
+                             bir mimari değişiklik olurdu. Bunun yerine aynı sembolü, kendi
+                             bağımsız çözünürlük seçiciyle karşılaştırma amaçlı gösterir —
+                             ör. sol tarafta 1D + çizim araçları, sağda 1W genel görünüm. -->
+                        <div class="tv-chart-pane tv-chart-pane-2" id="tv-chart-pane-2">
+                            <div class="tv-dual-pane-header">
+                                <span class="tv-dual-pane-label" id="tv-dual-pane-label">Karşılaştırma</span>
+                                <div class="tv-dual-res-row" id="tv-dual-res-row" role="group" aria-label="İkinci grafik zaman dilimi">
+                                    <button type="button" class="tv-res-btn" data-dres="1h">1H</button>
+                                    <button type="button" class="tv-res-btn" data-dres="4h">4H</button>
+                                    <button type="button" class="tv-res-btn" data-dres="1d">1D</button>
+                                    <button type="button" class="tv-res-btn active" data-dres="1w">1W</button>
+                                </div>
+                            </div>
+                            <div class="tv-dual-chart-body">
+                                <div id="tv-main-chart-2" class="tv-main-chart"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Çoklu grafik / 2x2 ızgara düzeni (17 Temmuz 2026, yedinci oturum):
@@ -260,6 +296,13 @@
                     </div>
 
                     <div class="tv-subpane-wrap" id="tv-subpane-wrap">
+                        <!-- (18 Temmuz 2026, onuncu oturum) "İndikatör taşıma": osilatör
+                             panelinin YÜKSEKLİĞİNİ bu tutamaçtan sürükleyerek ayarlayabilme —
+                             gerçek, çalışan bir sürükle-bırak etkileşimi (bkz. tradingChart.js
+                             setupSubpaneResize()). -->
+                        <div class="tv-subpane-resize-handle" id="tv-subpane-resize-handle" title="Sürükleyerek yüksekliği ayarla" role="separator" aria-orientation="horizontal">
+                            <span></span>
+                        </div>
                         <div class="tv-subpane-header">
                             <span id="tv-oscillator-title" class="tv-osc-title">RSI (14)</span>
                         </div>
@@ -331,6 +374,17 @@
                             <button type="button" class="leverage-btn" data-leverage="2">2x</button>
                             <button type="button" class="leverage-btn" data-leverage="5">5x</button>
                             <button type="button" class="leverage-btn" data-leverage="10">10x</button>
+                        </div>
+                        <!-- (18 Temmuz 2026, onuncu oturum) Manuel kaldıraç: hazır butonlar
+                             1/2/5/10x ile sınırlıyken, bu alan 1-20x arası herhangi bir tam
+                             sayı değeri kabul eder — aynı state.leverage'a yazar, aynı
+                             marj/likidasyon mantığını kullanır (bkz. tradingEngine.js
+                             setupLeverageSelector()). -->
+                        <div class="leverage-custom-row">
+                            <label for="leverage-custom-input">Manuel</label>
+                            <input type="number" id="leverage-custom-input" class="form-input leverage-custom-input" min="1" max="20" step="1" placeholder="ör. 7">
+                            <span class="leverage-custom-suffix">x</span>
+                            <button type="button" class="btn-chip-action" id="btn-leverage-custom-apply">Uygula</button>
                         </div>
                     </div>
 
@@ -809,10 +863,13 @@
                 <div class="indicator-modal-category">
                     <div class="indicator-subgroup-label">Temel Özellikler</div>
                     <p class="help-text">
-                        Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı,
+                        Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı
+                        (sol dikey araç rayında — Çizgiler, Fibonacci, Gann, Elliott, Şekiller, Pozisyon),
                         özelleştirilebilir teknik göstergeler, fiyat alarmları, Stop-Loss/Take-Profit ve OCO/Trailing
-                        Stop emirleri, kaldıraç/marj sistemi, sektörel BIST100 ısı haritası, 2x2 çoklu grafik
-                        ızgarası ve portföy performans takibi.
+                        Stop emirleri, hazır ve <strong>manuel (1-20x) kaldıraç/marj sistemi</strong>, sektörel
+                        BIST100 ısı haritası, aynı sembolü karşılaştırmalı gösteren <strong>Dual-Chart</strong>,
+                        2x2 çoklu grafik ızgarası, <strong>tam ekran grafik modu</strong> ve portföy performans
+                        takibi.
                     </p>
                 </div>
                 <div class="indicator-modal-category">

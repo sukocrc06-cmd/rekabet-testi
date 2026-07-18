@@ -1381,6 +1381,37 @@ body {
     letter-spacing: 0;
 }
 
+/* (18 Temmuz 2026, onuncu oturum) Manuel/özel kaldıraç girişi — hazır 1/2/5/10x
+   butonlarının yanında serbest bir değer (1-20x) girilebilir. */
+.leverage-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.leverage-custom-row label {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.leverage-custom-input {
+    width: 64px;
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    font-size: 12px;
+    text-align: right;
+}
+
+.leverage-custom-suffix {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: auto;
+}
+
 .oco-hint {
     font-size: 10px;
     color: var(--text-muted);
@@ -2718,6 +2749,65 @@ body {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+    display: flex;
+    gap: 2px;
+}
+
+/* (18 Temmuz 2026, onuncu oturum) Dual-Chart panelleri — pane-1 ana (çizim
+   araçlı) grafiği taşır ve tekli modda %100 genişlik kaplar; pane-2 sadece
+   Dual-Chart açıkken görünür olur (bkz. .tv-chart-area.tv-dual-active). */
+.tv-chart-pane {
+    position: relative;
+    flex: 1 1 100%;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.tv-chart-pane-2 {
+    display: none;
+    flex: 1 1 50%;
+    border-left: 1px solid var(--gold-border);
+}
+
+.tv-chart-area.tv-dual-active .tv-chart-pane-1 {
+    flex: 1 1 50%;
+}
+
+.tv-chart-area.tv-dual-active .tv-chart-pane-2 {
+    display: flex;
+}
+
+.tv-dual-pane-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+}
+
+.tv-dual-pane-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.tv-dual-res-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.tv-dual-chart-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
 }
 
 .tv-main-chart {
@@ -2826,6 +2916,32 @@ body {
     flex-direction: column;
     border-top: 1px solid rgba(212, 175, 55, 0.12);
     background-color: var(--bg-panel);
+    position: relative;
+}
+
+/* (18 Temmuz 2026, onuncu oturum) İndikatör panelini sürükleyerek
+   yeniden boyutlandırma tutamacı — bkz. tradingChart.js setupSubpaneResize(). */
+.tv-subpane-resize-handle {
+    height: 6px;
+    flex-shrink: 0;
+    cursor: row-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+}
+
+.tv-subpane-resize-handle span {
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background-color: var(--tint-06);
+    transition: background-color 0.15s ease;
+}
+
+.tv-subpane-resize-handle:hover span,
+.tv-subpane-resize-handle.dragging span {
+    background-color: var(--gold);
 }
 
 .tv-subpane-header {
@@ -3364,6 +3480,96 @@ body {
     }
     .tv-subpane-wrap {
         flex-basis: 110px;
+    }
+}
+
+/* Dar ekranlarda iki grafiği yan yana sığdırmak gerçekçi değil — Dual-Chart
+   ikinci paneli mobilde/tablette her zaman gizli kalır (JS state'i dokunulmaz,
+   sadece görsel olarak tekli moda düşer; masaüstüne dönünce otomatik geri gelir). */
+@media (max-width: 900px) {
+    .tv-chart-pane-2 {
+        display: none !important;
+    }
+    .tv-chart-area.tv-dual-active .tv-chart-pane-1 {
+        flex: 1 1 100%;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TAM EKRAN GRAFİK MODU (18 Temmuz 2026, onuncu oturum)
+   Header, izleme listesi (sidebar) ve işlem panelini gizleyip grafiği (tekli
+   ya da Dual-Chart) tüm viewport'a büyütür. Grid sütun/satırlarını 0'a
+   indirmek (display:none yerine) layout'un aniden zıplamasını önlüyor ve
+   ResizeObserver'ın (tradingChart.js setupResize()) geçişi doğal biçimde
+   yakalamasını sağlıyor.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dashboard-container.tv-fullscreen-mode {
+    grid-template-rows: 0 1fr 0;
+}
+
+.dashboard-container.tv-fullscreen-mode > .dashboard-header,
+.dashboard-container.tv-fullscreen-mode > .dashboard-footer {
+    display: none;
+}
+
+.dashboard-container.tv-fullscreen-mode .dashboard-body {
+    grid-template-columns: 0 1fr 0;
+}
+
+.dashboard-container.tv-fullscreen-mode .sidebar-panel,
+.dashboard-container.tv-fullscreen-mode .competition-panel {
+    display: none;
+}
+
+.dashboard-container.tv-fullscreen-mode .trading-chart-section {
+    min-height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SOL DİKEY ÇİZİM ARAÇLARI RAYI (18 Temmuz 2026, onuncu oturum)
+   Masaüstünde #chart-toolbar'ı (zaten var olan ~20+ gerçek çizim aracı —
+   TOOL_GROUPS, tradingChart.js) yatay araç çubuğundan çıkarıp ekranın en
+   solunda TradingView tarzı dikey bir raya sabitliyor. Araçların KENDİSİ
+   değişmiyor — yalnızca konum/yön değişiyor (bkz. tradingChart.js
+   toggleFlyout()'taki dikey-mod dallanması). Dar ekranlarda (bkz. altındaki
+   980px medya sorgusu) bu blok devre dışı kalır ve araç çubuğu eskisi gibi
+   .tv-toolbar içinde yatay akışa döner. */
+@media (min-width: 981px) {
+    .dashboard-container {
+        padding-left: 46px;
+    }
+
+    #chart-toolbar.tv-drawing-toolbar {
+        position: fixed;
+        left: 0;
+        top: 64px;
+        bottom: 32px;
+        width: 46px;
+        z-index: 250;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        padding: 10px 4px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        border-left: none;
+        border-right: 1px solid var(--gold-border);
+        background-color: var(--bg-sidebar);
+    }
+
+    .dashboard-container.tv-fullscreen-mode #chart-toolbar.tv-drawing-toolbar {
+        top: 0;
+        bottom: 0;
+    }
+
+    #chart-toolbar.tv-drawing-toolbar .tv-tool-group {
+        display: flex;
+    }
+
+    #chart-toolbar.tv-drawing-toolbar .tv-toolbar-sep {
+        width: 26px;
+        height: 1px;
+        margin: 3px 0;
     }
 }
 

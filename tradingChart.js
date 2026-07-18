@@ -94,6 +94,21 @@ const TradingChart = (() => {
     let drawCtx = null;
     let chartContainer = null;
 
+    // ── Dual-Chart companion pane (18 Temmuz 2026, onuncu oturum) ──
+    // Deliberately simple/read-only (no drawing tools, no overlay indicators)
+    // for the same architectural-risk reason documented in multiChartGrid.js:
+    // duplicating the full singleton chart/drawing engine for a second pane
+    // is far riskier than it's worth. It shows the SAME symbol as the main
+    // pane at an independently chosen resolution.
+    let dualChart = null;
+    let dualSeries = null;
+    let dualActive = false;
+    let dualResolution = '1w';
+    let dualRefreshTimer = null;
+
+    // ── Fullscreen chart mode (18 Temmuz 2026, onuncu oturum) ──
+    let fullscreenActive = false;
+
     let state = {
         ticker: null,
         candles: [],           // the currently DISPLAYED resolution's candles (derived)
@@ -180,6 +195,9 @@ const TradingChart = (() => {
         setupIndicatorModal();
         setupDrawingSelection();
         setupResize();
+        setupDualChartControls();
+        setupFullscreenControl();
+        setupSubpaneResize();
 
         window.addEventListener('resize', () => {
             resizeAll();
@@ -352,14 +370,23 @@ const TradingChart = (() => {
         return Math.floor(Date.UTC(parts[0], parts[1] - 1, parts[2]) / 1000);
     }
 
-    function deriveCandlesForResolution() {
-        const res = RESOLUTIONS.find(r => r.id === state.resolution) || RESOLUTIONS[3];
+    // Generalized version of the old deriveCandlesForResolution() — takes an
+    // explicit resolution id instead of always reading state.resolution, so
+    // the Dual-Chart companion pane (which has its OWN independent
+    // resolution) can reuse the exact same daily->intraday/weekly derivation
+    // logic without duplicating it.
+    function deriveCandlesForRes(resId) {
+        const res = RESOLUTIONS.find(r => r.id === resId) || RESOLUTIONS[3];
         if (res.kind === 'intraday') {
             return window.DataController.synthesizeIntradayCandles(state.dailyCandles, res.minutes);
         } else if (res.kind === 'weekly') {
             return window.DataController.aggregateWeeklyCandles(state.dailyCandles);
         }
         return state.dailyCandles;
+    }
+
+    function deriveCandlesForResolution() {
+        return deriveCandlesForRes(state.resolution);
     }
 
     function isIntradayResolution() {
@@ -389,6 +416,8 @@ const TradingChart = (() => {
         // they just don't render rather than throwing. They reappear as soon
         // as the user switches back to the resolution they were drawn on.
         redrawDrawings();
+
+        if (dualActive) refreshDualChart();
     }
 
     function setResolution(id) {
@@ -407,6 +436,172 @@ const TradingChart = (() => {
                 setResolution(btn.dataset.res);
             });
         });
+    }
+
+    /* ────────── Dual-Chart companion pane (onuncu oturum) ────────── */
+
+    function createDualChart() {
+        const container = byId('tv-main-chart-2');
+        if (!container || !window.LightweightCharts) return;
+        dualChart = LightweightCharts.createChart(container, baseChartOptions(container, true));
+        dualSeries = dualChart.addCandlestickSeries({
+            upColor: COLORS.up,
+            downColor: COLORS.down,
+            borderUpColor: COLORS.up,
+            borderDownColor: COLORS.down,
+            wickUpColor: COLORS.wickUp,
+            wickDownColor: COLORS.wickDown
+        });
+    }
+
+    function destroyDualChart() {
+        if (dualRefreshTimer) {
+            clearInterval(dualRefreshTimer);
+            dualRefreshTimer = null;
+        }
+        if (dualChart) {
+            try { dualChart.remove(); } catch (e) { /* already gone */ }
+            dualChart = null;
+            dualSeries = null;
+        }
+    }
+
+    function refreshDualChart() {
+        if (!dualActive || !dualSeries || !state.dailyCandles.length) return;
+        const candles = deriveCandlesForRes(dualResolution).map(c => ({
+            time: c.date, open: c.open, high: c.high, low: c.low, close: c.close
+        }));
+        dualSeries.setData(candles);
+        dualChart.timeScale().fitContent();
+        const label = byId('tv-dual-pane-label');
+        if (label && state.ticker) label.textContent = state.ticker + ' — Karşılaştırma';
+    }
+
+    function setDualResolution(resId) {
+        dualResolution = resId;
+        document.querySelectorAll('#tv-dual-res-row [data-dres]').forEach(b => {
+            b.classList.toggle('active', b.dataset.dres === resId);
+        });
+        refreshDualChart();
+    }
+
+    function toggleDualChart() {
+        dualActive = !dualActive;
+        const area = byId('tv-chart-area-single');
+        const btn = byId('btn-toggle-dual-chart');
+        if (area) area.classList.toggle('tv-dual-active', dualActive);
+        if (btn) btn.classList.toggle('active', dualActive);
+
+        if (dualActive) {
+            if (!dualChart) createDualChart();
+            // Layout only settles after the pane's display flips to flex —
+            // defer sizing/data a tick, same pattern used by
+            // multiChartGrid.js's openGridView().
+            setTimeout(() => {
+                resizeAll();
+                refreshDualChart();
+            }, 30);
+            if (!dualRefreshTimer) dualRefreshTimer = setInterval(refreshDualChart, 5000);
+        } else {
+            destroyDualChart();
+        }
+    }
+
+    function setupDualChartControls() {
+        const toggleBtn = byId('btn-toggle-dual-chart');
+        if (toggleBtn) toggleBtn.addEventListener('click', toggleDualChart);
+
+        const resRow = byId('tv-dual-res-row');
+        if (resRow) {
+            resRow.querySelectorAll('[data-dres]').forEach(btn => {
+                btn.addEventListener('click', () => setDualResolution(btn.dataset.dres));
+            });
+        }
+    }
+
+    /* ────────── Tam Ekran Grafik Modu (onuncu oturum) ────────── */
+
+    function setFullscreenIcon(active) {
+        const enterIcon = byId('fullscreen-icon-enter');
+        const exitIcon = byId('fullscreen-icon-exit');
+        if (enterIcon) enterIcon.style.display = active ? 'none' : '';
+        if (exitIcon) exitIcon.style.display = active ? '' : 'none';
+        const btn = byId('btn-toggle-fullscreen');
+        if (btn) {
+            btn.classList.toggle('active', active);
+            btn.title = active ? 'Tam Ekrandan Çık (Esc)' : 'Tam Ekran Grafik (Esc ile çık)';
+        }
+    }
+
+    function toggleFullscreen(forceState) {
+        fullscreenActive = typeof forceState === 'boolean' ? forceState : !fullscreenActive;
+        const container = document.querySelector('.dashboard-container');
+        if (container) container.classList.toggle('tv-fullscreen-mode', fullscreenActive);
+        setFullscreenIcon(fullscreenActive);
+        // Header/sidebar/trade-panel visibility flips instantly via CSS; the
+        // chart containers' actual pixel size only settles after that reflow,
+        // so resize on the next tick (ResizeObserver also catches this, but
+        // an explicit call avoids a one-frame flash of stale chart width).
+        setTimeout(() => {
+            resizeAll();
+            redrawDrawings();
+        }, 30);
+    }
+
+    function setupFullscreenControl() {
+        const btn = byId('btn-toggle-fullscreen');
+        if (btn) btn.addEventListener('click', () => toggleFullscreen());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && fullscreenActive) toggleFullscreen(false);
+        });
+    }
+
+    /* ────────── Osilatör panelini sürükleyerek yeniden boyutlandırma ────────── */
+
+    function setupSubpaneResize() {
+        const handle = byId('tv-subpane-resize-handle');
+        const wrap = byId('tv-subpane-wrap');
+        if (!handle || !wrap) return;
+
+        const MIN_H = 90;
+        const MAX_H = 420;
+        let dragging = false;
+        let startY = 0;
+        let startH = 0;
+
+        function onMove(e) {
+            if (!dragging) return;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const delta = startY - clientY; // dragging UP increases pane height
+            const newH = Math.min(MAX_H, Math.max(MIN_H, startH + delta));
+            wrap.style.flexBasis = newH + 'px';
+        }
+
+        function onUp() {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+            resizeAll();
+        }
+
+        function onDown(e) {
+            dragging = true;
+            handle.classList.add('dragging');
+            startY = e.touches ? e.touches[0].clientY : e.clientY;
+            startH = wrap.getBoundingClientRect().height;
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: true });
+            document.addEventListener('touchend', onUp);
+            e.preventDefault();
+        }
+
+        handle.addEventListener('mousedown', onDown);
+        handle.addEventListener('touchstart', onDown, { passive: false });
     }
 
     function formatCandleDate(ts) {
@@ -1169,8 +1364,19 @@ const TradingChart = (() => {
         if (willOpen) {
             if (anchorBtn) {
                 const rect = anchorBtn.getBoundingClientRect();
-                flyout.style.top = (rect.bottom + 6) + 'px';
-                flyout.style.left = rect.left + 'px';
+                // Masaüstünde (>=981px) #chart-toolbar sol dikey raya sabitlenmiş
+                // durumda (bkz. styles.css) — flyout'u ikonun ALTINA değil
+                // SAĞINA açmak gerekiyor, yoksa menü rayın dışına, chart'ın
+                // üzerine düşer. Dar ekranlarda araç çubuğu hâlâ yatay akışta
+                // olduğundan eski (altına açılan) davranış korunuyor.
+                const isVerticalRail = window.matchMedia('(min-width: 981px)').matches;
+                if (isVerticalRail) {
+                    flyout.style.top = rect.top + 'px';
+                    flyout.style.left = (rect.right + 6) + 'px';
+                } else {
+                    flyout.style.top = (rect.bottom + 6) + 'px';
+                    flyout.style.left = rect.left + 'px';
+                }
             }
             flyout.classList.add('open');
         }
@@ -2024,6 +2230,10 @@ const TradingChart = (() => {
         if (subChart && subContainer) {
             subChart.applyOptions({ width: subContainer.clientWidth, height: subContainer.clientHeight });
         }
+        const dualContainer = byId('tv-main-chart-2');
+        if (dualChart && dualContainer) {
+            dualChart.applyOptions({ width: dualContainer.clientWidth, height: dualContainer.clientHeight });
+        }
         resizeDrawCanvas();
     }
 
@@ -2073,7 +2283,10 @@ const TradingChart = (() => {
         debugGetChartType: () => state.chartType,
         debugGetActiveTool: () => state.activeTool,
         debugGetResolution: () => state.resolution,
-        debugGetCandleCount: () => state.candles.length
+        debugGetCandleCount: () => state.candles.length,
+        debugIsDualActive: () => dualActive,
+        debugGetDualResolution: () => dualResolution,
+        debugIsFullscreenActive: () => fullscreenActive
     });
 })();
 

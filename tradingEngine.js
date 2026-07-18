@@ -1492,18 +1492,55 @@ const TradingEngine = (() => {
         updateEstimate();
     }
 
+    const LEVERAGE_MIN = 1;
+    const LEVERAGE_MAX = 20;
+
+    function applyLeverage(value) {
+        state.leverage = Math.min(LEVERAGE_MAX, Math.max(LEVERAGE_MIN, Math.round(Number(value) || 1)));
+        const hint = byId('leverage-warning-hint');
+        if (hint) hint.style.display = state.leverage >= 5 ? 'inline' : 'none';
+        updateEstimate();
+        return state.leverage;
+    }
+
     function setupLeverageSelector() {
         const buttons = document.querySelectorAll('.leverage-btn');
-        const hint = byId('leverage-warning-hint');
+        const customInput = byId('leverage-custom-input');
+        const customApplyBtn = byId('btn-leverage-custom-apply');
         if (!buttons.length) return;
+
         buttons.forEach(btn => {
             btn.addEventListener('click', () => {
-                state.leverage = Math.max(1, parseInt(btn.dataset.leverage, 10) || 1);
+                applyLeverage(parseInt(btn.dataset.leverage, 10) || 1);
                 buttons.forEach(b => b.classList.toggle('active', b === btn));
-                if (hint) hint.style.display = state.leverage >= 5 ? 'inline' : 'none';
-                updateEstimate();
+                if (customInput) customInput.value = '';
             });
         });
+
+        // (18 Temmuz 2026, onuncu oturum) Manuel kaldıraç: hazır 1/2/5/10x
+        // butonlarının dışında, 1-20x arası herhangi bir tam sayı — aynı
+        // state.leverage'a yazıp aynı marj/likidasyon mantığını kullanıyor.
+        // Preset butonlarından biriyle birebir eşleşirse o buton "active"
+        // görünür kalsın diye işaretleniyor; eşleşmezse hepsi pasife düşüyor
+        // (kullanıcı gerçekten özel bir değer kullandığını görsün diye).
+        if (customInput && customApplyBtn) {
+            const applyCustom = () => {
+                const raw = parseInt(customInput.value, 10);
+                if (!raw || isNaN(raw)) {
+                    showToast(`Geçerli bir kaldıraç girin (${LEVERAGE_MIN}-${LEVERAGE_MAX}x arası).`);
+                    return;
+                }
+                const applied = applyLeverage(raw);
+                customInput.value = applied;
+                const matchingPreset = Array.from(buttons).find(b => parseInt(b.dataset.leverage, 10) === applied);
+                buttons.forEach(b => b.classList.toggle('active', b === matchingPreset));
+                showToast(`Kaldıraç ${applied}x olarak ayarlandı.`);
+            };
+            customApplyBtn.addEventListener('click', applyCustom);
+            customInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); applyCustom(); }
+            });
+        }
     }
 
     function applyQtyPct(pct) {
