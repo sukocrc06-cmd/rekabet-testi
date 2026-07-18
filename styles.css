@@ -2439,12 +2439,26 @@ body {
     background-color: rgba(244, 67, 54, 0.1);
 }
 
-/* ────────── Stop-Loss / Take-Profit ────────── */
+/* ────────── Stop-Loss / Take-Profit ──────────
+   (üçüncü tur, 18 Temmuz 2026) Yeniden düzenlendi: fiyat alanları artık
+   kendi satırında (.qt-sltp-fields-row), trailing-stop alt-bloğu
+   (.qt-trailing-block) ayrı bir satırda — hepsi tutarlı bir kart görünümü
+   veren .qt-sltp-box içinde, ince bir üst-ayraç ile birbirinden ayrılıyor. */
 
-.qt-sltp-row {
+.qt-sltp-box {
+    display: none;               /* JS toggles to 'flex' */
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 10px;
+    background-color: var(--tint-03);
+    border: 1px solid var(--tint-06);
+    border-radius: var(--radius-sm);
+}
+
+.qt-sltp-fields-row {
     display: flex;
     gap: 8px;
-    margin-top: 8px;
 }
 
 .qt-sltp-field {
@@ -2458,6 +2472,15 @@ body {
     text-transform: uppercase;
     margin-bottom: 4px;
     font-weight: 600;
+}
+
+.qt-trailing-block {
+    padding-top: 8px;
+    border-top: 1px solid var(--tint-06);
+}
+
+.qt-trailing-field {
+    margin-top: 8px;
 }
 
 .sltp-modal-info {
@@ -2965,6 +2988,35 @@ body {
 
 .tv-grid-promote-btn:hover {
     background-color: var(--gold-dim);
+}
+
+/* (18 Temmuz 2026, onuncu oturum, üçüncü tur) Izgara hücresi için sade
+   SMA20/EMA9 overlay aç/kapa butonu — bkz. multiChartGrid.js
+   toggleCellOverlay()/refreshCellOverlay(). */
+.tv-grid-indicator-btn {
+    background: transparent;
+    border: 1px solid var(--tint-14);
+    color: var(--text-muted);
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.tv-grid-indicator-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--gold-border);
+}
+
+.tv-grid-indicator-btn.active {
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
+    color: var(--gold);
 }
 
 .tv-grid-cell-chart {

@@ -694,6 +694,161 @@ const DataController = (() => {
     }
 
     /**
+     * Compute Ichimoku Kinko Hyo (Ichimoku Cloud).
+     *
+     * Tenkan-sen ve Kijun-sen mevcut barlarda hesaplanır. Senkou Span A/B ve
+     * Chikou Span, standart formüle göre gerçek verilerden hesaplanır ve
+     * `displacement` kadar kaydırılır — ancak son gerçek mum çubuğunun
+     * ötesine sahte/gelecek zaman damgalı barlar EKLENMEZ (bu projede veri
+     * uydurmama ilkesi gereği). Bu yüzden bulut, en güncel `displacement`
+     * bar için henüz "ileri" çizilmez; Chikou de son `displacement` barda
+     * boş kalır. Bu dürüst bir basitleştirmedir, hata değildir.
+     */
+    function computeIchimoku(candles, tenkanPeriod = 9, kijunPeriod = 26, senkouBPeriod = 52, displacement = 26) {
+        const len = candles.length;
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+
+        function midpoint(period, i) {
+            if (i < period - 1) return null;
+            let hh = -Infinity, ll = Infinity;
+            for (let j = i - period + 1; j <= i; j++) {
+                if (highs[j] > hh) hh = highs[j];
+                if (lows[j] < ll) ll = lows[j];
+            }
+            return (hh + ll) / 2;
+        }
+
+        const tenkan = new Array(len).fill(null);
+        const kijun = new Array(len).fill(null);
+        const senkouARaw = new Array(len).fill(null);
+        const senkouBRaw = new Array(len).fill(null);
+        const chikou = new Array(len).fill(null);
+
+        for (let i = 0; i < len; i++) {
+            tenkan[i] = midpoint(tenkanPeriod, i);
+            kijun[i] = midpoint(kijunPeriod, i);
+            if (tenkan[i] !== null && kijun[i] !== null) {
+                senkouARaw[i] = (tenkan[i] + kijun[i]) / 2;
+            }
+            senkouBRaw[i] = midpoint(senkouBPeriod, i);
+        }
+
+        // Senkou Span A/B: displacement kadar ileri kaydırılır (yalnızca gerçek bar aralığında).
+        const senkouA = new Array(len).fill(null);
+        const senkouB = new Array(len).fill(null);
+        for (let i = 0; i < len; i++) {
+            const srcIdx = i - displacement;
+            if (srcIdx >= 0) {
+                senkouA[i] = senkouARaw[srcIdx];
+                senkouB[i] = senkouBRaw[srcIdx];
+            }
+        }
+
+        // Chikou Span: kapanış fiyatı displacement kadar geriye kaydırılır.
+        for (let i = 0; i < len; i++) {
+            const dstIdx = i - displacement;
+            if (dstIdx >= 0) {
+                chikou[dstIdx] = closes[i];
+            }
+        }
+
+        return {
+            tenkan: tenkan.map(v => v === null ? null : +v.toFixed(4)),
+            kijun: kijun.map(v => v === null ? null : +v.toFixed(4)),
+            senkouA: senkouA.map(v => v === null ? null : +v.toFixed(4)),
+            senkouB: senkouB.map(v => v === null ? null : +v.toFixed(4)),
+            chikou: chikou.map(v => v === null ? null : +v.toFixed(4))
+        };
+    }
+
+    /**
+     * Compute Parabolic SAR (Stop and Reverse) — Wilder'in standart algoritması.
+     * Görselleştirme: nokta işaretleyici yerine ince noktalı çizgi olarak
+     * gösterilecektir (bkz. tradingChart.js) — bu dürüst bir basitleştirmedir.
+     */
+    function computeParabolicSAR(candles, step = 0.02, maxStep = 0.2) {
+        const len = candles.length;
+        const sar = new Array(len).fill(null);
+        if (len < 2) return sar;
+
+        let isUptrend = candles[1].close >= candles[0].close;
+        let af = step;
+        let ep = isUptrend ? candles[0].high : candles[0].low;
+        let sarValue = isUptrend ? candles[0].low : candles[0].high;
+
+        sar[0] = +sarValue.toFixed(4);
+
+        for (let i = 1; i < len; i++) {
+            let nextSar = sarValue + af * (ep - sarValue);
+
+            if (isUptrend) {
+                // SAR, önceki iki barın en düşüğünü aşamaz.
+                const prevLow1 = candles[i - 1].low;
+                const prevLow2 = i >= 2 ? candles[i - 2].low : prevLow1;
+                nextSar = Math.min(nextSar, prevLow1, prevLow2);
+
+                if (candles[i].low < nextSar) {
+                    // Trend dönüşü: yükselişten düşüşe.
+                    isUptrend = false;
+                    nextSar = ep;
+                    ep = candles[i].low;
+                    af = step;
+                } else {
+                    if (candles[i].high > ep) { ep = candles[i].high; af = Math.min(af + step, maxStep); }
+                }
+            } else {
+                const prevHigh1 = candles[i - 1].high;
+                const prevHigh2 = i >= 2 ? candles[i - 2].high : prevHigh1;
+                nextSar = Math.max(nextSar, prevHigh1, prevHigh2);
+
+                if (candles[i].high > nextSar) {
+                    // Trend dönüşü: düşüşten yükselişe.
+                    isUptrend = true;
+                    nextSar = ep;
+                    ep = candles[i].high;
+                    af = step;
+                } else {
+                    if (candles[i].low < ep) { ep = candles[i].low; af = Math.min(af + step, maxStep); }
+                }
+            }
+
+            sarValue = nextSar;
+            sar[i] = +sarValue.toFixed(4);
+        }
+
+        return sar;
+    }
+
+    /**
+     * Compute classical (floor-trader) Pivot Points from the most recently
+     * COMPLETED candle (henüz oluşmakta olan son bar hariç). Bunlar bir
+     * zaman serisi değil, yatay destek/direnç seviyeleridir — grafik
+     * üzerinde createPriceLine() ile statik çizgiler olarak gösterilir
+     * (RSI'nin 70/30 referans çizgileriyle aynı desen).
+     */
+    function computePivotPoints(candles) {
+        if (!candles || candles.length < 2) return null;
+        const ref = candles[candles.length - 2]; // son tamamlanmış bar
+        const { high, low, close } = ref;
+        const p = (high + low + close) / 3;
+        const r1 = 2 * p - low;
+        const s1 = 2 * p - high;
+        const r2 = p + (high - low);
+        const s2 = p - (high - low);
+        const r3 = high + 2 * (p - low);
+        const s3 = low - 2 * (high - p);
+
+        const round4 = v => +v.toFixed(4);
+        return {
+            p: round4(p),
+            r1: round4(r1), r2: round4(r2), r3: round4(r3),
+            s1: round4(s1), s2: round4(s2), s3: round4(s3)
+        };
+    }
+
+    /**
      * Compute Average True Range (Wilder's smoothing).
      */
     function computeATR(candles, period = 14) {
@@ -1162,7 +1317,10 @@ const DataController = (() => {
      *   bollingerUpper: (number|null)[],
      *   bollingerMiddle: (number|null)[],
      *   bollingerLower: (number|null)[],
-     *   vwap: number[]
+     *   vwap: number[],
+     *   ichimoku: {tenkan, kijun, senkouA, senkouB, chikou},
+     *   psar: (number|null)[],
+     *   pivotPoints: {p, r1, r2, r3, s1, s2, s3}|null
      * }}
      */
     function calculateIndicators(candles) {
@@ -1188,6 +1346,11 @@ const DataController = (() => {
         const adx14 = computeADX(candles, 14);
         const obv = computeOBV(candles);
         const willr14 = computeWilliamsR(candles, 14);
+
+        // --- Ichimoku Cloud / Parabolic SAR / Pivot Points (üçüncü tur — indikatör çeşitlendirme) ---
+        const ichimoku = computeIchimoku(candles);
+        const psar = computeParabolicSAR(candles);
+        const pivotPoints = computePivotPoints(candles);
 
         // --- Bollinger Bands (20-period, 2 std-dev) ---
         const bbPeriod = 20;
@@ -1230,7 +1393,8 @@ const DataController = (() => {
         return {
             sma20, sma50, sma200, ema9, ema21, wma20,
             bollingerUpper, bollingerMiddle, bollingerLower, vwap,
-            rsi14, macd, stochastic, atr14, adx14, obv, willr14
+            rsi14, macd, stochastic, atr14, adx14, obv, willr14,
+            ichimoku, psar, pivotPoints
         };
     }
 
@@ -1583,6 +1747,9 @@ const DataController = (() => {
         computeADX,
         computeOBV,
         computeWilliamsR,
+        computeIchimoku,
+        computeParabolicSAR,
+        computePivotPoints,
         computeSupport,
         computeResistance,
 

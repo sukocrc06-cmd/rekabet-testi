@@ -277,10 +277,16 @@
                          (çok daha riskli bir mimari değişiklik) sade, salt-okunur mini
                          grafikler kullanılıyor — bir hücreye tıklamak o sembolü ana
                          (tekli) grafiğe "yükseltir". -->
+                    <!-- (18 Temmuz 2026, onuncu oturum, üçüncü tur) Her hücreye sade
+                         SMA20/EMA9 overlay gösterge aç/kapa butonu eklendi
+                         (.tv-grid-indicator-btn) — Dual-Chart Panel 2'deki "sade
+                         overlay" yaklaşımıyla aynı: hücrenin salt-okunur/kasıtlı
+                         basit mimarisi korunuyor, tam gösterge motoru eklenmiyor. -->
                     <div class="tv-grid-view" id="tv-grid-view" style="display:none;">
                         <div class="tv-grid-cell" data-cell="0">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="0"></select>
+                                <button type="button" class="tv-grid-indicator-btn" data-cell="0" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="0" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
                             <div class="tv-grid-cell-chart" id="tv-grid-chart-0"></div>
@@ -288,6 +294,7 @@
                         <div class="tv-grid-cell" data-cell="1">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="1"></select>
+                                <button type="button" class="tv-grid-indicator-btn" data-cell="1" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="1" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
                             <div class="tv-grid-cell-chart" id="tv-grid-chart-1"></div>
@@ -295,6 +302,7 @@
                         <div class="tv-grid-cell" data-cell="2">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="2"></select>
+                                <button type="button" class="tv-grid-indicator-btn" data-cell="2" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="2" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
                             <div class="tv-grid-cell-chart" id="tv-grid-chart-2"></div>
@@ -302,6 +310,7 @@
                         <div class="tv-grid-cell" data-cell="3">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="3"></select>
+                                <button type="button" class="tv-grid-indicator-btn" data-cell="3" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="3" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
                             <div class="tv-grid-cell-chart" id="tv-grid-chart-3"></div>
@@ -426,28 +435,41 @@
                         <p class="oco-hint">Fiyat üst tetiği yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT emri gerçekleşir — hangisi önce olursa diğeri otomatik iptal edilir.</p>
                     </div>
 
-                    <div class="form-group" style="margin-bottom: 12px;" id="qt-sltp-group">
+                    <!-- (üçüncü tur, 18 Temmuz 2026) SL/TP bölümü yeniden düzenlendi:
+                         önceki sürümde trailing-stop kutucuğu ve yüzde alanı, SL/TP fiyat
+                         alanlarıyla AYNI flex satırına sıkışıyordu (görsel karmaşa). Artık
+                         kendi alt-bloğunda, ayrı bir satırda. Ayrıca "(OCO)" ibaresi
+                         kaldırıldı — bu bilet zaten ayrı bir "OCO" emir tipi içeriyor
+                         (qt-oco-row) ve aynı kısaltmanın iki farklı anlamda kullanılması
+                         kafa karıştırıcıydı; burası aslında pozisyona bağlı bracket
+                         (SL+TP) emri, bekleyen kırılım emri değil. -->
+                    <div class="form-group qt-sltp-group" style="margin-bottom: 12px;" id="qt-sltp-group">
                         <label class="alert-notif-toggle-row" style="margin-top:0; text-transform:none; font-weight:500;">
                             <input type="checkbox" id="qt-sltp-toggle">
-                            <span>Stop-Loss / Take-Profit ekle (OCO)</span>
+                            <span>Stop-Loss / Take-Profit ekle</span>
                         </label>
-                        <div class="qt-sltp-row" id="qt-sltp-row" style="display:none;">
-                            <div class="qt-sltp-field">
-                                <label for="qt-sl-price">Stop-Loss (₺)</label>
-                                <input type="number" id="qt-sl-price" class="form-input" min="0" step="0.01" placeholder="0.00">
+                        <div class="qt-sltp-box" id="qt-sltp-row" style="display:none;">
+                            <div class="qt-sltp-fields-row">
+                                <div class="qt-sltp-field">
+                                    <label for="qt-sl-price">Stop-Loss (₺)</label>
+                                    <input type="number" id="qt-sl-price" class="form-input" min="0" step="0.01" placeholder="0.00">
+                                </div>
+                                <div class="qt-sltp-field">
+                                    <label for="qt-tp-price">Take-Profit (₺)</label>
+                                    <input type="number" id="qt-tp-price" class="form-input" min="0" step="0.01" placeholder="0.00">
+                                </div>
                             </div>
-                            <div class="qt-sltp-field">
-                                <label for="qt-tp-price">Take-Profit (₺)</label>
-                                <input type="number" id="qt-tp-price" class="form-input" min="0" step="0.01" placeholder="0.00">
+                            <div class="qt-trailing-block">
+                                <label class="alert-notif-toggle-row" style="margin-top:0; text-transform:none; font-weight:500;">
+                                    <input type="checkbox" id="qt-trailing-toggle">
+                                    <span>Sabit Stop-Loss yerine Trailing Stop kullan</span>
+                                </label>
+                                <div class="qt-sltp-field qt-trailing-field" id="qt-trailing-row" style="display:none;">
+                                    <label for="qt-trailing-pct">Trailing Stop Mesafesi (%)</label>
+                                    <input type="number" id="qt-trailing-pct" class="form-input" min="0.1" step="0.1" placeholder="örn. 2.5">
+                                </div>
                             </div>
-                            <label class="alert-notif-toggle-row" style="margin-top:8px; text-transform:none; font-weight:500;">
-                                <input type="checkbox" id="qt-trailing-toggle">
-                                <span>Sabit Stop-Loss yerine Trailing Stop kullan</span>
-                            </label>
-                            <div class="qt-sltp-field" id="qt-trailing-row" style="display:none;">
-                                <label for="qt-trailing-pct">Trailing Stop Mesafesi (%)</label>
-                                <input type="number" id="qt-trailing-pct" class="form-input" min="0.1" step="0.1" placeholder="örn. 2.5">
-                            </div>
+                            <p class="oco-hint">Emir gerçekleştiğinde pozisyona otomatik olarak bağlanır; fiyat Stop-Loss (veya Trailing Stop mesafesi) ya da Take-Profit seviyesine ulaştığında pozisyon kapatılır.</p>
                         </div>
                     </div>
 
@@ -696,6 +718,25 @@
                             <span class="custom-checkbox"></span>
                             <span class="checkbox-text">WMA 20 (Pembe)</span>
                         </label>
+                        <!-- (üçüncü tur, 18 Temmuz 2026) Ek teknik göstergeler: Ichimoku Cloud,
+                             Parabolic SAR, Pivot Points — bkz. dataController.js compute* fonksiyonları
+                             ve tradingChart.js renderOverlays() için ilgili yorumlar. Bunlar bilgilendirici
+                             göstergelerdir, alım/satım sinyali değildir. -->
+                        <label class="checkbox-label indicator-search-item" data-search="ichimoku cloud kumo tenkan kijun senkou chikou">
+                            <input type="checkbox" id="chk-ichimoku">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Ichimoku Cloud</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="parabolic sar stop and reverse">
+                            <input type="checkbox" id="chk-psar">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Parabolic SAR</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="pivot points destek direnç floor trader">
+                            <input type="checkbox" id="chk-pivot">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Pivot Points</span>
+                        </label>
                     </div>
                 </div>
 
@@ -803,7 +844,7 @@
             <div class="indicator-modal-body">
                 <div class="sltp-modal-info" id="sltp-modal-info">--</div>
                 <div class="indicator-modal-category" data-category-label="sl tp">
-                    <div class="qt-sltp-row">
+                    <div class="qt-sltp-fields-row">
                         <div class="qt-sltp-field">
                             <label for="sltp-modal-sl">Stop-Loss (₺)</label>
                             <input type="number" id="sltp-modal-sl" class="form-input" min="0" step="0.01" placeholder="0.00">

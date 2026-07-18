@@ -35,12 +35,19 @@ const MultiChartGrid = (() => {
         dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
         light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' }
     };
-    const COLORS = { up: '#D4AF37', down: '#555555', wickUp: '#D4AF37', wickDown: '#777777' };
+    const COLORS = { up: '#D4AF37', down: '#555555', wickUp: '#D4AF37', wickDown: '#777777', sma20: '#42A5F5', ema9: '#26C6DA' };
+
+    // (18 Temmuz 2026, onuncu oturum, üçüncü tur) Her hücreye sade SMA20/EMA9
+    // overlay göstergesi eklendi — Dual-Chart Panel 2'deki "tam gösterge
+    // motorunu çoğaltma, sadece 2 sabit gösterge" yaklaşımının aynısı. Aç/kapa
+    // durumu hücre bazında localStorage'da kalıcı.
+    const OVERLAY_STORAGE_KEY = 'optipulselab_grid_overlay_v1';
 
     let DC = null;
     let active = false;
     let cellSymbols = DEFAULT_SYMBOLS.slice();
-    const cellCharts = []; // { chart, series } per cell, recreated each time the grid is opened
+    let cellOverlayActive = [false, false, false, false];
+    const cellCharts = []; // { chart, series, overlaySeries, lastCandles } per cell, recreated each time the grid is opened
 
     function byId(id) { return document.getElementById(id); }
 
@@ -61,6 +68,21 @@ const MultiChartGrid = (() => {
 
     function saveCellSymbols() {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cellSymbols)); } catch (e) { /* ignore */ }
+    }
+
+    function loadCellOverlayActive() {
+        try {
+            const raw = localStorage.getItem(OVERLAY_STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed) && parsed.length === CELL_COUNT) return parsed.map(Boolean);
+            }
+        } catch (e) { /* private mode / corrupt storage — fall back to defaults */ }
+        return [false, false, false, false];
+    }
+
+    function saveCellOverlayActive() {
+        try { localStorage.setItem(OVERLAY_STORAGE_KEY, JSON.stringify(cellOverlayActive)); } catch (e) { /* ignore */ }
     }
 
     function destroyCharts() {
@@ -94,7 +116,7 @@ const MultiChartGrid = (() => {
             wickUpColor: COLORS.wickUp,
             wickDownColor: COLORS.wickDown
         });
-        return { chart, series };
+        return { chart, series, overlaySeries: {}, lastCandles: [] };
     }
 
     // Basitleştirilmiş fetch: ana grafikteki gibi retry/12sn timeout yerine
@@ -129,7 +151,45 @@ const MultiChartGrid = (() => {
         if (!entry) return;
         const candles = await fetchCellCandles(symbol);
         entry.series.setData(candles);
+        entry.lastCandles = candles;
+        refreshCellOverlay(index);
         entry.chart.timeScale().fitContent();
+    }
+
+    // Sade SMA20/EMA9 overlay çizimi — açıksa entry.lastCandles'tan hesaplanıp
+    // çiziliyor, kapalıysa var olan seriler temizleniyor. Yeni veri her
+    // geldiğinde (sembol değişimi) loadCell() bunu otomatik çağırıyor.
+    function refreshCellOverlay(index) {
+        const entry = cellCharts[index];
+        if (!entry) return;
+        Object.values(entry.overlaySeries).forEach(s => { try { entry.chart.removeSeries(s); } catch (e) {} });
+        entry.overlaySeries = {};
+        if (!cellOverlayActive[index] || !entry.lastCandles.length || !DC) return;
+
+        const dates = entry.lastCandles.map(c => c.time);
+        const closes = entry.lastCandles.map(c => c.close);
+        const sma20 = DC.computeSMA(closes, 20);
+        const ema9 = DC.computeEMA(closes, 9);
+        const toPoints = (values) => {
+            const out = [];
+            for (let i = 0; i < dates.length; i++) {
+                if (values[i] === null || values[i] === undefined) continue;
+                out.push({ time: dates[i], value: values[i] });
+            }
+            return out;
+        };
+        entry.overlaySeries.sma20 = entry.chart.addLineSeries({ color: COLORS.sma20, lineWidth: 1.25, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+        entry.overlaySeries.sma20.setData(toPoints(sma20));
+        entry.overlaySeries.ema9 = entry.chart.addLineSeries({ color: COLORS.ema9, lineWidth: 1.25, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: LightweightCharts.LineStyle.Dashed });
+        entry.overlaySeries.ema9.setData(toPoints(ema9));
+    }
+
+    function toggleCellOverlay(index) {
+        cellOverlayActive[index] = !cellOverlayActive[index];
+        saveCellOverlayActive();
+        const btn = document.querySelector(`.tv-grid-indicator-btn[data-cell="${index}"]`);
+        if (btn) btn.classList.toggle('active', cellOverlayActive[index]);
+        refreshCellOverlay(index);
     }
 
     function populateSelect(select, selectedSymbol) {
@@ -215,6 +275,12 @@ const MultiChartGrid = (() => {
             });
         });
 
+        document.querySelectorAll('.tv-grid-indicator-btn').forEach(btn => {
+            const i = parseInt(btn.dataset.cell, 10);
+            btn.classList.toggle('active', cellOverlayActive[i]);
+            btn.addEventListener('click', () => toggleCellOverlay(i));
+        });
+
         window.addEventListener('resize', () => { if (active) resizeAll(); });
     }
 
@@ -225,6 +291,7 @@ const MultiChartGrid = (() => {
             return;
         }
         cellSymbols = loadCellSymbols();
+        cellOverlayActive = loadCellOverlayActive();
         setupControls();
     }
 

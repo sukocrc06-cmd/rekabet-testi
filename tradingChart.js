@@ -40,7 +40,16 @@ const TradingChart = (() => {
         volUp: 'rgba(212, 175, 55, 0.45)',
         volDown: 'rgba(120, 120, 120, 0.35)',
         baselineTop: '#D4AF37',
-        baselineBottom: '#EF5350'
+        baselineBottom: '#EF5350',
+        ichimokuTenkan: '#EF5350',
+        ichimokuKijun: '#42A5F5',
+        ichimokuSenkouA: 'rgba(38, 198, 218, 0.9)',
+        ichimokuSenkouB: 'rgba(171, 71, 188, 0.9)',
+        ichimokuChikou: '#8D6E63',
+        psar: 'rgba(255, 167, 38, 0.9)',
+        pivot: 'rgba(212, 175, 55, 0.7)',
+        pivotR: 'rgba(239, 83, 80, 0.55)',
+        pivotS: 'rgba(38, 198, 218, 0.55)'
     };
 
     // Tier-1 chart type catalog (TradingView "Çubuklar" menu parity). Each
@@ -89,6 +98,9 @@ const TradingChart = (() => {
                                    // (those render directly on candleSeries).
     let volumeSeries = null;      // optional volume histogram, own price scale
     let overlaySeries = {};       // { sma20: LineSeries, ... }
+    let pivotPriceLines = [];     // Pivot Points createPriceLine() handles — candleSeries
+                                   // kalıcı olduğu için her renderOverlays() çağrısında
+                                   // manuel temizlenmesi gerekir (removeSeries() geçerli değil).
 
     // ── Çoklu-osilatör paneli (18 Temmuz 2026, onuncu oturum) ──
     // Artık aynı anda birden fazla gösterge (RSI + MACD + ADX vb.) aktif
@@ -1022,6 +1034,10 @@ const TradingChart = (() => {
         // Clear existing overlay series
         Object.values(overlaySeries).forEach(s => { try { chart.removeSeries(s); } catch (e) {} });
         overlaySeries = {};
+        // Pivot Points çizgileri ayrı candleSeries.removePriceLine() ile temizlenir
+        // (bkz. pivotPriceLines tanımı) — chart.removeSeries() burada geçerli değil.
+        pivotPriceLines.forEach(line => { try { candleSeries.removePriceLine(line); } catch (e) {} });
+        pivotPriceLines = [];
 
         if (!state.indicators || !state.candles.length) return;
         const dates = state.candles.map(c => c.date);
@@ -1035,7 +1051,10 @@ const TradingChart = (() => {
             ema21: checked('chk-ema21'),
             wma20: checked('chk-wma20'),
             bollinger: checked('chk-bollinger'),
-            vwap: checked('chk-vwap')
+            vwap: checked('chk-vwap'),
+            ichimoku: checked('chk-ichimoku'),
+            psar: checked('chk-psar'),
+            pivot: checked('chk-pivot')
         };
 
         const addLine = (key, values, color, opts = {}) => {
@@ -1058,6 +1077,45 @@ const TradingChart = (() => {
         if (vis.bollinger) {
             addLine('bbUpper', ind.bollingerUpper, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
             addLine('bbLower', ind.bollingerLower, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+        }
+
+        // Ichimoku Cloud: 5 çizgi (Senkou A/B, gerçek verilerden hesaplanan
+        // ama sahte gelecek bar EKLENMEDEN çizilen bulut dahil — bkz.
+        // dataController.js computeIchimoku() yorum bloğu).
+        if (vis.ichimoku && ind.ichimoku) {
+            addLine('ichiTenkan', ind.ichimoku.tenkan, COLORS.ichimokuTenkan, { lineWidth: 1 });
+            addLine('ichiKijun', ind.ichimoku.kijun, COLORS.ichimokuKijun, { lineWidth: 1 });
+            addLine('ichiSenkouA', ind.ichimoku.senkouA, COLORS.ichimokuSenkouA, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addLine('ichiSenkouB', ind.ichimoku.senkouB, COLORS.ichimokuSenkouB, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addLine('ichiChikou', ind.ichimoku.chikou, COLORS.ichimokuChikou, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+        }
+
+        // Parabolic SAR: klasik izole-nokta gösterimi yerine ince noktalı
+        // çizgi olarak çiziliyor (dürüst basitleştirme — bkz. dataController.js).
+        if (vis.psar && ind.psar) {
+            addLine('psar', ind.psar, COLORS.psar, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, crosshairMarkerVisible: false });
+        }
+
+        // Pivot Points: zaman serisi değil, son tamamlanmış bardan hesaplanan
+        // yatay destek/direnç seviyeleri — RSI'nin 70/30 çizgileriyle aynı
+        // createPriceLine() deseni.
+        if (vis.pivot && ind.pivotPoints && candleSeries) {
+            const pp = ind.pivotPoints;
+            const addPivotLine = (price, title, color) => {
+                if (price === null || price === undefined) return;
+                const line = candleSeries.createPriceLine({
+                    price, color, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true, title
+                });
+                pivotPriceLines.push(line);
+            };
+            addPivotLine(pp.p, 'P', COLORS.pivot);
+            addPivotLine(pp.r1, 'R1', COLORS.pivotR);
+            addPivotLine(pp.r2, 'R2', COLORS.pivotR);
+            addPivotLine(pp.r3, 'R3', COLORS.pivotR);
+            addPivotLine(pp.s1, 'S1', COLORS.pivotS);
+            addPivotLine(pp.s2, 'S2', COLORS.pivotS);
+            addPivotLine(pp.s3, 'S3', COLORS.pivotS);
         }
 
         updateLegend(vis);
@@ -1086,7 +1144,10 @@ const TradingChart = (() => {
         { key: 'ema21',     label: 'EMA21',      colorKey: 'ema21',  chk: 'chk-ema21' },
         { key: 'wma20',     label: 'WMA20',      colorKey: 'wma20',  chk: 'chk-wma20' },
         { key: 'bollinger', label: 'BB(20,2)',   colorKey: 'bbLine', chk: 'chk-bollinger' },
-        { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' }
+        { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' },
+        { key: 'ichimoku',  label: 'Ichimoku',   colorKey: 'ichimokuKijun', chk: 'chk-ichimoku' },
+        { key: 'psar',      label: 'Parabolic SAR', colorKey: 'psar', chk: 'chk-psar' },
+        { key: 'pivot',     label: 'Pivot Points', colorKey: 'pivot', chk: 'chk-pivot' }
     ];
 
     function updateLegend(vis) {
@@ -1112,7 +1173,7 @@ const TradingChart = (() => {
     }
 
     function setupOverlayCheckboxes() {
-        ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-bollinger', 'chk-vwap'].forEach(id => {
+        ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap', 'chk-ichimoku', 'chk-psar', 'chk-pivot'].forEach(id => {
             const el = byId(id);
             if (el) el.addEventListener('change', renderOverlays);
         });
