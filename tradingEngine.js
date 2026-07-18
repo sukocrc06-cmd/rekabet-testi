@@ -51,7 +51,7 @@ const TradingEngine = (() => {
 
     // All full-screen modal backdrop ids in the app — used so opening one
     // reliably closes any other that might already be open.
-    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop'];
+    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop', 'command-palette-backdrop'];
     function closeOtherModals(exceptId) {
         ALL_MODAL_BACKDROP_IDS.forEach(id => {
             if (id === exceptId) return;
@@ -67,7 +67,14 @@ const TradingEngine = (() => {
     }
     function fmtPrice(v) {
         if (v === null || v === undefined || isNaN(v)) return '--';
-        return v >= 1000 ? v.toFixed(0) : v.toFixed(2);
+        // (18 Temmuz 2026, dördüncü tur, Madde 5f) Önceden toFixed() kullanılıyordu,
+        // bu da ondalık ayıracı olarak her zaman '.' üretiyordu (ör. "125.40") —
+        // oysa fmtTRY() ve uygulamanın geri kalanı Türkçe yerel biçimi (ondalık
+        // virgül, binlik nokta, ör. "1.234,56") kullanıyor. Aynı ekranda iki
+        // farklı sayı biçimi görünmesin diye burası da tr-TR yereline taşındı;
+        // "1000 TL ve üzeri fiyatlarda ondalıksız göster" davranışı korunuyor.
+        const decimals = v >= 1000 ? 0 : 2;
+        return v.toLocaleString('tr-TR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     }
     function genId() { return 'ord_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
@@ -1016,6 +1023,139 @@ const TradingEngine = (() => {
         });
     }
 
+    // (18 Temmuz 2026, dördüncü tur — "Komut Paleti")
+    // Ctrl+K / "/" ile açılır; sembol arama ve sık kullanılan işlemleri (tema,
+    // ses, reset, tur, ısı haritası, kısayollar, yardım, göstergeler paneli)
+    // tek bir arama kutusunda birleştirir. Hiçbir mevcut modalın/düğmenin
+    // davranışını DEĞİŞTİRMEZ — sadece ilgili düğmeye programatik .click()
+    // göndererek açar, böylece o modalların kendi aç/kapat/durum mantığı
+    // (tourGuide.js'in .click() ile tetiklediği modallar dahil) aynen çalışır.
+    const CMDP_ICON_ACTION = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
+    function setupCommandPalette() {
+        const backdrop = byId('command-palette-backdrop');
+        const input = byId('command-palette-input');
+        const resultsEl = byId('command-palette-results');
+        const closeBtn = byId('btn-close-command-palette');
+        if (!backdrop || !input || !resultsEl) return;
+
+        const ACTIONS = [
+            { label: 'Tema Değiştir (Koyu / Açık)', sub: 'Görünüm', hint: 'T', keywords: 'tema tema değiştir dark light aydınlık koyu görünüm', run: () => byId('btn-theme-toggle')?.click() },
+            { label: 'Sesli Bildirimleri Aç/Kapat', sub: 'Görünüm', keywords: 'ses mute sessiz bildirim', run: () => byId('btn-mute-toggle')?.click() },
+            { label: 'Kompakt Görünümü Aç/Kapat', sub: 'Görünüm', keywords: 'kompakt compact sıkı dar görünüm', run: () => byId('btn-toggle-compact')?.click() },
+            { label: 'Göstergeler Panelini Aç', sub: 'Grafik', hint: 'G', keywords: 'gösterge indicator rsi macd ekle overlay osilatör supertrend', run: () => byId('btn-open-indicators')?.click() },
+            { label: 'Fiyat Alarmları Panelini Aç', sub: 'Grafik', hint: 'A', keywords: 'alarm price alert fiyat uyarı', run: () => byId('btn-open-alerts')?.click() },
+            { label: 'BIST100 Isı Haritasını Aç', sub: 'Piyasa', hint: 'H', keywords: 'ısı harita heatmap piyasa', run: () => byId('btn-open-heatmap')?.click() },
+            { label: 'İşlem Panelini Aç/Kapat', sub: 'İşlem', keywords: 'işlem panel trade emir order al sat', run: () => byId('btn-toggle-tradepanel')?.click() },
+            { label: 'Parametreleri Sıfırla (Reset)', sub: 'Genel', keywords: 'reset sıfırla temizle varsayılan', run: () => byId('btn-reset-params')?.click() },
+            { label: 'Tanıtım Turunu Başlat', sub: 'Yardım', keywords: 'tur tanıtım tour rehber gezinti', run: () => byId('btn-open-tour')?.click() },
+            { label: 'Klavye Kısayollarını Göster', sub: 'Yardım', hint: '?', keywords: 'kısayol shortcut klavye', run: () => byId('btn-open-shortcuts')?.click() },
+            { label: 'Yardım / Hakkında', sub: 'Yardım', keywords: 'yardım hakkında help about bilgi', run: () => byId('btn-open-help')?.click() },
+        ];
+
+        let flatItems = []; // items currently rendered, in order — kept in sync with DOM for keyboard nav
+        let activeIdx = -1;
+
+        function matches(hay, term) { return hay.toLowerCase().includes(term); }
+
+        function computeResults(term) {
+            if (!term) {
+                return { actions: ACTIONS.slice(0, 6), symbols: [] };
+            }
+            const actions = ACTIONS.filter(a => matches(a.label + ' ' + a.sub + ' ' + a.keywords, term));
+            let symbols = [];
+            if (DC && Array.isArray(DC.BIST100)) {
+                symbols = DC.BIST100.filter(s => matches(s.symbol, term) || matches(s.name, term)).slice(0, 8);
+            }
+            return { actions: actions.slice(0, 6), symbols };
+        }
+
+        function render(term) {
+            const { actions, symbols } = computeResults(term);
+            flatItems = [];
+            let html = '';
+
+            if (symbols.length) {
+                html += '<div class="cmdp-section-label">Semboller</div>';
+                symbols.forEach(s => {
+                    flatItems.push({ type: 'symbol', symbol: s.symbol });
+                    html += '<button type="button" class="cmdp-item" data-cmdp-idx="' + (flatItems.length - 1) + '">' +
+                        '<span class="cmdp-item-icon">' + s.symbol.slice(0, 2) + '</span>' +
+                        '<span class="cmdp-item-main"><span class="cmdp-item-label">' + s.symbol + '</span><span class="cmdp-item-sub">' + s.name + '</span></span>' +
+                        '</button>';
+                });
+            }
+            if (actions.length) {
+                html += '<div class="cmdp-section-label">Hızlı İşlemler</div>';
+                actions.forEach(a => {
+                    flatItems.push({ type: 'action', run: a.run });
+                    html += '<button type="button" class="cmdp-item" data-cmdp-idx="' + (flatItems.length - 1) + '">' +
+                        '<span class="cmdp-item-icon">' + CMDP_ICON_ACTION + '</span>' +
+                        '<span class="cmdp-item-main"><span class="cmdp-item-label">' + a.label + '</span><span class="cmdp-item-sub">' + a.sub + '</span></span>' +
+                        (a.hint ? '<span class="cmdp-item-hint">' + a.hint + '</span>' : '') +
+                        '</button>';
+                });
+            }
+            if (!flatItems.length) {
+                html = '<div class="cmdp-empty">Sonuç bulunamadı</div>';
+            }
+            resultsEl.innerHTML = html;
+            activeIdx = flatItems.length ? 0 : -1;
+            updateActiveHighlight();
+        }
+
+        function updateActiveHighlight() {
+            resultsEl.querySelectorAll('.cmdp-item').forEach((el, i) => {
+                el.classList.toggle('active', i === activeIdx);
+            });
+        }
+
+        function runItem(idx) {
+            const item = flatItems[idx];
+            if (!item) return;
+            close();
+            if (item.type === 'symbol') selectSymbol(item.symbol);
+            else if (item.type === 'action') item.run();
+        }
+
+        const open = () => {
+            closeOtherModals('command-palette-backdrop');
+            backdrop.classList.add('open');
+            input.value = '';
+            render('');
+            input.focus();
+        };
+        const close = () => backdrop.classList.remove('open');
+
+        window.__optipulseOpenCommandPalette = open;
+
+        input.addEventListener('input', () => render(input.value.trim().toLowerCase()));
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (flatItems.length) { activeIdx = (activeIdx + 1) % flatItems.length; updateActiveHighlight(); }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (flatItems.length) { activeIdx = (activeIdx - 1 + flatItems.length) % flatItems.length; updateActiveHighlight(); }
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (activeIdx >= 0) runItem(activeIdx);
+            } else if (e.key === 'Escape') {
+                close();
+            }
+        });
+        resultsEl.addEventListener('click', (e) => {
+            const item = e.target.closest('.cmdp-item');
+            if (!item) return;
+            runItem(parseInt(item.dataset.cmdpIdx, 10));
+        });
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+        });
+    }
+
     function switchToTradeSubtab() {
         const tab = document.querySelector('.panel-subtab[data-panel-tab="trade"]');
         if (tab && !tab.classList.contains('active')) tab.click();
@@ -1033,10 +1173,13 @@ const TradingEngine = (() => {
                 return;
             }
 
-            // Ctrl/Cmd+K or '/' focuses the symbol search box.
+            // Ctrl/Cmd+K or '/' opens the command palette (symbol search +
+            // quick actions). Falls back to focusing the watchlist search
+            // box if the palette isn't wired up for some reason.
             if ((e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !isTyping)) {
                 e.preventDefault();
-                byId('watchlist-search')?.focus();
+                if (window.__optipulseOpenCommandPalette) window.__optipulseOpenCommandPalette();
+                else byId('watchlist-search')?.focus();
                 return;
             }
 
@@ -1352,11 +1495,6 @@ const TradingEngine = (() => {
         const select = byId('stock-select');
         if (select) {
             select.value = symbol;
-        }
-
-        const tickerLabel = byId('analysis-ticker-label');
-        if (tickerLabel) {
-            tickerLabel.innerText = 'Şu an analiz ediliyor: ' + symbol + '.IS';
         }
 
         updateActiveSymbolTicket();
@@ -2288,6 +2426,33 @@ const TradingEngine = (() => {
     }
 
     /* ════════════════════════════════════════════════
+       Kompakt Görünüm (18 Temmuz 2026, dördüncü tur, Madde 5e)
+       Watchlist satırlarını ve durum çubuğunu sıkılaştıran, tercihi
+       localStorage'da tutan basit bir görünüm anahtarı. Tema anahtarıyla
+       birebir aynı desen (bkz. setupThemeToggle) — sadece <body>'ye bir
+       class ekleyip CSS'in geri kalanını halletmesine izin veriyor.
+       ════════════════════════════════════════════════ */
+    const COMPACT_MODE_STORAGE_KEY = 'optipulselab_compact_mode';
+
+    function applyCompactMode(enabled) {
+        document.body.classList.toggle('compact-mode', enabled);
+        try { localStorage.setItem(COMPACT_MODE_STORAGE_KEY, enabled ? '1' : '0'); } catch (e) { /* private mode / quota */ }
+        const btn = byId('btn-toggle-compact');
+        const label = byId('btn-toggle-compact-label');
+        if (btn) btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        if (label) label.textContent = enabled ? 'Normal Görünüm' : 'Kompakt Görünüm';
+    }
+
+    function setupCompactMode() {
+        const btn = byId('btn-toggle-compact');
+        if (!btn) return;
+        let stored = false;
+        try { stored = localStorage.getItem(COMPACT_MODE_STORAGE_KEY) === '1'; } catch (e) { /* private mode */ }
+        applyCompactMode(stored);
+        btn.addEventListener('click', () => applyCompactMode(!document.body.classList.contains('compact-mode')));
+    }
+
+    /* ════════════════════════════════════════════════
        Sesli bildirimler (Alarm / SL-TP / Marj Çağrısı)
        ════════════════════════════════════════════════ */
     // (18 Temmuz 2026, dokuzuncu oturum) Fiyat alarmı, Stop-Loss/Take-
@@ -2475,9 +2640,11 @@ const TradingEngine = (() => {
         setupHeatmapModal();
         setupShortcutsModal();
         setupHelpModal();
+        setupCommandPalette();
         setupGlobalShortcuts();
         setupCsvExport();
         setupThemeToggle();
+        setupCompactMode();
         setupMuteToggle();
         renderPositions();
         renderOrders();
@@ -2507,7 +2674,14 @@ const TradingEngine = (() => {
         selectSymbol,
         getPrice,
         closePosition,
-        resetPortfolio
+        resetPortfolio,
+        // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
+        // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
+        // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki
+        // Türkçe yerel biçimden — binlik nokta/ondalık virgül — farklı bir
+        // görünüm üretiyordu), tek bir merkezi fiyat biçimlendiricisi burada
+        // dışa açılıyor.
+        fmtPrice
     });
 })();
 

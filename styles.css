@@ -63,6 +63,16 @@
     --radius-sm: 4px;
     --transition-smooth: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     --transition-fast: all 0.15s ease-out;
+
+    /* (18 Temmuz 2026, dördüncü tur, Madde 5c — ikon boyutu tutarlılığı)
+       Denetimde mevcut ikonların zaten büyük ölçüde 14px (araç çubuğu/rail
+       butonları) ve 16px (üst bar butonları) olarak tutarlı kullanıldığı
+       görüldü; var olan yüzlerce inline SVG'yi riske atarak toptan
+       değiştirmek yerine, bundan sonraki yeni bileşenlerin aynı ölçekte
+       kalması için isim tokenları tanımlıyoruz. */
+    --icon-size-sm: 14px;
+    --icon-size-md: 16px;
+    --icon-size-lg: 20px;
 }
 
 /* --- Light theme overrides (applied via [data-theme="light"] on <html>) --- */
@@ -169,12 +179,20 @@ body {
     align-items: center;
     padding: 0 24px;
     z-index: 10;
+    /* (dördüncü tur, Madde 2) Header'ın hiçbir zaman iki satıra bölünmemesi
+       için: flex öğeleri sarmasın, taşma durumunda içerik kırpılsın/gizlensin
+       (buton etiketlerinin ikon-only'e düşmesi zaten var olan bir mekanizma —
+       bkz. 640px medya sorgusu) — "sağ sol üste gidiyor" şikayetinin kökü. */
+    flex-wrap: nowrap;
+    overflow: hidden;
 }
 
 .logo-area {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .pulse-indicator {
@@ -213,14 +231,16 @@ body {
 .header-status {
     display: flex;
     align-items: center;
-    gap: 24px;
+    gap: 16px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .status-item {
-    font-size: 13px;
+    font-size: 12px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
 }
 
 .status-label {
@@ -240,10 +260,78 @@ body {
     text-shadow: 0 0 4px var(--gold-glow);
 }
 
+/* (18 Temmuz 2026, dördüncü tur, Madde 5a — durum çubuğu sadeleştirme)
+   Motor/Piyasa durumu için küçük bir renkli nokta ekliyoruz. background-color:
+   currentColor sayesinde JS'in bu span'lara doğrudan yazdığı .style.color
+   (ONLINE/CALCULATING/OFFLINE, OPEN/CLOSED) değeri neyse nokta da otomatik
+   onu alır — app.js'teki hiçbir durum-güncelleme koduna dokunmadan, salt
+   CSS ile. */
+#engine-status::before,
+#market-status-val::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
 .header-actions {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-shrink: 0;
+}
+
+/* --- Header hamburger menu (dördüncü tur, Madde 2) ---
+   Açılma/kapanma deseni tradingChart.js'teki setupChartTypeMenu() ile
+   birebir aynı: position:fixed + getBoundingClientRect, closeOtherModals +
+   closeAllFlyouts ile diğer her şeyi kapatma, dışarı tıklama + Escape. */
+.header-menu-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.header-menu-dropdown {
+    display: none;
+    position: fixed;
+    z-index: 620;
+    min-width: 200px;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    padding: 6px;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.header-menu-dropdown.open {
+    display: flex;
+}
+
+.header-menu-dropdown .btn {
+    width: 100%;
+    justify-content: flex-start;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    box-shadow: none;
+    padding: 8px 10px;
+}
+
+.header-menu-dropdown .btn:hover {
+    background-color: var(--tint-06);
+    color: var(--text-primary, #eaeaea);
+    transform: none;
+}
+
+.header-menu-divider {
+    height: 1px;
+    background-color: var(--tint-08);
+    margin: 4px 2px;
 }
 
 /* --- Header Balance Pill (demo trading balance, top right) --- */
@@ -1168,10 +1256,6 @@ body {
         font-size: 15px;
     }
 
-    #analysis-ticker-label {
-        display: none;
-    }
-
     .header-status {
         gap: 10px;
     }
@@ -1181,13 +1265,23 @@ body {
     }
 
     /* Metinli header butonları ikon-only'e düşüyor, yer kazanılıyor —
-     * fonksiyonellik title="" tooltip'i ile korunuyor. */
+     * fonksiyonellik title="" tooltip'i ile korunuyor. Hamburger menü
+     * dropdown'ı bu daraltmanın DIŞINDA tutuluyor (aşağıdaki kural) —
+     * dikey liste içinde ikon-only satırlar okunaksız olurdu. */
     .header-actions .btn .btn-label {
         display: none;
     }
 
     .header-actions .btn {
         padding: 8px;
+    }
+
+    .header-menu-dropdown .btn .btn-label {
+        display: inline;
+    }
+
+    .header-menu-dropdown .btn {
+        padding: 8px 10px;
     }
 
     .text-hide-mobile {
@@ -1593,6 +1687,37 @@ body {
     font-weight: 600;
 }
 
+/* (18 Temmuz 2026, dördüncü tur, Madde 5e — "Kompakt Görünüm" seçeneği)
+   Hamburger menüdeki düğme <body>'ye .compact-mode class'ı ekleyip
+   localStorage'a yazıyor; JS tarafında watchlist satırlarının kendisi
+   yeniden render EDİLMİYOR — sadece bu class üzerinden CSS ile
+   sıkılaştırılıyor, böylece mevcut render/click mantığına dokunulmuyor. */
+body.compact-mode .watchlist-row {
+    padding: 2px 8px;
+}
+
+body.compact-mode .wl-symbol,
+body.compact-mode .wl-price {
+    font-size: 11px;
+}
+
+body.compact-mode .wl-name {
+    font-size: 8px;
+}
+
+body.compact-mode .wl-spark {
+    width: 34px;
+    height: 14px;
+}
+
+body.compact-mode .header-status {
+    gap: 12px;
+}
+
+body.compact-mode .status-item {
+    font-size: 11px;
+}
+
 /* --- Indicator subgroup label --- */
 .indicator-subgroup-label {
     font-size: 10px;
@@ -1982,6 +2107,66 @@ body {
     color: var(--gold-light);
 }
 
+/* ── "Göstergeler" rail flyout'u (dördüncü tur, Madde 3) ──
+   Diğer flyout'lardan (en fazla 8 öğe) daha uzun bir liste taşıyor (~25
+   gösterge), bu yüzden kaydırılabilir + biraz daha geniş. */
+.tv-indicator-flyout {
+    min-width: 220px;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.tv-indicator-flyout-label {
+    font-size: 10px;
+    color: var(--gold);
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 6px 8px 4px;
+}
+
+.tv-indicator-flyout-label:first-child {
+    padding-top: 2px;
+}
+
+.tv-indicator-flyout-check {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border: 1px solid var(--tint-14);
+    flex-shrink: 0;
+    position: relative;
+}
+
+.tv-indicator-flyout-item.active .tv-indicator-flyout-check {
+    background-color: var(--gold);
+    border-color: var(--gold);
+}
+
+.tv-indicator-flyout-item.active .tv-indicator-flyout-check::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 0px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--text-dark, #1a1a1a);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.tv-indicator-flyout-more {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 11px;
+}
+
+.tv-tool-flyout-divider {
+    height: 1px;
+    background-color: var(--tint-06);
+    margin: 5px 2px;
+}
+
 .tv-toolbar-sep {
     width: 1px;
     height: 20px;
@@ -2222,6 +2407,130 @@ body {
 .indicator-modal-body {
     overflow-y: auto;
     padding: 14px 16px 18px;
+}
+
+/* Komut Paleti (18 Temmuz 2026, dördüncü tur) — .indicator-modal-backdrop/
+   .indicator-modal ile aynı taban desen, sadece iç düzeni farklı: üstte tek
+   satır arama kutusu + kapat butonu, altında kaydırılabilir sonuç listesi. */
+.command-palette-modal {
+    width: 520px;
+    max-height: 62vh;
+}
+
+.cmdp-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--tint-06);
+    background-color: var(--bg-sidebar);
+    flex-shrink: 0;
+}
+
+.cmdp-search-icon {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.cmdp-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary, #eaeaea);
+    font-size: 15px;
+    font-family: inherit;
+}
+
+.cmdp-input::placeholder {
+    color: var(--text-muted);
+}
+
+.cmdp-results {
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.cmdp-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 8px 10px 4px;
+}
+
+.cmdp-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--text-primary, #eaeaea);
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    transition: var(--transition-fast);
+}
+
+.cmdp-item.active,
+.cmdp-item:hover {
+    background-color: var(--tint-08);
+}
+
+.cmdp-item-icon {
+    flex-shrink: 0;
+    width: var(--icon-size-lg);
+    height: var(--icon-size-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gold);
+    opacity: 0.85;
+}
+
+.cmdp-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+}
+
+.cmdp-item-label {
+    font-weight: 600;
+    color: var(--text-primary, #eaeaea);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cmdp-item-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cmdp-item-hint {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-muted);
+    border: 1px solid var(--tint-08);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+}
+
+.cmdp-empty {
+    padding: 24px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
 }
 
 .indicator-modal-toolbar {

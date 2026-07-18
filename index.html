@@ -31,7 +31,12 @@
                 </button>
                 <div class="pulse-indicator"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
-                <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: ---</span>
+                <!-- (18 Temmuz 2026, onuncu oturum, dördüncü tur) "Şu an analiz
+                     ediliyor: SEMBOL" etiketi kaldırıldı — aynı bilgi zaten
+                     grafiğin üstündeki sembol başlığında (#tv-symbol-name) çok
+                     daha belirgin şekilde gösteriliyor; buradaki kopya sadece
+                     header'da gereksiz yer kaplıyordu (bkz. arayuz-iyilestirme-
+                     onerileri.md, Madde 4). -->
             </div>
             <div class="header-status">
                 <div class="status-item" id="engine-status-item">
@@ -60,22 +65,6 @@
                     <span class="header-balance-label">Bakiye</span>
                     <span class="header-balance-value" id="header-balance-value">--</span>
                 </div>
-                <button class="btn btn-secondary btn-tour" id="btn-open-tour" title="Uygulama Tanıtım Turu">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
-                    <span class="btn-label">Tanıtım Turu</span>
-                </button>
-                <button class="btn btn-secondary" id="btn-open-heatmap">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-                    <span class="btn-label">Isı Haritası</span>
-                </button>
-                <button class="btn btn-secondary" id="btn-open-shortcuts" title="Klavye Kısayolları (?)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path></svg>
-                    <span class="btn-label">Kısayollar</span>
-                </button>
-                <button class="btn btn-secondary" id="btn-open-help" title="Yardım / Hakkında">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                    <span class="btn-label">Yardım</span>
-                </button>
                 <button class="btn btn-icon" id="btn-mute-toggle" title="Sesli Bildirimleri Aç/Kapat">
                     <svg id="mute-icon-on" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
                     <svg id="mute-icon-off" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
@@ -84,10 +73,55 @@
                     <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                     <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
                 </button>
-                <button class="btn btn-secondary" id="btn-reset-params">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
-                    <span class="btn-label">Reset</span>
-                </button>
+
+                <!-- (18 Temmuz 2026, onuncu oturum, dördüncü tur) Header sıkışıklığı
+                     düzeltmesi (bkz. arayuz-iyilestirme-onerileri.md, Madde 2):
+                     yalnızca sık kullanılan aksiyonlar (Bakiye/Sessize Al/Tema)
+                     her zaman görünür kalıyor; daha az sık kullanılanlar (Tur/Isı
+                     Haritası/Kısayollar/Yardım/Reset) bu hamburger menüye taşındı.
+                     Butonların KENDİSİ (id'leri, click handler'ları) hiç değişmedi
+                     — sadece konumları değişti, bu yüzden tradingEngine.js/app.js/
+                     tourGuide.js'deki mevcut event listener'lar aynen çalışmaya
+                     devam ediyor. Açılma deseni tradingChart.js'teki
+                     setupChartTypeMenu() ile birebir aynı (position:fixed +
+                     getBoundingClientRect, closeOtherModals/closeAllFlyouts,
+                     dışarı tıklama + Escape ile kapanma). -->
+                <div class="header-menu-wrap">
+                    <button type="button" class="btn btn-icon" id="btn-header-menu" title="Diğer İşlemler" aria-label="Diğer İşlemler">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <div class="header-menu-dropdown" id="header-menu-dropdown">
+                        <button class="btn btn-secondary btn-tour" id="btn-open-tour" title="Uygulama Tanıtım Turu">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                            <span class="btn-label">Tanıtım Turu</span>
+                        </button>
+                        <button class="btn btn-secondary" id="btn-open-heatmap">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                            <span class="btn-label">Isı Haritası</span>
+                        </button>
+                        <button class="btn btn-secondary" id="btn-open-shortcuts" title="Klavye Kısayolları (?)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path></svg>
+                            <span class="btn-label">Kısayollar</span>
+                        </button>
+                        <button class="btn btn-secondary" id="btn-open-help" title="Yardım / Hakkında">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                            <span class="btn-label">Yardım</span>
+                        </button>
+                        <div class="header-menu-divider"></div>
+                        <!-- (18 Temmuz 2026, dördüncü tur, Madde 5e) Kompakt Görünüm:
+                             body'ye .compact-mode class'ı ekleyip localStorage'a yazar;
+                             watchlist satırlarını ve durum çubuğunu CSS ile sıkılaştırır. -->
+                        <button class="btn btn-secondary" id="btn-toggle-compact" title="Daha sık aralıklı, kompakt görünüm" aria-pressed="false">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="8" x2="21" y2="8"></line><line x1="3" y1="16" x2="21" y2="16"></line></svg>
+                            <span class="btn-label" id="btn-toggle-compact-label">Kompakt Görünüm</span>
+                        </button>
+                        <div class="header-menu-divider"></div>
+                        <button class="btn btn-secondary" id="btn-reset-params">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+                            <span class="btn-label">Reset</span>
+                        </button>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -737,6 +771,23 @@
                             <span class="custom-checkbox"></span>
                             <span class="checkbox-text">Pivot Points</span>
                         </label>
+                        <!-- (dördüncü tur, 18 Temmuz 2026) Gösterge çeşitliliği devamı —
+                             bkz. arayuz-iyilestirme-onerileri.md Madde 3. -->
+                        <label class="checkbox-label indicator-search-item" data-search="supertrend super trend atr trend takip">
+                            <input type="checkbox" id="chk-supertrend">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">SuperTrend</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="keltner channels kanal volatilite">
+                            <input type="checkbox" id="chk-keltner">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Keltner Kanalları</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="donchian channels kanal kırılım breakout">
+                            <input type="checkbox" id="chk-donchian">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Donchian Kanalları</span>
+                        </label>
                     </div>
                 </div>
 
@@ -777,6 +828,16 @@
                             <input type="checkbox" class="osc-checkbox" data-osc="obv">
                             <span class="custom-checkbox"></span>
                             <span class="checkbox-text">OBV</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="cci commodity channel index momentum">
+                            <input type="checkbox" class="osc-checkbox" data-osc="cci">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">CCI (20)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="mfi money flow index hacim momentum">
+                            <input type="checkbox" class="osc-checkbox" data-osc="mfi">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">MFI (14)</span>
                         </label>
                         <label class="checkbox-label indicator-search-item" data-search="williams %r williams r momentum">
                             <input type="checkbox" class="osc-checkbox" data-osc="willr">
@@ -888,6 +949,21 @@
         </div>
     </div>
 
+    <!-- Komut Paleti (18 Temmuz 2026, dördüncü tur — Ctrl+K / "/" ile açılır.
+         Sembol arama + hızlı işlem menüsünü tek pencerede birleştirir. -->
+    <div class="indicator-modal-backdrop" id="command-palette-backdrop">
+        <div class="indicator-modal command-palette-modal" role="dialog" aria-modal="true" aria-label="Komut Paleti">
+            <div class="cmdp-search-wrap">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="cmdp-search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="command-palette-input" class="cmdp-input" placeholder="Sembol ara veya bir komut yazın…" autocomplete="off" spellcheck="false">
+                <button type="button" class="indicator-modal-close" id="btn-close-command-palette" aria-label="Kapat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="cmdp-results" id="command-palette-results"></div>
+        </div>
+    </div>
+
     <!-- Keyboard shortcuts help modal -->
     <div class="indicator-modal-backdrop" id="shortcuts-modal-backdrop">
         <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Klavye Kısayolları">
@@ -900,7 +976,7 @@
             <div class="indicator-modal-body">
                 <div class="indicator-modal-category" data-category-label="genel">
                     <div class="indicator-subgroup-label">Genel</div>
-                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>K</kbd> veya <kbd>/</kbd></span><span class="shortcut-desc">Sembol ara</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>K</kbd> veya <kbd>/</kbd></span><span class="shortcut-desc">Komut paletini aç (sembol ara / hızlı işlem)</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="shortcut-desc">İlgili grafik sekmesine geç</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>[</kbd> / <kbd>]</kbd></span><span class="shortcut-desc">Önceki / sonraki grafik sekmesi</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Açık pencereyi kapat</span></div>

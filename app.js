@@ -193,6 +193,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return sign + value.toFixed(2) + '%';
     }
 
+    /* (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
+       denetimi) Bu dosyada fiyat alanları (bakiye değil, tek bir hisse
+       fiyatı) daha önce doğrudan .toFixed(2) ile yazılıyordu — bu da hep
+       '.' ondalık ayıracı üretiyordu (ör. "125.40"), oysa watchlist/pozisyon
+       panellerindeki tradingEngine.js'in fmtPrice()'ı Türkçe yerel biçim
+       kullanıyor (ör. "125,40"). tradingEngine.js her zaman app.js'ten önce
+       yüklendiği için (bkz. index.html script sırası) window.TradingEngine
+       hazır olacak; yine de savunmacı bir .toFixed(2) yedeği bırakıyoruz. */
+    function fmtStockPrice(value) {
+        if (window.TradingEngine && typeof window.TradingEngine.fmtPrice === 'function') {
+            return window.TradingEngine.fmtPrice(value);
+        }
+        return (typeof value === 'number' ? value.toFixed(2) : '--');
+    }
+
     /* ────────────── Tab Switching ────────────── */
 
     function setupTabs(tabBtns, panels) {
@@ -440,12 +455,6 @@ document.addEventListener('DOMContentLoaded', () => {
         populateOverlays(result);
         updateCompetitionPanel(capital, commission);
         updateRiskMonitor(result.metrics);
-
-        // ── Update header analysis-ticker-label dynamically ──
-        const tickerLabel = safeGetElement('analysis-ticker-label');
-        if (tickerLabel) {
-            tickerLabel.innerText = `Şu an analiz ediliyor: ${state.selectedAsset}`;
-        }
 
         // ── Restore state ──
         state.isSimulating = false;
@@ -955,7 +964,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Price action overlay
-        if (el.priceOverlayLast) el.priceOverlayLast.innerText = '₺' + s.lastPrice.toFixed(2);
+        if (el.priceOverlayLast) el.priceOverlayLast.innerText = '₺' + fmtStockPrice(s.lastPrice);
         if (el.priceOverlayVol)  el.priceOverlayVol.innerText = formatVolume(s.totalVolume);
     }
 
@@ -993,8 +1002,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="font-bold">${ticker}</td>
                     <td><span class="badge ${typeClass}">${trade.type}</span></td>
                     <td class="font-mono">${trade.shares}</td>
-                    <td class="font-mono">₺${trade.entryPrice.toFixed(2)}</td>
-                    <td class="font-mono">₺${trade.exitPrice.toFixed(2)}</td>
+                    <td class="font-mono">₺${fmtStockPrice(trade.entryPrice)}</td>
+                    <td class="font-mono">₺${fmtStockPrice(trade.exitPrice)}</td>
                     <td class="font-mono ${pnlClass}">${pnlSign}${formatTRY(trade.pnl)}</td>
                     <td>${statusBadge}</td>
                 </tr>

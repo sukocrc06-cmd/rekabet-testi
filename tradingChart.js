@@ -49,7 +49,11 @@ const TradingChart = (() => {
         psar: 'rgba(255, 167, 38, 0.9)',
         pivot: 'rgba(212, 175, 55, 0.7)',
         pivotR: 'rgba(239, 83, 80, 0.55)',
-        pivotS: 'rgba(38, 198, 218, 0.55)'
+        pivotS: 'rgba(38, 198, 218, 0.55)',
+        supertrendUp: '#26A69A',
+        supertrendDown: '#EF5350',
+        keltnerLine: 'rgba(255, 167, 38, 0.55)',
+        donchianLine: 'rgba(126, 87, 194, 0.55)'
     };
 
     // Tier-1 chart type catalog (TradingView "Çubuklar" menu parity). Each
@@ -119,7 +123,9 @@ const TradingChart = (() => {
         atr:   { title: 'ATR (14)' },
         adx:   { title: 'ADX (14)' },
         obv:   { title: 'OBV' },
-        willr: { title: 'Williams %R (14)' }
+        willr: { title: 'Williams %R (14)' },
+        cci:   { title: 'CCI (20)' },
+        mfi:   { title: 'MFI (14)' }
     };
 
     function loadActiveOscillators() {
@@ -240,6 +246,7 @@ const TradingChart = (() => {
         setupDrawCanvas();
         setupToolbar();
         setupChartTypeMenu();
+        setupHeaderMenu();
         setupResolutionBar();
         setupPriceScaleToggle();
         setupOscillatorCheckboxes();
@@ -1054,7 +1061,10 @@ const TradingChart = (() => {
             vwap: checked('chk-vwap'),
             ichimoku: checked('chk-ichimoku'),
             psar: checked('chk-psar'),
-            pivot: checked('chk-pivot')
+            pivot: checked('chk-pivot'),
+            supertrend: checked('chk-supertrend'),
+            keltner: checked('chk-keltner'),
+            donchian: checked('chk-donchian')
         };
 
         const addLine = (key, values, color, opts = {}) => {
@@ -1118,6 +1128,26 @@ const TradingChart = (() => {
             addPivotLine(pp.s3, 'S3', COLORS.pivotS);
         }
 
+        // SuperTrend: iki ayrı seri (yükseliş/düşüş segmenti) — bkz.
+        // dataController.js computeSuperTrend() yorum bloğu (dürüst
+        // basitleştirme: nokta-bazlı renk API'si yerine null-boşluklu
+        // iki çizgi kullanılıyor).
+        if (vis.supertrend && ind.supertrend) {
+            addLine('supertrendUp', ind.supertrend.up, COLORS.supertrendUp, { lineWidth: 2 });
+            addLine('supertrendDown', ind.supertrend.down, COLORS.supertrendDown, { lineWidth: 2 });
+        }
+
+        if (vis.keltner && ind.keltner) {
+            addLine('keltnerUpper', ind.keltner.upper, COLORS.keltnerLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addLine('keltnerMiddle', ind.keltner.middle, COLORS.keltnerLine, { lineWidth: 1 });
+            addLine('keltnerLower', ind.keltner.lower, COLORS.keltnerLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+        }
+
+        if (vis.donchian && ind.donchian) {
+            addLine('donchianUpper', ind.donchian.upper, COLORS.donchianLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+            addLine('donchianLower', ind.donchian.lower, COLORS.donchianLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+        }
+
         updateLegend(vis);
     }
 
@@ -1147,7 +1177,10 @@ const TradingChart = (() => {
         { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' },
         { key: 'ichimoku',  label: 'Ichimoku',   colorKey: 'ichimokuKijun', chk: 'chk-ichimoku' },
         { key: 'psar',      label: 'Parabolic SAR', colorKey: 'psar', chk: 'chk-psar' },
-        { key: 'pivot',     label: 'Pivot Points', colorKey: 'pivot', chk: 'chk-pivot' }
+        { key: 'pivot',     label: 'Pivot Points', colorKey: 'pivot', chk: 'chk-pivot' },
+        { key: 'supertrend', label: 'SuperTrend', colorKey: 'supertrendUp', chk: 'chk-supertrend' },
+        { key: 'keltner',   label: 'Keltner',     colorKey: 'keltnerLine', chk: 'chk-keltner' },
+        { key: 'donchian',  label: 'Donchian',    colorKey: 'donchianLine', chk: 'chk-donchian' }
     ];
 
     function updateLegend(vis) {
@@ -1173,7 +1206,7 @@ const TradingChart = (() => {
     }
 
     function setupOverlayCheckboxes() {
-        ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap', 'chk-ichimoku', 'chk-psar', 'chk-pivot'].forEach(id => {
+        ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap', 'chk-ichimoku', 'chk-psar', 'chk-pivot', 'chk-supertrend', 'chk-keltner', 'chk-donchian'].forEach(id => {
             const el = byId(id);
             if (el) el.addEventListener('change', renderOverlays);
         });
@@ -1290,6 +1323,16 @@ const TradingChart = (() => {
             series.willr.setData(seriesFromValues(dates, ind.willr14));
             series.willr.createPriceLine({ price: -20, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '-20' });
             series.willr.createPriceLine({ price: -80, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '-80' });
+        } else if (type === 'cci') {
+            series.cci = paneChart.addLineSeries({ color: '#7E57C2', lineWidth: 1.5, priceLineVisible: false });
+            series.cci.setData(seriesFromValues(dates, ind.cci20));
+            series.cci.createPriceLine({ price: 100, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '100' });
+            series.cci.createPriceLine({ price: -100, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '-100' });
+        } else if (type === 'mfi') {
+            series.mfi = paneChart.addLineSeries({ color: '#FF7043', lineWidth: 1.5, priceLineVisible: false });
+            series.mfi.setData(seriesFromValues(dates, ind.mfi14));
+            series.mfi.createPriceLine({ price: 80, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '80' });
+            series.mfi.createPriceLine({ price: 20, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '20' });
         }
 
         return { series, title };
@@ -1556,6 +1599,49 @@ const TradingChart = (() => {
         }
     }
 
+    /* ────────── Header "diğer işlemler" hamburger menüsü ──────────
+       (18 Temmuz 2026, onuncu oturum, dördüncü tur) Header sıkışıklığını
+       gidermek için (bkz. arayuz-iyilestirme-onerileri.md, Madde 2) daha az
+       sık kullanılan header butonları (Tur/Isı Haritası/Kısayollar/Yardım/
+       Reset) buraya taşındı. Açılma deseni yukarıdaki setupChartTypeMenu()
+       ile BİREBİR AYNI — yeni bir dropdown mimarisi icat edilmedi, var olan
+       desen yeniden kullanıldı. */
+    function setupHeaderMenu() {
+        const btn = byId('btn-header-menu');
+        const dropdown = byId('header-menu-dropdown');
+        if (!btn || !dropdown) return;
+
+        const close = () => dropdown.classList.remove('open');
+        const open = () => {
+            if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            closeAllFlyouts();
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = (rect.bottom + 6) + 'px';
+            // Sağa hizalı açılır — header'ın en sağındaki butondan tetiklendiği
+            // için sola değil sağa taşarsa viewport dışına çıkar.
+            dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+            dropdown.style.left = 'auto';
+            dropdown.classList.add('open');
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdown.classList.contains('open')) close(); else open();
+        });
+        document.addEventListener('click', (e) => {
+            if (dropdown.classList.contains('open') && !dropdown.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dropdown.classList.contains('open')) close();
+        });
+        // Menüdeki herhangi bir butona tıklanınca (Tur/Isı Haritası/vb.) menü
+        // kendiliğinden kapansın — o butonların kendi click handler'ları
+        // (tradingEngine.js/app.js/tourGuide.js'de) hiç değişmeden ayrıca çalışır.
+        dropdown.addEventListener('click', (e) => {
+            if (e.target.closest('button')) close();
+        });
+    }
+
     /* ────────── Drawing tools toolbar (grouped flyout menus, Tier 1) ────────── */
 
     // Tier-1 drawing tool catalog, grouped TradingView-style. `standalone`
@@ -1564,6 +1650,16 @@ const TradingChart = (() => {
     // a flyout listing every tool in the group.
     const TOOL_GROUPS = [
         { id: 'cursor', standalone: true, tools: [{ id: 'cursor', label: 'İmleç' }] },
+        // (18 Temmuz 2026, onuncu oturum, dördüncü tur) "Göstergeler" grubu —
+        // diğer rail gruplarından FARKLI: bir çizim aracı SEÇMİYOR, tıklanınca
+        // açılan flyout'ta doğrudan gösterge checkbox'ları listeleniyor (bkz.
+        // arayuz-iyilestirme-onerileri.md Madde 3). Bu yüzden `checklist: true`
+        // ile işaretlendi — renderToolbar()/setupToolbar() bu bayrağı görünce
+        // farklı bir HTML/click-davranışı üretiyor. Flyout'taki her checkbox,
+        // Göstergeler modalındaki #chk-*/.osc-checkbox elemanlarının BİREBİR
+        // AYNISINI tetikliyor (ayrı bir state icat edilmedi — bkz.
+        // renderIndicatorFlyoutContent()/wireIndicatorFlyoutClicks()).
+        { id: 'indicators', label: 'Göstergeler', checklist: true, tools: [] },
         { id: 'lines', label: 'Çizgiler', tools: [
             { id: 'trend', label: 'Trend Çizgisi' },
             { id: 'ray', label: 'Işın' },
@@ -1656,9 +1752,91 @@ const TradingChart = (() => {
             clear: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>',
             magnet: '<path d="M6 3v9a6 6 0 0 0 12 0V3"></path><path d="M6 3H2v9"></path><path d="M22 3h-4v9"></path>',
             lock: '<rect x="5" y="11" width="14" height="10" rx="1"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
-            hide: '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.65 19.65 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line>'
+            hide: '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.65 19.65 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line>',
+            indicators: '<line x1="4" y1="6" x2="20" y2="6"></line><circle cx="9" cy="6" r="2" fill="currentColor"></circle><line x1="4" y1="12" x2="20" y2="12"></line><circle cx="15" cy="12" r="2" fill="currentColor"></circle><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="7" cy="18" r="2" fill="currentColor"></circle>'
         };
         return '<svg ' + S + '>' + (ICONS[id] || ICONS.cursor) + '</svg>';
+    }
+
+    // "Göstergeler" flyout'unun içeriği — Göstergeler modalındaki iki
+    // kategoriyle birebir aynı listeler (bkz. index.html indicator-modal-
+    // category blokları). Buradaki her satır ayrı bir state TAŞIMIYOR —
+    // tıklanınca doğrudan modal'daki gerçek #chk-*/.osc-checkbox elemanını
+    // bulup değiştiriyor (bkz. wireIndicatorFlyoutClicks()), böylece rail'den
+    // veya modaldan açma hiçbir zaman birbirinden ayrışmıyor.
+    const INDICATOR_FLYOUT_OVERLAY = [
+        { chk: 'chk-sma20', label: 'SMA 20' },
+        { chk: 'chk-sma50', label: 'SMA 50' },
+        { chk: 'chk-sma200', label: 'SMA 200' },
+        { chk: 'chk-ema9', label: 'EMA 9' },
+        { chk: 'chk-ema21', label: 'EMA 21' },
+        { chk: 'chk-wma20', label: 'WMA 20' },
+        { chk: 'chk-bollinger', label: 'Bollinger Bands' },
+        { chk: 'chk-vwap', label: 'VWAP' },
+        { chk: 'chk-ichimoku', label: 'Ichimoku Cloud' },
+        { chk: 'chk-psar', label: 'Parabolic SAR' },
+        { chk: 'chk-pivot', label: 'Pivot Points' },
+        { chk: 'chk-supertrend', label: 'SuperTrend' },
+        { chk: 'chk-keltner', label: 'Keltner Kanalları' },
+        { chk: 'chk-donchian', label: 'Donchian Kanalları' }
+    ];
+    const INDICATOR_FLYOUT_OSCILLATOR = [
+        { osc: 'rsi', label: 'RSI (14)' },
+        { osc: 'macd', label: 'MACD' },
+        { osc: 'stoch', label: 'Stochastic' },
+        { osc: 'atr', label: 'ATR (14)' },
+        { osc: 'adx', label: 'ADX (14)' },
+        { osc: 'obv', label: 'OBV' },
+        { osc: 'cci', label: 'CCI (20)' },
+        { osc: 'mfi', label: 'MFI (14)' },
+        { osc: 'willr', label: 'Williams %R' }
+    ];
+
+    function indicatorFlyoutItem(isActive, attr, attrVal, label) {
+        return '<button type="button" class="tv-tool-flyout-item tv-indicator-flyout-item' + (isActive ? ' active' : '') +
+            '" data-' + attr + '="' + attrVal + '" role="menuitemcheckbox" aria-checked="' + isActive + '">' +
+            '<span class="tv-indicator-flyout-check"></span><span>' + label + '</span></button>';
+    }
+
+    function renderIndicatorFlyoutContent() {
+        const overlayHtml = INDICATOR_FLYOUT_OVERLAY.map(def => {
+            const el = byId(def.chk);
+            return indicatorFlyoutItem(!!(el && el.checked), 'indicator-chk', def.chk, def.label);
+        }).join('');
+        const oscHtml = INDICATOR_FLYOUT_OSCILLATOR.map(def => {
+            const el = document.querySelector('.osc-checkbox[data-osc="' + def.osc + '"]');
+            return indicatorFlyoutItem(!!(el && el.checked), 'indicator-osc', def.osc, def.label);
+        }).join('');
+
+        return (
+            '<div class="tv-indicator-flyout-label">Ana Grafik (Overlay)</div>' +
+            overlayHtml +
+            '<div class="tv-indicator-flyout-label">Osilatör Paneli</div>' +
+            oscHtml +
+            '<div class="tv-tool-flyout-divider"></div>' +
+            '<button type="button" class="tv-tool-flyout-item tv-indicator-flyout-more" data-action="open-indicator-modal">Tüm Göstergeler / Ayarlar…</button>'
+        );
+    }
+
+    // Flyout içindeki bir gösterge satırına tıklanınca gerçek checkbox'ı
+    // (modal'daki #chk-* veya .osc-checkbox) bulup değiştirir, 'change'
+    // event'ini dispatch eder (renderOverlays()/oscillator sürükle-sırala
+    // altyapısı zaten bu event'i dinliyor — bkz. setupOverlayCheckboxes()/
+    // setupOscillatorCheckboxes()), sonra flyout'u AÇIK tutarak içeriğini
+    // güncel checked durumlarıyla yeniden çizer (kullanıcı art arda birden
+    // fazla gösterge açıp kapatabilsin diye kapatmıyoruz).
+    function handleIndicatorFlyoutClick(target) {
+        const chkId = target.dataset.indicatorChk;
+        const oscId = target.dataset.indicatorOsc;
+        let el = null;
+        if (chkId) el = byId(chkId);
+        else if (oscId) el = document.querySelector('.osc-checkbox[data-osc="' + oscId + '"]');
+        if (!el) return;
+        el.checked = !el.checked;
+        el.dispatchEvent(new Event('change'));
+
+        const flyout = document.querySelector('.tv-tool-flyout[data-flyout="indicators"]');
+        if (flyout) flyout.innerHTML = renderIndicatorFlyoutContent();
     }
 
     function renderToolbar() {
@@ -1670,6 +1848,19 @@ const TradingChart = (() => {
                 const t = g.tools[0];
                 const isActive = state.activeTool === t.id;
                 return '<button type="button" class="tv-tool-btn' + (isActive ? ' active' : '') + '" data-tool="' + t.id + '" title="' + t.label + '">' + toolIcon(t.id) + '</button>';
+            }
+            if (g.checklist) {
+                return (
+                    '<div class="tv-tool-group" data-group="' + g.id + '">' +
+                        '<button type="button" class="tv-tool-btn tv-tool-group-btn tv-tool-checklist-btn" data-checklist-toggle="' + g.id + '" title="' + g.label + '">' +
+                            toolIcon(g.id) +
+                            '<span class="tv-tool-caret" data-caret="' + g.id + '"><svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6l8 12 8-12z"></path></svg></span>' +
+                        '</button>' +
+                        '<div class="tv-tool-flyout tv-indicator-flyout" data-flyout="' + g.id + '" role="menu" aria-label="' + g.label + '">' +
+                            renderIndicatorFlyoutContent() +
+                        '</div>' +
+                    '</div>'
+                );
             }
             const lastId = groupLastTool[g.id] || g.tools[0].id;
             const lastDef = g.tools.find(t => t.id === lastId) || g.tools[0];
@@ -1797,6 +1988,28 @@ const TradingChart = (() => {
         renderToolbar();
 
         toolbar.addEventListener('click', (e) => {
+            // "Göstergeler" flyout'una özel satırlar (checkbox tıklama /
+            // "Tüm Göstergeler..." bağlantısı) — bunlar genel .tv-tool-flyout-item
+            // eşleşmesinden ÖNCE ele alınmalı, aksi halde aşağıdaki genel dal
+            // bunları bir "çizim aracı seç" tıklaması sanıp state.activeTool'u
+            // bozardı.
+            const indicatorItem = e.target.closest('.tv-indicator-flyout-item');
+            if (indicatorItem) {
+                handleIndicatorFlyoutClick(indicatorItem);
+                return;
+            }
+            const moreLink = e.target.closest('[data-action="open-indicator-modal"]');
+            if (moreLink) {
+                closeAllFlyouts();
+                byId('btn-open-indicators')?.click();
+                return;
+            }
+            const checklistToggle = e.target.closest('[data-checklist-toggle]');
+            if (checklistToggle) {
+                toggleFlyout(checklistToggle.dataset.checklistToggle);
+                return;
+            }
+
             const flyoutItem = e.target.closest('.tv-tool-flyout-item');
             if (flyoutItem) {
                 const groupEl = flyoutItem.closest('.tv-tool-group');

@@ -849,6 +849,140 @@ const DataController = (() => {
     }
 
     /**
+     * Compute SuperTrend (ATR tabanlı trend-takip göstergesi).
+     *
+     * İki ayrı seri döndürülür — `up` (yükseliş trendindeyken dolu, düşüş
+     * trendindeyken null) ve `down` (tam tersi). Bu, tek bir çizgiyi trend
+     * yönüne göre iki renkli göstermenin (gerçek TradingView'daki gibi
+     * yeşil/kırmızı segmentler) Lightweight Charts'ta nokta-bazlı renk API'si
+     * olmadan yapılabilecek dürüst/doğru yolu — her iki seri de candleSeries
+     * üzerinde AYNI çizginin farklı segmentleri, sahte/ekstra veri değil.
+     */
+    function computeSuperTrend(candles, period = 10, multiplier = 3) {
+        const len = candles.length;
+        const atr = computeATR(candles, period);
+        const up = new Array(len).fill(null);
+        const down = new Array(len).fill(null);
+        if (len < period + 1) return { up, down };
+
+        let finalUpper = null, finalLower = null, trendUp = true;
+
+        for (let i = 0; i < len; i++) {
+            if (atr[i] === null || atr[i] === undefined) continue;
+            const mid = (candles[i].high + candles[i].low) / 2;
+            const basicUpper = mid + multiplier * atr[i];
+            const basicLower = mid - multiplier * atr[i];
+
+            if (finalUpper === null) {
+                finalUpper = basicUpper;
+                finalLower = basicLower;
+            } else {
+                const prevClose = candles[i - 1].close;
+                finalUpper = (basicUpper < finalUpper || prevClose > finalUpper) ? basicUpper : finalUpper;
+                finalLower = (basicLower > finalLower || prevClose < finalLower) ? basicLower : finalLower;
+            }
+
+            const close = candles[i].close;
+            if (trendUp) {
+                if (close < finalLower) trendUp = false;
+            } else {
+                if (close > finalUpper) trendUp = true;
+            }
+
+            const value = trendUp ? finalLower : finalUpper;
+            if (trendUp) up[i] = +value.toFixed(4); else down[i] = +value.toFixed(4);
+        }
+
+        return { up, down };
+    }
+
+    /**
+     * Compute Commodity Channel Index (CCI).
+     */
+    function computeCCI(candles, period = 20) {
+        const len = candles.length;
+        const cci = new Array(len).fill(null);
+        const typical = candles.map(c => (c.high + c.low + c.close) / 3);
+
+        for (let i = period - 1; i < len; i++) {
+            let sum = 0;
+            for (let j = i - period + 1; j <= i; j++) sum += typical[j];
+            const mean = sum / period;
+            let meanDev = 0;
+            for (let j = i - period + 1; j <= i; j++) meanDev += Math.abs(typical[j] - mean);
+            meanDev /= period;
+            cci[i] = meanDev === 0 ? 0 : +((typical[i] - mean) / (0.015 * meanDev)).toFixed(2);
+        }
+        return cci;
+    }
+
+    /**
+     * Compute Keltner Channels (EMA orta çizgi + ATR tabanlı üst/alt bant).
+     */
+    function computeKeltnerChannels(candles, period = 20, atrPeriod = 10, multiplier = 2) {
+        const closes = candles.map(c => c.close);
+        const middle = computeEMA(closes, period);
+        const atr = computeATR(candles, atrPeriod);
+        const len = candles.length;
+        const upper = new Array(len).fill(null);
+        const lower = new Array(len).fill(null);
+
+        for (let i = 0; i < len; i++) {
+            if (middle[i] === null || middle[i] === undefined || atr[i] === null || atr[i] === undefined) continue;
+            upper[i] = +(middle[i] + multiplier * atr[i]).toFixed(4);
+            lower[i] = +(middle[i] - multiplier * atr[i]).toFixed(4);
+        }
+        return { middle, upper, lower };
+    }
+
+    /**
+     * Compute Donchian Channels (belirli periyottaki en yüksek/en düşük).
+     */
+    function computeDonchianChannels(candles, period = 20) {
+        const len = candles.length;
+        const upper = new Array(len).fill(null);
+        const lower = new Array(len).fill(null);
+        const middle = new Array(len).fill(null);
+
+        for (let i = period - 1; i < len; i++) {
+            let hh = -Infinity, ll = Infinity;
+            for (let j = i - period + 1; j <= i; j++) {
+                if (candles[j].high > hh) hh = candles[j].high;
+                if (candles[j].low < ll) ll = candles[j].low;
+            }
+            upper[i] = +hh.toFixed(4);
+            lower[i] = +ll.toFixed(4);
+            middle[i] = +((hh + ll) / 2).toFixed(4);
+        }
+        return { upper, lower, middle };
+    }
+
+    /**
+     * Compute Money Flow Index (hacim ağırlıklı RSI benzeri osilatör).
+     */
+    function computeMFI(candles, period = 14) {
+        const len = candles.length;
+        const mfi = new Array(len).fill(null);
+        const typical = candles.map(c => (c.high + c.low + c.close) / 3);
+        const rawFlow = candles.map((c, i) => typical[i] * (c.volume || 0));
+
+        for (let i = period; i < len; i++) {
+            let posFlow = 0, negFlow = 0;
+            for (let j = i - period + 1; j <= i; j++) {
+                if (typical[j] > typical[j - 1]) posFlow += rawFlow[j];
+                else if (typical[j] < typical[j - 1]) negFlow += rawFlow[j];
+            }
+            if (negFlow === 0) {
+                mfi[i] = 100;
+            } else {
+                const moneyRatio = posFlow / negFlow;
+                mfi[i] = +(100 - (100 / (1 + moneyRatio))).toFixed(2);
+            }
+        }
+        return mfi;
+    }
+
+    /**
      * Compute Average True Range (Wilder's smoothing).
      */
     function computeATR(candles, period = 14) {
@@ -1352,6 +1486,13 @@ const DataController = (() => {
         const psar = computeParabolicSAR(candles);
         const pivotPoints = computePivotPoints(candles);
 
+        // --- SuperTrend / CCI / Keltner / Donchian / MFI (dördüncü tur — indikatör çeşitlendirme) ---
+        const supertrend = computeSuperTrend(candles);
+        const cci20 = computeCCI(candles, 20);
+        const keltner = computeKeltnerChannels(candles);
+        const donchian = computeDonchianChannels(candles);
+        const mfi14 = computeMFI(candles, 14);
+
         // --- Bollinger Bands (20-period, 2 std-dev) ---
         const bbPeriod = 20;
         const bbMult   = 2;
@@ -1394,7 +1535,8 @@ const DataController = (() => {
             sma20, sma50, sma200, ema9, ema21, wma20,
             bollingerUpper, bollingerMiddle, bollingerLower, vwap,
             rsi14, macd, stochastic, atr14, adx14, obv, willr14,
-            ichimoku, psar, pivotPoints
+            ichimoku, psar, pivotPoints,
+            supertrend, cci20, keltner, donchian, mfi14
         };
     }
 
@@ -1750,6 +1892,11 @@ const DataController = (() => {
         computeIchimoku,
         computeParabolicSAR,
         computePivotPoints,
+        computeSuperTrend,
+        computeCCI,
+        computeKeltnerChannels,
+        computeDonchianChannels,
+        computeMFI,
         computeSupport,
         computeResistance,
 
