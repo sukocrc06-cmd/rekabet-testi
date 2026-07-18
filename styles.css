@@ -995,83 +995,214 @@ body {
     animation: tabFadeIn 0.3s ease-out forwards;
 }
 
-/* --- Responsive Adjustments --- */
-@media (max-width: 1024px) {
+/* --- Responsive Adjustments (17 Temmuz 2026, yedinci oturum) ---
+ * Bu bölüm daha önce (backtest dashboard döneminden kalma, artık DOM'da
+ * karşılığı olmayan .metrics-cards-grid/.strategy-details-grid gibi ölü
+ * sınıflara hitap eden) etkisiz kurallar içeriyordu; ayrıca aşağıdaki eski
+ * ".competition-panel { display:none !important; }" kuralı 1200px altında
+ * TÜM işlem panelini (alım/satım ticket'ı, pozisyonlar, emir defteri)
+ * geri getirilemeyecek şekilde tamamen gizliyordu — trading terminaline
+ * dönüşümden sonra bu artık gerçek bir kullanılabilirlik hatası.
+ * Şimdi: dar ekranlarda sidebar ve işlem paneli tamamen kaybolmak yerine,
+ * header'daki iki yeni buton (☰ Piyasa / işlem ikonu) ile açılıp kapanan
+ * kayar (drawer) panellere dönüşüyor; grafik alanı her zaman erişilebilir
+ * kalıyor. Grid sütunlarının "1fr" ortadaki grafik alanı, içeriğin doğal
+ * min-content genişliğinden dolayı sayfayı yatay taşırmaması için ilgili
+ * panellere min-width:0 eklendi (klasik CSS grid/flex shrink sorunu). */
+.sidebar-panel,
+.main-content-panel,
+.competition-panel.trading-panel {
+    min-width: 0;
+}
+
+.dashboard-header {
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.dashboard-header::-webkit-scrollbar {
+    display: none;
+}
+
+.tv-resolution-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Sadece dar-ekran modunda görünen sidebar/işlem paneli açma-kapama
+ * butonları ve arka karartma katmanı — normal (geniş) ekranda gizli. */
+.mobile-drawer-toggle {
+    display: none;
+}
+
+.btn-icon {
+    padding: 8px;
+    width: 34px;
+    height: 34px;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.mobile-drawer-backdrop {
+    display: none;
+}
+
+.mobile-drawer-close {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--gold-border);
+    color: var(--gold);
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    margin-left: auto;
+}
+
+.mobile-drawer-close:hover {
+    background-color: var(--gold-dim);
+}
+
+@media (max-width: 1300px) {
     .dashboard-body {
-        grid-template-columns: 280px 1fr;
-    }
-    .metrics-cards-grid {
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: 260px 1fr 300px;
     }
 }
 
-@media (max-width: 768px) {
-    body {
-        overflow-y: auto;
-        height: auto;
+/* Orta genişlik: sidebar + işlem paneli hâlâ sabit sütun olarak yan yana
+ * duruyor ama daha dar; grafik alanı min-width:0 sayesinde küçülebiliyor. */
+@media (max-width: 1180px) {
+    .dashboard-body {
+        grid-template-columns: 240px 1fr 280px;
     }
+}
 
-    .dashboard-container {
-        grid-template-rows: auto;
-        height: auto;
-        width: 100vw;
-    }
-
+/* Dar ekran / tablet ve altı: sidebar ve işlem paneli artık sabit sütun
+ * değil, header'dan açılıp kapanan kayar (off-canvas) panellere dönüşüyor.
+ * Grafik alanı tüm genişliği kaplıyor. */
+@media (max-width: 980px) {
     .dashboard-body {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto;
-        height: auto;
-        overflow: visible;
+    }
+
+    .mobile-drawer-toggle {
+        display: inline-flex;
+    }
+
+    /* top:64px (header yüksekliğiyle birebir, .dashboard-container'ın
+     * grid-template-rows'undaki ilk değer) böylece açık drawer header'ın
+     * ALTINDAN başlıyor — header'ı kaplayıp içindeki diğer drawer butonunu
+     * tıklanamaz hale getirmiyor (bulunup düzeltilen gerçek bir hata: ilk
+     * denemede top:0 kullanılmıştı, bu da sidebar açıkken "İşlem Paneli"
+     * butonunun arkasında kalıp tıklanamamasına yol açıyordu). */
+    .sidebar-panel,
+    .competition-panel.trading-panel {
+        position: fixed;
+        top: 64px;
+        bottom: 0;
+        z-index: 200;
+        width: min(320px, 86vw);
+        max-height: none;
+        transition: transform 0.25s ease;
+        box-shadow: 0 0 28px rgba(0, 0, 0, 0.45);
     }
 
     .sidebar-panel {
+        left: 0;
         grid-column: 1;
-        grid-row: 1;
-        border-right: none;
-        border-bottom: 1px solid var(--gold-border);
-        max-height: none;
-        overflow: visible;
+        grid-row: auto;
+        transform: translateX(-100%);
+    }
+
+    .competition-panel.trading-panel {
+        right: 0;
+        grid-column: 1;
+        transform: translateX(100%);
+    }
+
+    .sidebar-panel.drawer-open,
+    .competition-panel.trading-panel.drawer-open {
+        transform: translateX(0);
+    }
+
+    .mobile-drawer-backdrop.visible {
+        display: block;
+        position: fixed;
+        top: 64px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 190;
+    }
+
+    /* Drawer modundayken kapatma (X) butonu görünür oluyor — arka planın
+     * dar bir kesimine dokunmaya güvenmek yerine net bir kapatma yolu. */
+    .sidebar-panel .mobile-drawer-close,
+    .competition-panel.trading-panel .mobile-drawer-close {
+        display: flex;
+    }
+
+    .sidebar-panel .panel-header,
+    .competition-panel.trading-panel .panel-header {
+        justify-content: flex-start;
+        gap: 10px;
     }
 
     .main-content-panel {
         grid-column: 1;
-        grid-row: 2;
-        grid-template-rows: auto auto;
-        height: auto;
-        overflow: visible;
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboard-header {
+        padding: 0 10px;
     }
 
-    .metrics-section {
-        height: auto;
+    .logo-area {
+        gap: 8px;
     }
 
-    .metrics-cards-grid {
-        grid-template-columns: repeat(2, 1fr);
+    .logo-area h1 {
+        font-size: 15px;
     }
 
-    .strategy-details-grid {
-        grid-template-columns: 1fr;
+    #analysis-ticker-label {
+        display: none;
+    }
+
+    .header-status {
+        gap: 10px;
+    }
+
+    .header-actions {
+        gap: 5px;
+    }
+
+    /* Metinli header butonları ikon-only'e düşüyor, yer kazanılıyor —
+     * fonksiyonellik title="" tooltip'i ile korunuyor. */
+    .header-actions .btn .btn-label {
+        display: none;
+    }
+
+    .header-actions .btn {
+        padding: 8px;
     }
 
     .text-hide-mobile {
         display: none !important;
     }
-
-    .dashboard-footer {
-        display: none;
-    }
 }
 
-@media (max-width: 480px) {
-    .metrics-cards-grid {
-        grid-template-columns: 1fr;
+@media (max-width: 420px) {
+    .sidebar-panel,
+    .competition-panel.trading-panel {
+        width: 92vw;
     }
-    .header-actions {
-        gap: 6px;
-    }
-    .btn {
-        padding: 6px 12px;
-        font-size: 11px;
+
+    .header-balance-label {
+        display: none;
     }
 }
 
@@ -1148,15 +1279,15 @@ body {
     box-shadow: 0 0 8px rgba(67, 160, 71, 0.3);
 }
 
-/* Responsive adjustment for desktop views */
-@media (max-width: 1200px) {
-    .dashboard-body {
-        grid-template-columns: 280px 1fr;
-    }
-    .competition-panel {
-        display: none !important;
-    }
-}
+/* Not: bu bölümde önceden "@media (max-width:1200px) { .competition-panel
+ * { display:none !important; } }" kuralı vardı — trading terminaline
+ * dönüşümden önceki backtest dashboard döneminden kalma. O zamanki
+ * ".competition-panel" sadece dekoratif bir "motor yarışı" istatistik
+ * paneliydi, kaybolması sorun değildi. Şimdi aynı DOM elemanı gerçek
+ * "İşlem Paneli"ni (alım/satım ticket'ı, pozisyonlar, emirler) taşıyor —
+ * bu yüzden bu kural kaldırıldı; dar ekran davranışı artık yukarıdaki
+ * "Responsive Adjustments" bölümündeki kayar (drawer) panel kurallarıyla
+ * yönetiliyor, panel kaybolmuyor, header'daki butonla açılıp kapanıyor. */
 
 /* ==========================================================================
    TRADING SYSTEM ADD-ONS
@@ -1193,6 +1324,98 @@ body {
     background-color: var(--gold-dim);
     border-color: var(--gold);
     color: var(--gold);
+}
+
+/* --- Kaldıraç (Leverage) Seçici ---
+ * .exchange-selector ile aynı görsel dilde ama kaldıraç arttıkça (2x → 10x)
+ * rengi turuncuya/kırmızıya kayarak risk arttığını görsel olarak da
+ * hissettiriyor — sadece "1x" nötr altın/gri kalıyor. */
+.leverage-selector {
+    display: flex;
+    gap: 6px;
+}
+
+.leverage-btn {
+    flex: 1;
+    background-color: var(--bg-input);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    padding: 7px 0;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    font-family: var(--font-mono);
+    transition: var(--transition-fast);
+}
+
+.leverage-btn:hover {
+    border-color: var(--gold);
+    color: var(--text-primary);
+}
+
+.leverage-btn.active {
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+.leverage-btn.active[data-leverage="5"] {
+    background-color: rgba(255, 152, 0, 0.15);
+    border-color: #FF9800;
+    color: #FF9800;
+}
+
+.leverage-btn.active[data-leverage="10"] {
+    background-color: rgba(244, 67, 54, 0.15);
+    border-color: #F44336;
+    color: #F44336;
+}
+
+.leverage-warning-hint {
+    color: #FF9800;
+    font-size: 9.5px;
+    text-transform: none;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+.oco-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 8px;
+}
+
+.btn-cancel-oco {
+    background: transparent;
+    border: 1px solid var(--tint-14);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-cancel-oco:hover {
+    border-color: #F44336;
+    color: #F44336;
+}
+
+.pos-leverage-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 5px;
+    background-color: var(--gold-dim);
+    color: var(--gold);
+    vertical-align: middle;
 }
 
 /* --- Watchlist ---
@@ -2164,6 +2387,76 @@ body {
     overflow-y: auto;
 }
 
+.heatmap-groupby-toggle {
+    display: flex;
+    gap: 2px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+
+.heatmap-groupby-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.heatmap-groupby-btn:hover {
+    color: var(--text-primary);
+}
+
+.heatmap-groupby-btn.active {
+    background-color: var(--gold-dim);
+    color: var(--gold);
+}
+
+/* Sektöre göre gruplu görünümde her sektör kendi başlığı + mini ısı
+ * haritası ızgarasıyla ayrı bir bölüm oluyor. */
+.heatmap-sector-group {
+    margin-bottom: 18px;
+}
+
+.heatmap-sector-group:last-child {
+    margin-bottom: 0;
+}
+
+.heatmap-sector-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--tint-05);
+}
+
+.heatmap-sector-name {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.heatmap-sector-count {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.heatmap-sector-avg {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    margin-left: auto;
+}
+
 .heatmap-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
@@ -2358,6 +2651,70 @@ body {
     font-family: var(--font-mono);
     color: var(--text-secondary);
     pointer-events: none;
+}
+
+/* --- Çoklu Grafik / 2x2 Izgara Düzeni (17 Temmuz 2026, yedinci oturum) --- */
+.tv-grid-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1px;
+    background-color: var(--gold-border);
+}
+
+.tv-grid-cell {
+    background-color: var(--bg-panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+}
+
+.tv-grid-cell-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+}
+
+.tv-grid-symbol-select {
+    flex: 1;
+    background-color: var(--bg-input);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 6px;
+    font-family: var(--font-sans);
+}
+
+.tv-grid-promote-btn {
+    background: transparent;
+    border: 1px solid var(--gold-border);
+    color: var(--gold);
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.tv-grid-promote-btn:hover {
+    background-color: var(--gold-dim);
+}
+
+.tv-grid-cell-chart {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
 }
 
 .tv-ohlc-legend .ohlc-date {

@@ -247,6 +247,62 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /* ────────────── Mobil/Dar Ekran Kayar (Drawer) Paneller ──────────────
+     * 980px altında sidebar (Piyasa) ve işlem paneli artık sabit sütun
+     * değil, header'daki iki ikon butonla açılıp kapanan kayar panellere
+     * dönüşüyor (bkz. styles.css "Responsive Adjustments" bölümü, 17
+     * Temmuz 2026 yedinci oturum). Aynı anda sadece bir panel açık kalsın
+     * diye biri açılırken diğeri kapatılıyor; backdrop'a tıklamak veya Esc
+     * her ikisini de kapatıyor. */
+    (function setupMobileDrawers() {
+        const sidebar = document.getElementById('sidebar-panel');
+        const tradePanel = document.getElementById('trading-panel');
+        const backdrop = document.getElementById('mobile-drawer-backdrop');
+        const btnSidebar = document.getElementById('btn-toggle-sidebar');
+        const btnTradePanel = document.getElementById('btn-toggle-tradepanel');
+        if (!sidebar || !tradePanel || !backdrop || !btnSidebar || !btnTradePanel) return;
+
+        function closeAllDrawers() {
+            sidebar.classList.remove('drawer-open');
+            tradePanel.classList.remove('drawer-open');
+            backdrop.classList.remove('visible');
+        }
+
+        function toggleDrawer(panelEl) {
+            const willOpen = !panelEl.classList.contains('drawer-open');
+            closeAllDrawers();
+            if (willOpen) {
+                panelEl.classList.add('drawer-open');
+                backdrop.classList.add('visible');
+            }
+        }
+
+        btnSidebar.addEventListener('click', () => toggleDrawer(sidebar));
+        btnTradePanel.addEventListener('click', () => toggleDrawer(tradePanel));
+        backdrop.addEventListener('click', closeAllDrawers);
+
+        // Panel içindeki net "X" kapatma butonları — arka planın dar bir
+        // kesimine dokunmaya güvenmek yerine belirsizliksiz bir kapatma yolu.
+        const btnCloseSidebar = document.getElementById('btn-close-sidebar-drawer');
+        const btnCloseTradePanel = document.getElementById('btn-close-tradepanel-drawer');
+        if (btnCloseSidebar) btnCloseSidebar.addEventListener('click', closeAllDrawers);
+        if (btnCloseTradePanel) btnCloseTradePanel.addEventListener('click', closeAllDrawers);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeAllDrawers();
+        });
+
+        // Bir hisse seçildiğinde (sidebar'daki izleme listesinden) dar
+        // ekranda sidebar'ı otomatik kapatıp grafiği göstermek daha doğal —
+        // TradingEngine bunu dinleyebilsin diye global bir yardımcı bırak.
+        window.__optipulseCloseMobileDrawers = closeAllDrawers;
+
+        // Geniş ekrana geri dönüldüğünde (ör. pencere büyütme) drawer
+        // state'i takılı kalmasın.
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 980) closeAllDrawers();
+        });
+    })();
+
     /* ────────────── Competition Checkbox Change Listeners ────────────── */
 
     const compCheckboxes = [el.chkEngineOpti, el.chkEngineBacktrader, el.chkEngineCustom];

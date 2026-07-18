@@ -26,6 +26,9 @@
         <!-- HEADER -->
         <header class="dashboard-header" id="main-header">
             <div class="logo-area">
+                <button type="button" class="btn btn-icon mobile-drawer-toggle" id="btn-toggle-sidebar" aria-label="Piyasa panelini aç/kapat" title="Piyasa Paneli">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
                 <div class="pulse-indicator"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
                 <span id="analysis-ticker-label" style="font-size: 13px; color: var(--gold); font-weight: 600; margin-left: 15px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 15px; letter-spacing: 0.5px;">Şu an analiz ediliyor: ---</span>
@@ -50,21 +53,24 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button type="button" class="btn btn-icon mobile-drawer-toggle" id="btn-toggle-tradepanel" aria-label="İşlem panelini aç/kapat" title="İşlem Paneli">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"></path></svg>
+                </button>
                 <div class="header-balance-pill" id="header-balance-pill">
                     <span class="header-balance-label">Bakiye</span>
                     <span class="header-balance-value" id="header-balance-value">--</span>
                 </div>
                 <button class="btn btn-secondary btn-tour" id="btn-open-tour" title="Uygulama Tanıtım Turu">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
-                    Tanıtım Turu
+                    <span class="btn-label">Tanıtım Turu</span>
                 </button>
                 <button class="btn btn-secondary" id="btn-open-heatmap">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-                    Isı Haritası
+                    <span class="btn-label">Isı Haritası</span>
                 </button>
                 <button class="btn btn-secondary" id="btn-open-shortcuts" title="Klavye Kısayolları (?)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path></svg>
-                    Kısayollar
+                    <span class="btn-label">Kısayollar</span>
                 </button>
                 <button class="btn btn-secondary" id="btn-theme-toggle" title="Koyu / Açık Tema (T)">
                     <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
@@ -72,18 +78,25 @@
                 </button>
                 <button class="btn btn-secondary" id="btn-reset-params">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
-                    Reset
+                    <span class="btn-label">Reset</span>
                 </button>
             </div>
         </header>
 
         <!-- MAIN LAYOUT -->
         <div class="dashboard-body">
+            <!-- Dar ekranlarda sidebar/işlem paneli açıkken arkayı karartıp
+                 dışarı tıklayınca kapatmak için kullanılan backdrop. -->
+            <div class="mobile-drawer-backdrop" id="mobile-drawer-backdrop"></div>
+
             <!-- SIDEBAR: MARKET SELECTION + INDICATORS -->
-            <aside class="sidebar-panel" aria-label="Market Selection and Indicators">
+            <aside class="sidebar-panel" aria-label="Market Selection and Indicators" id="sidebar-panel">
                 <div class="panel-header">
                     <h2>Piyasa</h2>
                     <span class="panel-badge">BIST</span>
+                    <button type="button" class="mobile-drawer-close" id="btn-close-sidebar-drawer" aria-label="Kapat" title="Kapat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </div>
 
                 <!-- Exchange Selector -->
@@ -147,6 +160,10 @@
                             <span id="price-scale-mode-label">Lin</span>
                         </button>
 
+                        <button type="button" class="tv-scale-toggle-btn" id="btn-toggle-grid-view" title="Çoklu Grafik Düzeni (2x2 Izgara)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+                        </button>
+
                         <button type="button" class="tv-indicators-btn" id="btn-open-indicators" title="Göstergeler">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18.7 8a3 3 0 1 1-3.4-3"></path><path d="M7 15l3-3 3 3 4-5"></path></svg>
                             <span>Göstergeler</span>
@@ -171,13 +188,52 @@
                         <button type="button" class="tv-res-btn" data-res="1w">1W</button>
                     </div>
 
-                    <div class="tv-chart-area">
+                    <div class="tv-chart-area" id="tv-chart-area-single">
                         <div id="tv-main-chart" class="tv-main-chart"></div>
                         <canvas id="tv-draw-overlay" class="tv-draw-overlay"></canvas>
                         <div id="tv-ohlc-legend" class="tv-ohlc-legend" style="display:none;"></div>
                     </div>
 
-                    <div class="tv-subpane-wrap">
+                    <!-- Çoklu grafik / 2x2 ızgara düzeni (17 Temmuz 2026, yedinci oturum):
+                         ana (tekli, çizim araçlı) grafiğin YANINDA değil YERİNE geçen,
+                         basitleştirilmiş 4 hücrelik bir genel bakış görünümü — her hücre
+                         kendi sembolünü/mum verisini bağımsız gösterir. Tekli grafiğin
+                         çizim/gösterge/çözünürlük altyapısını 4 kopyaya çıkarmak yerine
+                         (çok daha riskli bir mimari değişiklik) sade, salt-okunur mini
+                         grafikler kullanılıyor — bir hücreye tıklamak o sembolü ana
+                         (tekli) grafiğe "yükseltir". -->
+                    <div class="tv-grid-view" id="tv-grid-view" style="display:none;">
+                        <div class="tv-grid-cell" data-cell="0">
+                            <div class="tv-grid-cell-header">
+                                <select class="tv-grid-symbol-select" data-cell="0"></select>
+                                <button type="button" class="tv-grid-promote-btn" data-cell="0" title="Bu sembolü ana grafiğe yükselt">⤢</button>
+                            </div>
+                            <div class="tv-grid-cell-chart" id="tv-grid-chart-0"></div>
+                        </div>
+                        <div class="tv-grid-cell" data-cell="1">
+                            <div class="tv-grid-cell-header">
+                                <select class="tv-grid-symbol-select" data-cell="1"></select>
+                                <button type="button" class="tv-grid-promote-btn" data-cell="1" title="Bu sembolü ana grafiğe yükselt">⤢</button>
+                            </div>
+                            <div class="tv-grid-cell-chart" id="tv-grid-chart-1"></div>
+                        </div>
+                        <div class="tv-grid-cell" data-cell="2">
+                            <div class="tv-grid-cell-header">
+                                <select class="tv-grid-symbol-select" data-cell="2"></select>
+                                <button type="button" class="tv-grid-promote-btn" data-cell="2" title="Bu sembolü ana grafiğe yükselt">⤢</button>
+                            </div>
+                            <div class="tv-grid-cell-chart" id="tv-grid-chart-2"></div>
+                        </div>
+                        <div class="tv-grid-cell" data-cell="3">
+                            <div class="tv-grid-cell-header">
+                                <select class="tv-grid-symbol-select" data-cell="3"></select>
+                                <button type="button" class="tv-grid-promote-btn" data-cell="3" title="Bu sembolü ana grafiğe yükselt">⤢</button>
+                            </div>
+                            <div class="tv-grid-cell-chart" id="tv-grid-chart-3"></div>
+                        </div>
+                    </div>
+
+                    <div class="tv-subpane-wrap" id="tv-subpane-wrap">
                         <div class="tv-subpane-header">
                             <span id="tv-oscillator-title" class="tv-osc-title">RSI (14)</span>
                         </div>
@@ -187,10 +243,13 @@
             </main>
 
             <!-- RIGHT SIDEBAR: QUICK TRADE PANEL -->
-            <aside class="competition-panel trading-panel" aria-label="Quick Trade">
+            <aside class="competition-panel trading-panel" aria-label="Quick Trade" id="trading-panel">
                 <div class="panel-header">
                     <h2>Hızlı Alım Satım</h2>
                     <span class="panel-badge">DEMO</span>
+                    <button type="button" class="mobile-drawer-close" id="btn-close-tradepanel-drawer" aria-label="Kapat" title="Kapat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </div>
 
                 <!-- Active symbol + live price -->
@@ -221,6 +280,7 @@
                     <div class="order-type-tabs">
                         <button type="button" id="qt-order-market" class="order-type-btn active">Piyasa</button>
                         <button type="button" id="qt-order-limit" class="order-type-btn">Limit</button>
+                        <button type="button" id="qt-order-oco" class="order-type-btn" title="OCO: iki tetikleyiciden hangisi önce gerçekleşirse o emir çalışır, diğeri otomatik iptal olur">OCO</button>
                     </div>
 
                     <div class="form-group">
@@ -234,15 +294,45 @@
                         </div>
                     </div>
 
+                    <!-- Kaldıraç / Marj sistemi (17 Temmuz 2026, yedinci oturum): pozisyon
+                         açılırken seçilen kaldıraç, gereken teminatı (marj) düşürüyor —
+                         gerçek P&L büyüklüğü değişmiyor, sadece ne kadar bakiye kilitlendiği
+                         değişiyor. Demo/simülasyon amaçlıdır, gerçek bir marjin hesabı değildir. -->
+                    <div class="form-group">
+                        <label>Kaldıraç <span class="leverage-warning-hint" id="leverage-warning-hint" style="display:none;">— yüksek kaldıraç likidasyon riskini artırır</span></label>
+                        <div class="leverage-selector" role="group" aria-label="Kaldıraç seçimi">
+                            <button type="button" class="leverage-btn active" data-leverage="1">1x</button>
+                            <button type="button" class="leverage-btn" data-leverage="2">2x</button>
+                            <button type="button" class="leverage-btn" data-leverage="5">5x</button>
+                            <button type="button" class="leverage-btn" data-leverage="10">10x</button>
+                        </div>
+                    </div>
+
                     <div class="form-group" id="qt-limit-row" style="display:none;">
                         <label for="qt-limit-price">Limit Fiyat (₺)</label>
                         <input type="number" id="qt-limit-price" class="form-input" min="0" step="0.01" placeholder="0.00">
                     </div>
 
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <!-- OCO (One-Cancels-Other) bekleyen emir: fiyat iki tetikleyiciden
+                         hangisine önce ulaşırsa o yönde piyasa emri gerçekleşir, diğer
+                         tetikleyici otomatik iptal olur (17 Temmuz 2026, yedinci oturum). -->
+                    <div class="form-group" id="qt-oco-row" style="display:none;">
+                        <label>OCO Tetikleyicileri</label>
+                        <div class="qt-sltp-field" style="margin-bottom:8px;">
+                            <label for="qt-oco-upper">Üst Tetik — Kırılım AL (₺)</label>
+                            <input type="number" id="qt-oco-upper" class="form-input" min="0" step="0.01" placeholder="0.00">
+                        </div>
+                        <div class="qt-sltp-field">
+                            <label for="qt-oco-lower">Alt Tetik — Kırılım SAT (₺)</label>
+                            <input type="number" id="qt-oco-lower" class="form-input" min="0" step="0.01" placeholder="0.00">
+                        </div>
+                        <p class="oco-hint">Fiyat üst tetiği yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT emri gerçekleşir — hangisi önce olursa diğeri otomatik iptal edilir.</p>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 12px;" id="qt-sltp-group">
                         <label class="alert-notif-toggle-row" style="margin-top:0; text-transform:none; font-weight:500;">
                             <input type="checkbox" id="qt-sltp-toggle">
-                            <span>Stop-Loss / Take-Profit ekle</span>
+                            <span>Stop-Loss / Take-Profit ekle (OCO)</span>
                         </label>
                         <div class="qt-sltp-row" id="qt-sltp-row" style="display:none;">
                             <div class="qt-sltp-field">
@@ -253,11 +343,23 @@
                                 <label for="qt-tp-price">Take-Profit (₺)</label>
                                 <input type="number" id="qt-tp-price" class="form-input" min="0" step="0.01" placeholder="0.00">
                             </div>
+                            <label class="alert-notif-toggle-row" style="margin-top:8px; text-transform:none; font-weight:500;">
+                                <input type="checkbox" id="qt-trailing-toggle">
+                                <span>Sabit Stop-Loss yerine Trailing Stop kullan</span>
+                            </label>
+                            <div class="qt-sltp-field" id="qt-trailing-row" style="display:none;">
+                                <label for="qt-trailing-pct">Trailing Stop Mesafesi (%)</label>
+                                <input type="number" id="qt-trailing-pct" class="form-input" min="0.1" step="0.1" placeholder="örn. 2.5">
+                            </div>
                         </div>
                     </div>
 
                     <div class="qt-estimate-row">
-                        <span>Tahmini Tutar</span>
+                        <span>İşlem Büyüklüğü (Notional)</span>
+                        <span id="qt-est-notional">--</span>
+                    </div>
+                    <div class="qt-estimate-row">
+                        <span>Gereken Teminat (Marj)</span>
                         <span id="qt-est-cost">--</span>
                     </div>
 
@@ -341,6 +443,14 @@
                         <span class="acct-label">Açık K/Z</span>
                         <span class="acct-value" id="qt-openpnl">--</span>
                     </div>
+                    <div class="acct-item">
+                        <span class="acct-label">Kullanılan Marj</span>
+                        <span class="acct-value" id="qt-used-margin">--</span>
+                    </div>
+                    <div class="acct-item">
+                        <span class="acct-label">Marj Seviyesi</span>
+                        <span class="acct-value" id="qt-margin-level">--</span>
+                    </div>
                 </div>
 
                 <!-- Open positions -->
@@ -359,6 +469,25 @@
                                 </tr>
                             </thead>
                             <tbody id="qt-positions-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum) -->
+                <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
+                    <label>Bekleyen OCO Emirleri</label>
+                    <div class="table-container qt-mini-table">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Sembol</th>
+                                    <th>Üst Tetik</th>
+                                    <th>Alt Tetik</th>
+                                    <th>Adet</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="qt-pending-oco-body"></tbody>
                         </table>
                     </div>
                 </div>
@@ -571,6 +700,10 @@
             <div class="indicator-modal-header">
                 <h3>BIST100 Isı Haritası</h3>
                 <div class="heatmap-header-right">
+                    <div class="heatmap-groupby-toggle" role="group" aria-label="Isı haritası gruplama">
+                        <button type="button" class="heatmap-groupby-btn active" data-groupby="sector">Sektöre Göre</button>
+                        <button type="button" class="heatmap-groupby-btn" data-groupby="flat">Değişime Göre</button>
+                    </div>
                     <span class="heatmap-legend">
                         <span class="heatmap-legend-swatch heatmap-legend-neg"></span>Düşüş
                         <span class="heatmap-legend-swatch heatmap-legend-pos"></span>Yükseliş
@@ -581,7 +714,7 @@
                 </div>
             </div>
             <div class="indicator-modal-body heatmap-body">
-                <div class="heatmap-grid" id="heatmap-grid"></div>
+                <div class="heatmap-content" id="heatmap-content"></div>
             </div>
         </div>
     </div>
@@ -647,6 +780,8 @@
     <script src="tradingChart.js"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
     <script src="tradingEngine.js"></script>
+    <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
+    <script src="multiChartGrid.js"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
     <script src="tourGuide.js"></script>
     <!-- Application Controller -->

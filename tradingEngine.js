@@ -36,8 +36,15 @@ const TradingEngine = (() => {
         activeSymbol: null,
         side: 'BUY',          // BUY | SELL
         orderType: 'MARKET',  // MARKET | LIMIT
-        watchlistFilter: ''
+        watchlistFilter: '',
+        heatmapGroupBy: 'sector', // 'sector' | 'flat' — Isı Haritası gruplama modu (17 Temmuz 2026, yedinci oturum)
+        leverage: 1 // Kaldıraç — trading ticket'ta seçilen değer, yeni pozisyon açılırken kullanılır
     };
+
+    // Bir pozisyon likide edilmeden önce izin verilen maksimum marj kaybı
+    // oranı — gerçek borsalarda "maintenance margin" karşılığı. %80 kayıp =
+    // marj çağrısı simülasyonu (bkz. checkMarginCalls()).
+    const LIQUIDATION_MARGIN_LOSS_RATIO = 0.8;
 
     /* ────────── DOM helpers ────────── */
     function byId(id) { return document.getElementById(id); }
@@ -73,10 +80,16 @@ const TradingEngine = (() => {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed.balance === 'number') return parsed;
+                if (parsed && typeof parsed.balance === 'number') {
+                    // Eski (17 Temmuz 2026 yedinci oturumdan önce) kaydedilmiş
+                    // portföylerde pendingOrders alanı yok — geriye dönük
+                    // uyumluluk için varsayılan boş dizi ile tamamla.
+                    if (!Array.isArray(parsed.pendingOrders)) parsed.pendingOrders = [];
+                    return parsed;
+                }
             }
         } catch (e) { /* ignore corrupt storage */ }
-        return { balance: DEFAULT_BALANCE, positions: {}, history: [] };
+        return { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [] };
     }
 
     function savePortfolio() {
@@ -84,11 +97,12 @@ const TradingEngine = (() => {
     }
 
     function resetPortfolio() {
-        portfolio = { balance: DEFAULT_BALANCE, positions: {}, history: [] };
+        portfolio = { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [] };
         savePortfolio();
         renderPositions();
         renderOrders();
         renderAccountSummary();
+        renderPendingOcoOrders();
         equityHistory.length = 0;
         sampleEquity();
         renderPerformanceTab();
@@ -145,6 +159,8 @@ const TradingEngine = (() => {
         }
 
         checkStopLossTakeProfit();
+        checkMarginCalls();
+        checkPendingOcoOrders();
         checkAlerts();
 
         sampleEquity();
@@ -640,7 +656,9 @@ const TradingEngine = (() => {
             const p = priceProfiles[symbol];
             if (!p) return null;
             const chgPct = ((p.price - p.dayOpen) / p.dayOpen) * 100;
-            return { symbol, price: p.price, chgPct };
+            const profile = DC.STOCK_PROFILES && DC.STOCK_PROFILES[symbol];
+            const sector = (profile && profile.sector) || 'Diğer';
+            return { symbol, price: p.price, chgPct, sector };
         }).filter(Boolean);
     }
 
@@ -655,23 +673,70 @@ const TradingEngine = (() => {
         return 'rgb(' + rgb.join(',') + ')';
     }
 
-    function renderHeatmap() {
-        const grid = byId('heatmap-grid');
-        if (!grid) return;
-        const data = computeHeatmapData().sort((a, b) => b.chgPct - a.chgPct);
-        grid.innerHTML = data.map(d => {
-            const sign = d.chgPct >= 0 ? '+' : '';
-            return '<div class="heatmap-tile" style="background-color:' + heatmapColor(d.chgPct) + '" data-symbol="' + d.symbol + '" title="' + d.symbol + ' ' + sign + d.chgPct.toFixed(2) + '% · ₺' + fmtPrice(d.price) + '">' +
-                '<span class="heatmap-tile-symbol">' + d.symbol + '</span>' +
-                '<span class="heatmap-tile-chg">' + sign + d.chgPct.toFixed(2) + '%</span>' +
-                '</div>';
-        }).join('');
+    function heatmapTileHtml(d) {
+        const sign = d.chgPct >= 0 ? '+' : '';
+        return '<div class="heatmap-tile" style="background-color:' + heatmapColor(d.chgPct) + '" data-symbol="' + d.symbol + '" title="' + d.symbol + ' · ' + d.sector + ' · ' + sign + d.chgPct.toFixed(2) + '% · ₺' + fmtPrice(d.price) + '">' +
+            '<span class="heatmap-tile-symbol">' + d.symbol + '</span>' +
+            '<span class="heatmap-tile-chg">' + sign + d.chgPct.toFixed(2) + '%</span>' +
+            '</div>';
+    }
 
-        grid.querySelectorAll('.heatmap-tile').forEach(tile => {
+    // Sektöre göre gruplu ısı haritası (17 Temmuz 2026, yedinci oturum):
+    // her sektör kendi başlığı (isim + hisse sayısı + sektör ortalama %
+    // değişim) ile ayrı bir bölüm olarak render ediliyor, bölüm içindeki
+    // hisseler kendi aralarında değişime göre sıralı. Kullanıcı "Değişime
+    // Göre" moduna geçerse eski düz/tek-ızgara görünüme dönülüyor.
+    function renderHeatmap() {
+        const container = byId('heatmap-content');
+        if (!container) return;
+        const data = computeHeatmapData();
+
+        if (state.heatmapGroupBy === 'flat') {
+            const sorted = data.slice().sort((a, b) => b.chgPct - a.chgPct);
+            container.innerHTML = '<div class="heatmap-grid">' + sorted.map(heatmapTileHtml).join('') + '</div>';
+        } else {
+            const bySector = new Map();
+            data.forEach(d => {
+                if (!bySector.has(d.sector)) bySector.set(d.sector, []);
+                bySector.get(d.sector).push(d);
+            });
+            const sectors = Array.from(bySector.entries()).map(([sector, tiles]) => {
+                tiles.sort((a, b) => b.chgPct - a.chgPct);
+                const avgChg = tiles.reduce((sum, t) => sum + t.chgPct, 0) / tiles.length;
+                return { sector, tiles, avgChg };
+            }).sort((a, b) => b.avgChg - a.avgChg); // en güçlü sektör en üstte
+
+            container.innerHTML = sectors.map(s => {
+                const sign = s.avgChg >= 0 ? '+' : '';
+                const avgClass = s.avgChg >= 0 ? 'profit-text' : 'loss-text';
+                return '<div class="heatmap-sector-group">' +
+                    '<div class="heatmap-sector-header">' +
+                    '<span class="heatmap-sector-name">' + s.sector + '</span>' +
+                    '<span class="heatmap-sector-count">' + s.tiles.length + ' hisse</span>' +
+                    '<span class="heatmap-sector-avg ' + avgClass + '">Ort. ' + sign + s.avgChg.toFixed(2) + '%</span>' +
+                    '</div>' +
+                    '<div class="heatmap-grid">' + s.tiles.map(heatmapTileHtml).join('') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        container.querySelectorAll('.heatmap-tile').forEach(tile => {
             tile.addEventListener('click', () => {
                 const symbol = tile.dataset.symbol;
                 byId('heatmap-modal-backdrop')?.classList.remove('open');
                 selectSymbol(symbol);
+            });
+        });
+    }
+
+    function setupHeatmapGroupByToggle() {
+        const buttons = document.querySelectorAll('.heatmap-groupby-btn');
+        if (!buttons.length) return;
+        buttons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.heatmapGroupBy = btn.dataset.groupby;
+                buttons.forEach(b => b.classList.toggle('active', b === btn));
+                renderHeatmap();
             });
         });
     }
@@ -681,6 +746,7 @@ const TradingEngine = (() => {
         const openBtn = byId('btn-open-heatmap');
         const closeBtn = byId('btn-close-heatmap');
         if (!backdrop || !openBtn) return;
+        setupHeatmapGroupByToggle();
 
         const open = () => {
             closeOtherModals('heatmap-modal-backdrop');
@@ -843,7 +909,14 @@ const TradingEngine = (() => {
         body.innerHTML = html;
 
         body.querySelectorAll('.watchlist-row').forEach(row => {
-            row.addEventListener('click', () => selectSymbol(row.dataset.symbol));
+            row.addEventListener('click', () => {
+                selectSymbol(row.dataset.symbol);
+                // Dar ekranda (980px altı) sidebar bir kayar panel — sembol
+                // seçilince otomatik kapanıp grafiği göstersin.
+                if (typeof window.__optipulseCloseMobileDrawers === 'function') {
+                    window.__optipulseCloseMobileDrawers();
+                }
+            });
         });
     }
 
@@ -1010,28 +1083,45 @@ const TradingEngine = (() => {
         const sellTab = byId('qt-tab-sell');
         const marketTab = byId('qt-order-market');
         const limitTab = byId('qt-order-limit');
+        const ocoTab = byId('qt-order-oco');
         const qtyInput = byId('qt-qty');
         const limitInput = byId('qt-limit-price');
+        const ocoUpperInput = byId('qt-oco-upper');
+        const ocoLowerInput = byId('qt-oco-lower');
         const submitBtn = byId('qt-submit');
         const resetBtn = byId('qt-reset-portfolio');
         const sltpToggle = byId('qt-sltp-toggle');
         const sltpRow = byId('qt-sltp-row');
+        const trailingToggle = byId('qt-trailing-toggle');
+        const trailingRow = byId('qt-trailing-row');
 
         if (buyTab) buyTab.addEventListener('click', () => setSide('BUY'));
         if (sellTab) sellTab.addEventListener('click', () => setSide('SELL'));
         if (marketTab) marketTab.addEventListener('click', () => setOrderType('MARKET'));
         if (limitTab) limitTab.addEventListener('click', () => setOrderType('LIMIT'));
+        if (ocoTab) ocoTab.addEventListener('click', () => setOrderType('OCO'));
         if (qtyInput) qtyInput.addEventListener('input', updateEstimate);
         if (limitInput) limitInput.addEventListener('input', updateEstimate);
+        if (ocoUpperInput) ocoUpperInput.addEventListener('input', updateEstimate);
+        if (ocoLowerInput) ocoLowerInput.addEventListener('input', updateEstimate);
         if (sltpToggle && sltpRow) {
             sltpToggle.addEventListener('change', () => {
                 sltpRow.style.display = sltpToggle.checked ? 'flex' : 'none';
+            });
+        }
+        if (trailingToggle && trailingRow) {
+            trailingToggle.addEventListener('change', () => {
+                trailingRow.style.display = trailingToggle.checked ? 'flex' : 'none';
+                const slField = byId('qt-sl-price');
+                if (slField) slField.disabled = trailingToggle.checked;
             });
         }
 
         document.querySelectorAll('.qty-pct-btn').forEach(btn => {
             btn.addEventListener('click', () => applyQtyPct(parseInt(btn.dataset.pct, 10)));
         });
+
+        setupLeverageSelector();
 
         if (submitBtn) submitBtn.addEventListener('click', submitOrder);
         if (resetBtn) resetBtn.addEventListener('click', () => {
@@ -1062,11 +1152,41 @@ const TradingEngine = (() => {
         state.orderType = type;
         const marketTab = byId('qt-order-market');
         const limitTab = byId('qt-order-limit');
+        const ocoTab = byId('qt-order-oco');
         const limitRow = byId('qt-limit-row');
+        const ocoRow = byId('qt-oco-row');
+        const sltpGroup = byId('qt-sltp-group');
+        const sideTabs = document.querySelector('.trade-tabs');
+        const submitBtn = byId('qt-submit');
+
         if (marketTab) marketTab.classList.toggle('active', type === 'MARKET');
         if (limitTab) limitTab.classList.toggle('active', type === 'LIMIT');
+        if (ocoTab) ocoTab.classList.toggle('active', type === 'OCO');
         if (limitRow) limitRow.style.display = type === 'LIMIT' ? 'flex' : 'none';
+        if (ocoRow) ocoRow.style.display = type === 'OCO' ? 'flex' : 'none';
+
+        // OCO bekleyen bir emir — hangi yönde gerçekleşeceği önceden
+        // bilinmediğinden (tetikleyen fiyata bağlı), AL/SAT yön seçici ve
+        // pozisyon SL/TP'si bu modda anlamsız; gizleniyor.
+        if (sideTabs) sideTabs.style.display = type === 'OCO' ? 'none' : 'flex';
+        if (sltpGroup) sltpGroup.style.display = type === 'OCO' ? 'none' : 'block';
+        if (submitBtn) submitBtn.textContent = type === 'OCO' ? 'OCO EMRİ OLUŞTUR' : (state.side === 'BUY' ? 'AL (BUY)' : 'SAT (SELL)');
+
         updateEstimate();
+    }
+
+    function setupLeverageSelector() {
+        const buttons = document.querySelectorAll('.leverage-btn');
+        const hint = byId('leverage-warning-hint');
+        if (!buttons.length) return;
+        buttons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.leverage = Math.max(1, parseInt(btn.dataset.leverage, 10) || 1);
+                buttons.forEach(b => b.classList.toggle('active', b === btn));
+                if (hint) hint.style.display = state.leverage >= 5 ? 'inline' : 'none';
+                updateEstimate();
+            });
+        });
     }
 
     function applyQtyPct(pct) {
@@ -1074,17 +1194,21 @@ const TradingEngine = (() => {
         const price = effectivePrice();
         if (!price) return;
         const commissionPct = getCommissionPct();
+        const leverage = Math.max(1, Number(state.leverage) || 1);
         let qty;
         if (state.side === 'BUY') {
-            const usable = portfolio.balance * (pct / 100);
-            qty = Math.floor(usable / (price * (1 + commissionPct / 100)));
+            // Bakiyenin %pct'i kadarını TEMİNAT olarak kullan — kaldıraç
+            // sayesinde aynı teminatla `leverage` katı kadar nominal
+            // pozisyon açılabiliyor.
+            const usableMargin = portfolio.balance * (pct / 100);
+            qty = Math.floor((usableMargin * leverage) / (price * (1 + (commissionPct / 100) * leverage)));
         } else {
             const pos = portfolio.positions[state.activeSymbol];
             if (pos && pos.side === 'LONG') {
                 qty = Math.floor(pos.qty * (pct / 100));
             } else {
-                const usable = portfolio.balance * (pct / 100);
-                qty = Math.floor(usable / price);
+                const usableMargin = portfolio.balance * (pct / 100);
+                qty = Math.floor((usableMargin * leverage) / price);
             }
         }
         const qtyInput = byId('qt-qty');
@@ -1110,15 +1234,26 @@ const TradingEngine = (() => {
 
     function updateEstimate() {
         const estEl = byId('qt-est-cost');
+        const notionalEl = byId('qt-est-notional');
         if (!estEl) return;
         const price = effectivePrice();
         const qtyInput = byId('qt-qty');
         const qty = qtyInput ? parseInt(qtyInput.value, 10) || 0 : 0;
-        if (!price || !qty) { estEl.textContent = '--'; return; }
+        if (!price || !qty) {
+            estEl.textContent = '--';
+            if (notionalEl) notionalEl.textContent = '--';
+            return;
+        }
         const commissionPct = getCommissionPct();
-        const commission = price * qty * (commissionPct / 100);
-        const total = price * qty + commission;
-        estEl.textContent = `${fmtTRY(total)} (kom. ${fmtTRY(commission)})`;
+        const leverage = Math.max(1, Number(state.leverage) || 1);
+        const notional = price * qty;
+        const commission = notional * (commissionPct / 100);
+        const margin = notional / leverage;
+        const requiredTotal = margin + commission;
+        if (notionalEl) notionalEl.textContent = fmtTRY(notional);
+        estEl.textContent = leverage > 1
+            ? `${fmtTRY(requiredTotal)} (${leverage}x, kom. ${fmtTRY(commission)})`
+            : `${fmtTRY(requiredTotal)} (kom. ${fmtTRY(commission)})`;
     }
 
     function updateActiveSymbolTicket() {
@@ -1158,6 +1293,11 @@ const TradingEngine = (() => {
         if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); return; }
         if (!price || price <= 0) { showToast('Fiyat bilgisi alınamadı.'); return; }
 
+        if (state.orderType === 'OCO') {
+            submitOcoOrder(qty, price, commissionPct);
+            return;
+        }
+
         // Optional Stop-Loss / Take-Profit attached to the position this order opens/adds to.
         const sltpToggle = byId('qt-sltp-toggle');
         let slPrice = null, tpPrice = null;
@@ -1186,19 +1326,40 @@ const TradingEngine = (() => {
             showToast(`Limit emir ${fmtPrice(price)} seviyesinden gerçekleşti (demo).`);
         }
 
-        const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct);
+        // Var olan bir pozisyon farklı bir kaldıraçla açıksa, ekleme mevcut
+        // pozisyonun kaldıracıyla yapılacak (placeOrder içinde) — kullanıcıyı
+        // bilgilendir ki ticket'taki seçimin neden yansımadığını anlasın.
+        const existingBeforeOrder = portfolio.positions[state.activeSymbol];
+        const intendedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
+        if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage) {
+            showToast(`Not: ${state.activeSymbol} zaten ${existingBeforeOrder.leverage}x kaldıraçla açık — ekleme de ${existingBeforeOrder.leverage}x ile yapılacak.`);
+        }
+
+        const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct, state.leverage);
         if (!result.ok) {
             showToast(result.msg);
             return;
         }
 
-        // Attach SL/TP only if this order actually opened/added to a position in its
-        // own direction (not just reducing/closing an opposite one).
-        if ((slPrice !== null || tpPrice !== null)) {
+        // Attach SL/TP (or a Trailing Stop instead of a fixed SL) only if this
+        // order actually opened/added to a position in its own direction
+        // (not just reducing/closing an opposite one).
+        const trailingToggle = byId('qt-trailing-toggle');
+        const trailingPctInput = byId('qt-trailing-pct');
+        const useTrailing = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
+        if (slPrice !== null || tpPrice !== null || useTrailing) {
             const pos = portfolio.positions[state.activeSymbol];
             const expectedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
             if (pos && pos.side === expectedSide) {
-                if (slPrice !== null) pos.sl = slPrice;
+                if (useTrailing) {
+                    pos.trailingPct = Number(trailingPctInput.value);
+                    pos.trailingExtreme = pos.avgPrice; // en iyi fiyat henüz giriş fiyatı
+                    delete pos.sl; // trailing, sabit SL'nin yerini alır
+                } else if (slPrice !== null) {
+                    pos.sl = slPrice;
+                    delete pos.trailingPct;
+                    delete pos.trailingExtreme;
+                }
                 if (tpPrice !== null) pos.tp = tpPrice;
                 savePortfolio();
             }
@@ -1213,12 +1374,133 @@ const TradingEngine = (() => {
         const sltpRow = byId('qt-sltp-row');
         if (sltpRow) sltpRow.style.display = 'none';
         const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
-        if (slInput) slInput.value = '';
+        if (slInput) { slInput.value = ''; slInput.disabled = false; }
         if (tpInput) tpInput.value = '';
+        if (trailingToggle) trailingToggle.checked = false;
+        if (trailingPctInput) trailingPctInput.value = '';
+        const trailingRow = byId('qt-trailing-row');
+        if (trailingRow) trailingRow.style.display = 'none';
         updateEstimate();
     }
 
-    function placeOrder(symbol, side, qty, price, commissionPct) {
+    // OCO (One-Cancels-Other) bekleyen emir oluşturur: fiyat üst tetiği
+    // yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT gerçekleşir —
+    // hangisi önce olursa checkPendingOcoOrders() diğerini otomatik iptal
+    // eder (bkz. altta). Mevcut fiyata göre tetikleyicilerin doğru tarafta
+    // olduğunu doğrular, aksi halde emir anında (yanlışlıkla) tetiklenirdi.
+    function submitOcoOrder(qty, currentPrice, commissionPct) {
+        const upperInput = byId('qt-oco-upper');
+        const lowerInput = byId('qt-oco-lower');
+        const upper = upperInput && upperInput.value ? Number(upperInput.value) : null;
+        const lower = lowerInput && lowerInput.value ? Number(lowerInput.value) : null;
+
+        if (!upper && !lower) { showToast('En az bir tetikleyici (üst veya alt) girin.'); return; }
+        if (upper !== null && upper <= currentPrice) { showToast('Üst tetik, güncel fiyatın üzerinde olmalı.'); return; }
+        if (lower !== null && lower >= currentPrice) { showToast('Alt tetik, güncel fiyatın altında olmalı.'); return; }
+
+        if (!portfolio.pendingOrders) portfolio.pendingOrders = [];
+        portfolio.pendingOrders.push({
+            id: genId(),
+            symbol: state.activeSymbol,
+            qty,
+            upper,
+            lower,
+            leverage: state.leverage,
+            commissionPct,
+            createdAt: Date.now()
+        });
+        savePortfolio();
+        renderPendingOcoOrders();
+        showToast(`OCO emri oluşturuldu: ${state.activeSymbol} · ${upper ? 'üst ₺' + fmtPrice(upper) : ''}${upper && lower ? ' / ' : ''}${lower ? 'alt ₺' + fmtPrice(lower) : ''}`);
+
+        const qtyInput = byId('qt-qty');
+        if (qtyInput) qtyInput.value = '';
+        if (upperInput) upperInput.value = '';
+        if (lowerInput) lowerInput.value = '';
+        updateEstimate();
+    }
+
+    // Her tick'te bekleyen OCO emirlerini güncel fiyata karşı kontrol eder;
+    // biri tetiklenince o yönde piyasa emri gerçekleştirilip TÜM emir (iki
+    // tetikleyicisiyle birlikte) listeden kaldırılır — "diğerinin otomatik
+    // iptali" bu şekilde sağlanıyor (aynı nesnenin tek kullanımlık olması).
+    function checkPendingOcoOrders() {
+        if (!portfolio.pendingOrders || !portfolio.pendingOrders.length) return;
+        const stillPending = [];
+        let changed = false;
+        portfolio.pendingOrders.forEach(order => {
+            const price = getPrice(order.symbol);
+            if (!price) { stillPending.push(order); return; }
+            let triggeredSide = null;
+            if (order.upper !== null && price >= order.upper) triggeredSide = 'BUY';
+            else if (order.lower !== null && price <= order.lower) triggeredSide = 'SELL';
+
+            if (triggeredSide) {
+                changed = true;
+                const result = placeOrder(order.symbol, triggeredSide, order.qty, price, order.commissionPct, order.leverage);
+                if (result.ok) {
+                    showToast(`OCO tetiklendi: ${order.symbol} ${triggeredSide === 'BUY' ? 'AL' : 'AÇIĞA SAT'} @ ₺${fmtPrice(price)} — diğer tetikleyici iptal edildi.`);
+                    renderPositions();
+                    renderOrders();
+                } else {
+                    showToast(`OCO tetiklendi ama emir başarısız: ${result.msg}`);
+                }
+                // Triggered (successfully or not) — either way this pending
+                // order is consumed, matching real OCO semantics of a single
+                // fill attempt rather than retrying every tick.
+            } else {
+                stillPending.push(order);
+            }
+        });
+        if (changed) {
+            portfolio.pendingOrders = stillPending;
+            savePortfolio();
+            renderPendingOcoOrders();
+            renderAccountSummary();
+        }
+    }
+
+    function cancelOcoOrder(orderId) {
+        if (!portfolio.pendingOrders) return;
+        portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
+        savePortfolio();
+        renderPendingOcoOrders();
+        showToast('OCO emri iptal edildi.');
+    }
+    window.__optipulseCancelOco = cancelOcoOrder; // used by inline onclick in rendered rows
+
+    function renderPendingOcoOrders() {
+        const body = byId('qt-pending-oco-body');
+        if (!body) return;
+        const orders = portfolio.pendingOrders || [];
+        if (!orders.length) {
+            body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:16px; font-size:11px;">Bekleyen OCO emri yok</td></tr>`;
+            return;
+        }
+        body.innerHTML = orders.map(o => `
+            <tr>
+                <td class="font-bold">${o.symbol}</td>
+                <td class="font-mono">${o.upper !== null ? '₺' + fmtPrice(o.upper) : '--'}</td>
+                <td class="font-mono">${o.lower !== null ? '₺' + fmtPrice(o.lower) : '--'}</td>
+                <td class="font-mono">${o.qty}</td>
+                <td><button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button></td>
+            </tr>
+        `).join('');
+    }
+
+    // Kaldıraç/Marj modeli (17 Temmuz 2026, yedinci oturum): pozisyon açılırken
+    // bakiyeden tam nominal tutar (price*qty) yerine sadece MARJ
+    // (price*qty/leverage) düşülüyor, kapatılırken de o marj + gerçekleşen K/Z
+    // geri ekleniyor. Bu, hem LONG hem SHORT için simetrik/birleşik bir
+    // muhasebe modeli — leverage=1'de matematiksel olarak eskisiyle BİREBİR
+    // aynı sonucu (aynı final bakiye) verir (LONG için triviyal, SHORT için:
+    // eski model "ödünç hisse satıp bedelini hemen alma" kurgusuydu, yeni
+    // model "teminat kilitleme" kurgusu — ikisi de round-trip'te aynı net
+    // K/Z'ye ulaşıyor, ama yeni model kaldıraçla temiz şekilde genelleşiyor).
+    // ÖNEMLİ: kaldıraç sadece GEREKEN TEMİNATI azaltıyor; gerçekleşen K/Z
+    // büyüklüğü (fiyat farkı × adet) kaldıraçtan etkilenmiyor — gerçek marjin
+    // ticaretinde de böyledir.
+    function placeOrder(symbol, side, qty, price, commissionPct, leverage) {
         qty = Math.floor(Number(qty));
         price = Number(price);
         if (!qty || qty <= 0 || !price || price <= 0) return { ok: false, msg: 'Geçersiz miktar/fiyat' };
@@ -1231,15 +1513,16 @@ const TradingEngine = (() => {
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
             const closeCommission = commissionTotal * (closeQty / qty);
+            const posLeverage = pos.leverage || 1;
+            const releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
             let realizedPnl;
 
             if (pos.side === 'LONG') {
                 realizedPnl = (price - pos.avgPrice) * closeQty - closeCommission;
-                portfolio.balance += closeQty * price - closeCommission;
             } else {
                 realizedPnl = (pos.avgPrice - price) * closeQty - closeCommission;
-                portfolio.balance -= closeQty * price + closeCommission;
             }
+            portfolio.balance += releasedMargin + realizedPnl;
 
             pos.qty -= closeQty;
             remainingQty -= closeQty;
@@ -1256,38 +1539,37 @@ const TradingEngine = (() => {
             const newSide = side === 'BUY' ? 'LONG' : 'SHORT';
             const openCommission = commissionTotal * (remainingQty / qty);
 
-            if (newSide === 'LONG') {
-                const cost = price * remainingQty + openCommission;
-                if (portfolio.balance < cost) {
-                    savePortfolio();
-                    return { ok: false, msg: 'Yetersiz demo bakiye.' };
-                }
-                portfolio.balance -= cost;
-            } else {
-                // Açığa satış (short): bu demo motorunda kaldıraç/marj sistemi yok,
-                // bu yüzden açığa satılan tutarın tamamı kadar mevcut bakiye
-                // ("teminat") şart koşuluyor — aksi halde hiç sahip olunmayan bir
-                // miktar "satılarak" bakiyeye yoktan para eklenebilir.
-                const proceeds = price * remainingQty - openCommission;
-                if (portfolio.balance < price * remainingQty) {
-                    savePortfolio();
-                    return { ok: false, msg: 'Yetersiz demo bakiye (açığa satış için teminat gerekli).' };
-                }
-                portfolio.balance += proceeds;
-            }
+            // Var olan bir pozisyona ekleniyorsa, pozisyon zaten hangi
+            // kaldıraçla açıldıysa onunla devam ediyor — aynı pozisyon
+            // içinde farklı kaldıraç seviyelerini karıştırmak marj
+            // hesaplamasını belirsizleştirir. Ticket'taki seçim yalnızca
+            // YENİ bir pozisyon açılışında geçerli olur.
+            const existingPos = portfolio.positions[symbol];
+            const effectiveLeverage = (existingPos && existingPos.side === newSide && existingPos.leverage)
+                ? existingPos.leverage
+                : Math.max(1, Number(leverage) || 1);
 
-            if (!portfolio.positions[symbol]) {
-                portfolio.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price };
+            const margin = (price * remainingQty) / effectiveLeverage;
+            const requiredBalance = margin + openCommission;
+            if (portfolio.balance < requiredBalance) {
+                savePortfolio();
+                return { ok: false, msg: 'Yetersiz demo bakiye (gereken teminat: ' + fmtTRY(requiredBalance) + ').' };
+            }
+            portfolio.balance -= requiredBalance;
+
+            if (!existingPos) {
+                portfolio.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
             } else {
-                const p = portfolio.positions[symbol];
+                const p = existingPos;
                 const totalQty = p.qty + remainingQty;
                 p.avgPrice = (p.avgPrice * p.qty + price * remainingQty) / totalQty;
                 p.qty = totalQty;
+                p.leverage = effectiveLeverage;
             }
 
             portfolio.history.unshift({
                 id: genId(), ts: Date.now(), symbol, side, qty: remainingQty, price,
-                type: 'OPEN', commission: +openCommission.toFixed(2), pnl: null
+                type: 'OPEN', commission: +openCommission.toFixed(2), pnl: null, leverage: effectiveLeverage
             });
         }
 
@@ -1311,7 +1593,11 @@ const TradingEngine = (() => {
                 ? `🛑 ${symbol} Stop-Loss tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
                 : reason === 'TP'
                     ? `🎯 ${symbol} Take-Profit tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
-                    : `${symbol} pozisyonu kapatıldı.`;
+                    : reason === 'TRAILING'
+                        ? `📉 ${symbol} Trailing Stop tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
+                        : reason === 'LIQUIDATION'
+                            ? `⚠️ ${symbol} marj çağrısı — kaldıraçlı pozisyon zarar sınırını aştığı için ₺${fmtPrice(price)} seviyesinden otomatik likide edildi.`
+                            : `${symbol} pozisyonu kapatıldı.`;
             showToast(msg);
         }
     }
@@ -1324,15 +1610,60 @@ const TradingEngine = (() => {
     function checkStopLossTakeProfit() {
         Object.keys(portfolio.positions).forEach(symbol => {
             const pos = portfolio.positions[symbol];
-            if (!pos.sl && !pos.tp) return;
+            if (!pos.sl && !pos.tp && !pos.trailingPct) return;
             const price = getPrice(symbol);
             if (!price) return;
+
+            // Trailing Stop (17 Temmuz 2026, yedinci oturum): fiyat lehte
+            // hareket ettikçe pos.trailingExtreme yeni bir en iyi seviyeye
+            // "kilitleniyor" (geri çekilmede asla geri gitmiyor), stop
+            // seviyesi her zaman o en iyi seviyeden trailingPct kadar geride
+            // hesaplanıyor. Sabit SL'nin aksine, fiyat lehte ilerledikçe
+            // kilitlenen kâr da artıyor.
+            if (pos.trailingPct) {
+                if (pos.side === 'LONG') {
+                    if (price > pos.trailingExtreme) pos.trailingExtreme = price;
+                    const stopPrice = pos.trailingExtreme * (1 - pos.trailingPct / 100);
+                    if (price <= stopPrice) { closePosition(symbol, 'TRAILING'); return; }
+                } else {
+                    if (price < pos.trailingExtreme) pos.trailingExtreme = price;
+                    const stopPrice = pos.trailingExtreme * (1 + pos.trailingPct / 100);
+                    if (price >= stopPrice) { closePosition(symbol, 'TRAILING'); return; }
+                }
+            }
+
             if (pos.side === 'LONG') {
                 if (pos.sl && price <= pos.sl) { closePosition(symbol, 'SL'); return; }
                 if (pos.tp && price >= pos.tp) { closePosition(symbol, 'TP'); return; }
             } else {
                 if (pos.sl && price >= pos.sl) { closePosition(symbol, 'SL'); return; }
                 if (pos.tp && price <= pos.tp) { closePosition(symbol, 'TP'); return; }
+            }
+        });
+    }
+
+    // Marj çağrısı / likidasyon simülasyonu (17 Temmuz 2026, yedinci oturum):
+    // kaldıraçlı bir pozisyonun gerçekleşmemiş zararı, o pozisyona kilitli
+    // marjın LIQUIDATION_MARGIN_LOSS_RATIO'sunu (%80) aşarsa, gerçek bir
+    // borsadaki marj çağrısı/zorunlu kapama gibi pozisyon otomatik kapatılır
+    // — aksi halde kaldıraçlı bir pozisyon bakiyeyi negatife düşürebilirdi
+    // (demo bakiye asla eksiye düşmemeli). Sadece leverage > 1 olan
+    // pozisyonlar risk altında; leverage=1'de marj = tam nominal tutar
+    // olduğundan zarar hiçbir zaman marjın %100'ünü geçemez (bir hissenin
+    // fiyatı teorik olarak 0'a inebilir ama negatif olamaz).
+    function checkMarginCalls() {
+        Object.keys(portfolio.positions).forEach(symbol => {
+            const pos = portfolio.positions[symbol];
+            const leverage = pos.leverage || 1;
+            if (leverage <= 1) return;
+            const price = getPrice(symbol);
+            if (!price) return;
+            const margin = (pos.avgPrice * pos.qty) / leverage;
+            const unrealized = pos.side === 'LONG'
+                ? (price - pos.avgPrice) * pos.qty
+                : (pos.avgPrice - price) * pos.qty;
+            if (unrealized <= -margin * LIQUIDATION_MARGIN_LOSS_RATIO) {
+                closePosition(symbol, 'LIQUIDATION');
             }
         });
     }
@@ -1448,10 +1779,12 @@ const TradingEngine = (() => {
             if (pos.sl) sltpParts.push('SL ₺' + fmtPrice(pos.sl));
             if (pos.tp) sltpParts.push('TP ₺' + fmtPrice(pos.tp));
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
+            const leverage = pos.leverage || 1;
+            const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${leverage}x</span>` : '';
             html += `
                 <tr>
                     <td class="font-bold">${symbol}${sltpSub}</td>
-                    <td><span class="badge ${sideClass}">${pos.side}</span></td>
+                    <td><span class="badge ${sideClass}">${pos.side}</span>${leverageBadge}</td>
                     <td class="font-mono">${pos.qty}</td>
                     <td class="font-mono">₺${fmtPrice(pos.avgPrice)}</td>
                     <td class="font-mono ${pnlClass}">${unrealized >= 0 ? '+' : ''}${fmtTRY(unrealized)}</td>
@@ -1583,30 +1916,54 @@ const TradingEngine = (() => {
         if (btn) btn.addEventListener('click', toggleTheme);
     }
 
+    // Kaldıraç/marj modeliyle (bkz. placeOrder) uyumlu özkaynak formülü:
+    // `portfolio.balance` artık pozisyon açılırken kilitlenen marjı
+    // İÇERMİYOR (o tutar bakiyeden düşülüp pozisyona kilitleniyor), bu
+    // yüzden özkaynak = serbest bakiye + tüm açık pozisyonların kilitli
+    // marjı + tüm açık pozisyonların gerçekleşmemiş K/Z'si. Bu formül
+    // leverage=1'de eski "balance + longValue - shortValue" formülüyle
+    // matematiksel olarak birebir aynı sonucu verir (bkz. placeOrder'daki
+    // yorum) — sadece kaldıraç>1 için doğru şekilde genelleşiyor.
     function renderAccountSummary() {
-        let longValue = 0, shortValue = 0, openPnl = 0;
+        let usedMargin = 0, openPnl = 0;
         Object.keys(portfolio.positions).forEach(symbol => {
             const pos = portfolio.positions[symbol];
             const current = getPrice(symbol) || pos.avgPrice;
+            const leverage = pos.leverage || 1;
+            usedMargin += (pos.avgPrice * pos.qty) / leverage;
             if (pos.side === 'LONG') {
-                longValue += pos.qty * current;
                 openPnl += (current - pos.avgPrice) * pos.qty;
             } else {
-                shortValue += pos.qty * current;
                 openPnl += (pos.avgPrice - current) * pos.qty;
             }
         });
-        const equity = portfolio.balance + longValue - shortValue;
+        const equity = portfolio.balance + usedMargin + openPnl;
 
         // Balance now lives in the header pill (top right) rather than the trade ticket itself
         const headerBalEl = byId('header-balance-value');
         const eqEl = byId('qt-equity');
         const pnlEl = byId('qt-openpnl');
+        const usedMarginEl = byId('qt-used-margin');
+        const marginLevelEl = byId('qt-margin-level');
         if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
         if (eqEl) eqEl.textContent = fmtTRY(equity);
         if (pnlEl) {
             pnlEl.textContent = (openPnl >= 0 ? '+' : '') + fmtTRY(openPnl);
             pnlEl.className = 'acct-value ' + (openPnl >= 0 ? 'profit-text' : 'loss-text');
+        }
+        if (usedMarginEl) usedMarginEl.textContent = usedMargin > 0 ? fmtTRY(usedMargin) : '--';
+        if (marginLevelEl) {
+            // Marj seviyesi = özkaynak / kullanılan marj — %100'ün altına
+            // düşmesi risklidir, gerçek borsalarda burada marj çağrısı
+            // gelir (bkz. checkMarginCalls, %20 seviyesinde likidasyon).
+            if (usedMargin > 0) {
+                const marginLevelPct = (equity / usedMargin) * 100;
+                marginLevelEl.textContent = marginLevelPct.toFixed(0) + '%';
+                marginLevelEl.className = 'acct-value ' + (marginLevelPct < 150 ? 'loss-text' : marginLevelPct < 300 ? '' : 'profit-text');
+            } else {
+                marginLevelEl.textContent = '--';
+                marginLevelEl.className = 'acct-value';
+            }
         }
     }
 
@@ -1664,6 +2021,7 @@ const TradingEngine = (() => {
         renderPositions();
         renderOrders();
         renderAccountSummary();
+        renderPendingOcoOrders();
         updateAlertBadge();
         sampleEquity();
 

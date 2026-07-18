@@ -223,6 +223,58 @@ const TradingChart = (() => {
 
     /* ────────── Symbol loading ────────── */
 
+    // Fetches real OHLCV from the local backend, parses it, and returns
+    // null on any failure so the caller can fall back to simulated data.
+    //
+    // Root-cause note (17 Temmuz 2026, altıncı oturum): the backend's own
+    // yfinance call uses a 10s internal timeout (main.py `timeout=10`), but
+    // this fetch previously aborted after only 6s — meaning a perfectly
+    // healthy backend that just took 6-10s to answer (very common: yfinance
+    // needs an extra few seconds on its very first request after the backend
+    // starts, to fetch an auth "crumb" from Yahoo — and can be slow again
+    // under Yahoo-side rate limiting) got treated as "failed" and the app
+    // silently fell back to simulated prices, even though nothing was
+    // actually broken. Fixed by (a) raising the client timeout to 12s so it
+    // comfortably exceeds the backend's own 10s timeout, and (b) adding one
+    // automatic retry after a short pause before giving up — a single slow
+    // response no longer permanently reads as "backend down" for that
+    // symbol selection.
+    async function fetchOhlcvWithRetry(ticker) {
+        const attempt = async (timeoutMs) => {
+            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(timeoutMs), targetAddressSpace: 'loopback' });
+            if (!res.ok) return null;
+            const json = await res.json();
+            if (!json || !Array.isArray(json.data) || json.data.length <= 5) return null;
+            return json.data.map(r => ({
+                date: parseBackendDate(r.Date),
+                open: Number(r.Open || 0),
+                high: Number(r.High || 0),
+                low: Number(r.Low || 0),
+                close: Number(r.Close || 0),
+                volume: Number(r.Volume || 0)
+            })).filter(c => c.date !== null);
+        };
+
+        try {
+            const first = await attempt(12000);
+            if (first) return first;
+        } catch (err) {
+            console.warn('[TradingChart] Backend OHLCV fetch (1st attempt) failed:', err.message || err);
+        }
+
+        // One retry after a short pause — covers transient hiccups (Yahoo
+        // rate-limiting, a slow first crumb fetch) without hammering a
+        // genuinely offline backend.
+        await new Promise(r => setTimeout(r, 700));
+        try {
+            const second = await attempt(12000);
+            if (second) return second;
+        } catch (err) {
+            console.warn('[TradingChart] Backend OHLCV fetch (retry) failed, falling back to simulated data:', err.message || err);
+        }
+        return null;
+    }
+
     async function loadSymbol(ticker) {
         if (!chart || !candleSeries) {
             console.warn('[TradingChart] Chart not initialized (library failed to load?) — skipping loadSymbol.');
@@ -238,25 +290,7 @@ const TradingChart = (() => {
         state.ticker = ticker;
         setSymbolHeader(ticker, null, null);
 
-        let candles = null;
-        try {
-            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(6000), targetAddressSpace: 'loopback' });
-            if (res.ok) {
-                const json = await res.json();
-                if (json && Array.isArray(json.data) && json.data.length > 5) {
-                    candles = json.data.map(r => ({
-                        date: parseBackendDate(r.Date),
-                        open: Number(r.Open || 0),
-                        high: Number(r.High || 0),
-                        low: Number(r.Low || 0),
-                        close: Number(r.Close || 0),
-                        volume: Number(r.Volume || 0)
-                    })).filter(c => c.date !== null);
-                }
-            }
-        } catch (err) {
-            console.warn('[TradingChart] Backend OHLCV fetch failed, falling back to simulated data:', err.message || err);
-        }
+        let candles = await fetchOhlcvWithRetry(ticker);
 
         if (!candles || candles.length < 5) {
             candles = window.DataController.generateOHLCV(ticker, 90);
@@ -1018,6 +1052,15 @@ const TradingChart = (() => {
             { id: 'fib_fan', label: 'Fibonacci Yelpazesi' },
             { id: 'fib_time', label: 'Fibonacci Zaman Bölgesi' }
         ] },
+        // (17 Temmuz 2026, yedinci oturum) Tier 2 çizim araçları: Gann Fan
+        // (pivot + 1x1 açı noktasından türetilen klasik Gann açı seti) ve
+        // manuel Elliott Dalgası (kullanıcının 0-1-2-3-4-5 dalga noktalarını
+        // tek tek tıklayarak işaretlediği, otomatik dalga SAYIMI yapmayan —
+        // yalnızca görsel etiketleme sağlayan — bir sayım aracı).
+        { id: 'advanced', label: 'Gelişmiş Araçlar', tools: [
+            { id: 'gann_fan', label: 'Gann Yelpazesi' },
+            { id: 'elliott', label: 'Elliott Dalgası (Manuel)' }
+        ] },
         { id: 'shapes', label: 'Şekiller', tools: [
             { id: 'rect', label: 'Dikdörtgen' },
             { id: 'ellipse', label: 'Elips' },
@@ -1053,6 +1096,8 @@ const TradingChart = (() => {
             fib_ext: '<line x1="3" y1="4" x2="21" y2="4"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="3" y1="16" x2="21" y2="16"></line><line x1="3" y1="21" x2="12" y2="21"></line>',
             fib_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="21" y2="11"></line><line x1="3" y1="21" x2="21" y2="17"></line>',
             fib_time: '<line x1="4" y1="3" x2="4" y2="21"></line><line x1="10" y1="3" x2="10" y2="21"></line><line x1="16" y1="3" x2="16" y2="21"></line><line x1="21" y1="3" x2="21" y2="21"></line>',
+            gann_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="12" y2="3"></line><line x1="3" y1="21" x2="21" y2="12"></line><line x1="3" y1="21" x2="21" y2="17"></line><circle cx="3" cy="21" r="1.6" fill="currentColor"></circle>',
+            elliott: '<polyline points="2,18 7,6 11,14 16,3 20,11"></polyline><circle cx="2" cy="18" r="1.4" fill="currentColor"></circle><circle cx="20" cy="11" r="1.4" fill="currentColor"></circle>',
             rect: '<rect x="4" y="6" width="16" height="12" rx="1"></rect>',
             ellipse: '<ellipse cx="12" cy="12" rx="9" ry="6"></ellipse>',
             triangle: '<path d="M12 4l9 16H3z"></path>',
@@ -1134,6 +1179,7 @@ const TradingChart = (() => {
     function selectTool(tool) {
         state.activeTool = tool;
         state.pendingShape = null;
+        state.pendingPoints = null;
         updateToolbarActiveState();
         syncDrawCanvasCursor();
     }
@@ -1239,13 +1285,27 @@ const TradingChart = (() => {
             if (!toolbar.contains(e.target)) closeAllFlyouts();
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeAllFlyouts();
+            if (e.key === 'Escape') {
+                closeAllFlyouts();
+                if (state.pendingPoints) {
+                    // Cancel an in-progress multi-click drawing (e.g. Elliott
+                    // Wave) without discarding the active tool selection.
+                    state.pendingPoints = null;
+                    state.pendingShape = null;
+                    redrawDrawings();
+                }
+            }
         });
     }
 
     const SINGLE_POINT_TOOLS = ['vline', 'cross'];
     const FREEHAND_TOOLS = ['brush'];
     const DERIVED_THIRD_POINT_TOOLS = ['channel', 'triangle', 'pos_long', 'pos_short'];
+    // Manuel Elliott Dalgası: tek bir sürükleme yerine, kullanıcının sırayla
+    // tıklayarak 0-1-2-3-4-5 dalga noktalarını işaretlediği bir araç (klasik
+    // 5 dalgalı itki + düzeltme sayımı). `state.pendingPoints` bu tıklamalar
+    // arasında birikir; gerekli nokta sayısına ulaşınca çizim tamamlanır.
+    const MULTI_CLICK_TOOLS = { elliott: 6 };
 
     function priceRangeApprox() {
         if (!state.candles.length) return 1;
@@ -1315,6 +1375,21 @@ const TradingChart = (() => {
             return;
         }
 
+        if (MULTI_CLICK_TOOLS[state.activeTool]) {
+            const required = MULTI_CLICK_TOOLS[state.activeTool];
+            if (!state.pendingPoints) state.pendingPoints = [];
+            state.pendingPoints.push(dp);
+            if (state.pendingPoints.length >= required) {
+                state.drawings.push({ type: state.activeTool, points: state.pendingPoints.slice() });
+                state.pendingPoints = null;
+                finishDrawing();
+            } else {
+                state.pendingShape = { type: state.activeTool, points: state.pendingPoints.slice() };
+                redrawDrawings();
+            }
+            return;
+        }
+
         if (FREEHAND_TOOLS.includes(state.activeTool)) {
             state.pendingShape = { type: state.activeTool, points: [dp], dragging: true };
             return;
@@ -1324,6 +1399,20 @@ const TradingChart = (() => {
     }
 
     function onDrawMove(e) {
+        if (state.pendingPoints && MULTI_CLICK_TOOLS[state.activeTool]) {
+            // Rubber-band preview: show the committed points-so-far plus a
+            // "live" segment following the cursor, without adding it to
+            // state.pendingPoints (only an actual click commits a point).
+            const rect = drawCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+            const dp = pixelToDataPoint(x, y);
+            if (dp.time === null || dp.price === null) return;
+            state.pendingShape = { type: state.activeTool, points: state.pendingPoints.concat([dp]) };
+            redrawDrawings();
+            return;
+        }
         if (!state.pendingShape || !state.pendingShape.dragging) return;
         const rect = drawCanvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -1454,7 +1543,7 @@ const TradingChart = (() => {
     }
 
     function drawShape(shape, isSelected) {
-        if (shape.type === 'brush') {
+        if (shape.type === 'brush' || shape.type === 'elliott') {
             if (!shape.points || shape.points.length < 2) return;
             const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
             if (pts.length < 2) return;
@@ -1467,6 +1556,17 @@ const TradingChart = (() => {
             drawCtx.moveTo(pts[0].x, pts[0].y);
             pts.slice(1).forEach(p => drawCtx.lineTo(p.x, p.y));
             drawCtx.stroke();
+            if (shape.type === 'elliott') {
+                // Wave-count labels — purely visual markers the user assigns
+                // by click order (0 = başlangıç, 1-5 = itki dalgaları); this
+                // tool does not attempt automatic Elliott Wave detection.
+                const WAVE_LABELS = ['0', '1', '2', '3', '4', '5'];
+                drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+                drawCtx.font = 'bold 11px "Fira Code", monospace';
+                pts.forEach((p, i) => {
+                    drawCtx.fillText(WAVE_LABELS[i] !== undefined ? WAVE_LABELS[i] : String(i), p.x + 5, p.y - 5);
+                });
+            }
             drawCtx.restore();
             return;
         }
@@ -1656,6 +1756,37 @@ const TradingChart = (() => {
                 drawCtx.font = '9px "Fira Code", monospace';
                 drawCtx.fillText(String(n), lx + 2, 12);
             });
+        } else if (shape.type === 'gann_fan') {
+            // Klasik Gann açı seti: p1 = pivot, p2 = "1x1" (45°) açısını
+            // tanımlayan referans nokta. Her oran, p1->p2 fiyat/bar eğiminin
+            // bir katı olarak p2'nin zaman indeksinde bir fiyat üretir, tıpkı
+            // fib_fan'daki interpolasyon gibi — yalnızca oran seti farklı.
+            const GANN_RATIOS = [
+                { r: 1 / 8, label: '1x8' },
+                { r: 1 / 4, label: '1x4' },
+                { r: 1 / 3, label: '1x3' },
+                { r: 1 / 2, label: '1x2' },
+                { r: 1,     label: '1x1' },
+                { r: 2,     label: '2x1' },
+                { r: 3,     label: '3x1' },
+                { r: 4,     label: '4x1' },
+                { r: 8,     label: '8x1' }
+            ];
+            GANN_RATIOS.forEach(g => {
+                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * g.r;
+                const py = candleSeries.priceToCoordinate(price);
+                if (py === null) return;
+                const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
+                drawCtx.strokeStyle = g.r === 1 ? (isSelected ? '#4FC3F7' : COLORS.draw) : COLORS.fibLine;
+                drawCtx.lineWidth = g.r === 1 ? 2 : 1;
+                drawCtx.beginPath();
+                drawCtx.moveTo(a.x, a.y);
+                drawCtx.lineTo(ext.x, ext.y);
+                drawCtx.stroke();
+                drawCtx.fillStyle = COLORS.draw;
+                drawCtx.font = '9px "Fira Code", monospace';
+                drawCtx.fillText(g.label, ext.x - 24, ext.y - 3);
+            });
         }
 
         if (isSelected) {
@@ -1688,7 +1819,7 @@ const TradingChart = (() => {
         for (let i = state.drawings.length - 1; i >= 0; i--) {
             const shape = state.drawings[i];
 
-            if (shape.type === 'brush') {
+            if (shape.type === 'brush' || shape.type === 'elliott') {
                 if (!shape.points || shape.points.length < 2) continue;
                 const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
                 for (let j = 0; j < pts.length - 1; j++) {
@@ -1735,7 +1866,7 @@ const TradingChart = (() => {
                     return ly !== null && Math.abs(y - ly) <= HIT_TOLERANCE;
                 });
                 if (hit) return i;
-            } else if (shape.type === 'fib_fan' || shape.type === 'fib_time') {
+            } else if (shape.type === 'fib_fan' || shape.type === 'fib_time' || shape.type === 'gann_fan') {
                 // Low-value to hit-test precisely (fan rays / time-zone verticals extend to the
                 // canvas edge) — a generous bounding-box check keeps selection usable without
                 // duplicating the render geometry here.
@@ -1767,8 +1898,8 @@ const TradingChart = (() => {
         };
 
         let clone;
-        if (copiedDrawing.type === 'brush') {
-            clone = { type: 'brush', points: (copiedDrawing.points || []).map(shiftPoint) };
+        if (copiedDrawing.type === 'brush' || copiedDrawing.type === 'elliott') {
+            clone = { type: copiedDrawing.type, points: (copiedDrawing.points || []).map(shiftPoint) };
             if (clone.points.length < 2) return false;
         } else {
             clone = { type: copiedDrawing.type, p1: shiftPoint(copiedDrawing.p1), p2: shiftPoint(copiedDrawing.p2) };
