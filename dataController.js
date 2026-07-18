@@ -519,6 +519,29 @@ const DataController = (() => {
     }
 
     /**
+     * Compute Weighted Moving Average — like SMA but recent bars count more
+     * (weight i+1 for the i-th bar in the window, so the most recent bar in
+     * a period-N window has weight N). Added onuncu oturum (18 Temmuz 2026)
+     * to diversify the overlay indicator list alongside SMA/EMA.
+     * @param {number[]} closes
+     * @param {number}   period
+     * @returns {(number|null)[]}
+     */
+    function computeWMA(closes, period) {
+        const wma = [];
+        const denom = (period * (period + 1)) / 2;
+        for (let i = 0; i < closes.length; i++) {
+            if (i < period - 1) { wma.push(null); continue; }
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += closes[i - period + 1 + j] * (j + 1);
+            }
+            wma.push(+(sum / denom).toFixed(4));
+        }
+        return wma;
+    }
+
+    /**
      * Compute Exponential Moving Average.
      */
     function computeEMA(values, period) {
@@ -641,6 +664,33 @@ const DataController = (() => {
             dValues.push(cnt > 0 ? +(sum / cnt).toFixed(2) : null);
         }
         return { k: kValues, d: dValues };
+    }
+
+    /**
+     * Compute Williams %R — momentum oscillator ranging -100..0, conceptually
+     * a mirrored/rescaled Stochastic %K (%R = -100 * (highestHigh - close) /
+     * (highestHigh - lowestLow) over the window). Added onuncu oturum (18
+     * Temmuz 2026) to diversify the oscillator panel list alongside RSI/
+     * MACD/Stochastic. -80 and below is conventionally "oversold", -20 and
+     * above "overbought" (mirrors RSI's 30/70 but on Williams %R's own scale).
+     * @param {Array} candles
+     * @param {number} period
+     * @returns {(number|null)[]}
+     */
+    function computeWilliamsR(candles, period = 14) {
+        const willr = [];
+        for (let i = 0; i < candles.length; i++) {
+            if (i < period - 1) { willr.push(null); continue; }
+            let highestHigh = -Infinity, lowestLow = Infinity;
+            for (let j = i - period + 1; j <= i; j++) {
+                if (candles[j].high > highestHigh) highestHigh = candles[j].high;
+                if (candles[j].low < lowestLow) lowestLow = candles[j].low;
+            }
+            const range = highestHigh - lowestLow;
+            const value = range === 0 ? 0 : ((highestHigh - candles[i].close) / range) * -100;
+            willr.push(+value.toFixed(2));
+        }
+        return willr;
     }
 
     /**
@@ -1127,6 +1177,9 @@ const DataController = (() => {
         const ema9  = computeEMA(closes, 9);
         const ema21 = computeEMA(closes, 21);
 
+        // --- Weighted Moving Average (onuncu oturum — indikatör çeşitlendirme) ---
+        const wma20 = computeWMA(closes, 20);
+
         // --- Oscillators ---
         const rsi14 = computeRSI(closes, 14);
         const macd = computeMACD(closes, 12, 26, 9);
@@ -1134,6 +1187,7 @@ const DataController = (() => {
         const atr14 = computeATR(candles, 14);
         const adx14 = computeADX(candles, 14);
         const obv = computeOBV(candles);
+        const willr14 = computeWilliamsR(candles, 14);
 
         // --- Bollinger Bands (20-period, 2 std-dev) ---
         const bbPeriod = 20;
@@ -1174,9 +1228,9 @@ const DataController = (() => {
         }
 
         return {
-            sma20, sma50, sma200, ema9, ema21,
+            sma20, sma50, sma200, ema9, ema21, wma20,
             bollingerUpper, bollingerMiddle, bollingerLower, vwap,
-            rsi14, macd, stochastic, atr14, adx14, obv
+            rsi14, macd, stochastic, atr14, adx14, obv, willr14
         };
     }
 
@@ -1521,12 +1575,14 @@ const DataController = (() => {
         runStrategy,
         computeSMA,
         computeEMA,
+        computeWMA,
         computeRSI,
         computeMACD,
         computeStochastic,
         computeATR,
         computeADX,
         computeOBV,
+        computeWilliamsR,
         computeSupport,
         computeResistance,
 

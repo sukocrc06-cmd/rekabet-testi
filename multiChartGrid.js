@@ -151,7 +151,7 @@ const MultiChartGrid = (() => {
         const single = byId('tv-chart-area-single');
         const gridView = byId('tv-grid-view');
         const resBar = byId('tv-resolution-bar');
-        const subpane = byId('tv-subpane-wrap');
+        const subpane = byId('tv-subpanes-container');
         const toggleBtn = byId('btn-toggle-grid-view');
         if (single) single.style.display = 'none';
         if (resBar) resBar.style.display = 'none';
@@ -177,7 +177,7 @@ const MultiChartGrid = (() => {
         const single = byId('tv-chart-area-single');
         const gridView = byId('tv-grid-view');
         const resBar = byId('tv-resolution-bar');
-        const subpane = byId('tv-subpane-wrap');
+        const subpane = byId('tv-subpanes-container');
         const toggleBtn = byId('btn-toggle-grid-view');
         if (single) single.style.display = '';
         if (resBar) resBar.style.display = '';

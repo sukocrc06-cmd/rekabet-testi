@@ -1514,6 +1514,7 @@ const TradingEngine = (() => {
                 applyLeverage(parseInt(btn.dataset.leverage, 10) || 1);
                 buttons.forEach(b => b.classList.toggle('active', b === btn));
                 if (customInput) customInput.value = '';
+                document.querySelectorAll('.leverage-quick-chip').forEach(c => c.classList.remove('active'));
             });
         });
 
@@ -1524,8 +1525,8 @@ const TradingEngine = (() => {
         // görünür kalsın diye işaretleniyor; eşleşmezse hepsi pasife düşüyor
         // (kullanıcı gerçekten özel bir değer kullandığını görsün diye).
         if (customInput && customApplyBtn) {
-            const applyCustom = () => {
-                const raw = parseInt(customInput.value, 10);
+            const applyCustom = (forcedValue) => {
+                const raw = forcedValue !== undefined ? forcedValue : parseInt(customInput.value, 10);
                 if (!raw || isNaN(raw)) {
                     showToast(`Geçerli bir kaldıraç girin (${LEVERAGE_MIN}-${LEVERAGE_MAX}x arası).`);
                     return;
@@ -1534,11 +1535,25 @@ const TradingEngine = (() => {
                 customInput.value = applied;
                 const matchingPreset = Array.from(buttons).find(b => parseInt(b.dataset.leverage, 10) === applied);
                 buttons.forEach(b => b.classList.toggle('active', b === matchingPreset));
+                const chips = document.querySelectorAll('.leverage-quick-chip');
+                chips.forEach(c => c.classList.toggle('active', parseInt(c.dataset.leverageChip, 10) === applied));
                 showToast(`Kaldıraç ${applied}x olarak ayarlandı.`);
             };
-            customApplyBtn.addEventListener('click', applyCustom);
+            customApplyBtn.addEventListener('click', () => applyCustom());
             customInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); applyCustom(); }
+            });
+
+            // (18 Temmuz 2026, onuncu oturum, ikinci tur) Manuel girişin
+            // hemen yanında hızlı-seçim chip'leri (3x/7x/15x/20x) — hazır
+            // 1/2/5/10x butonlarının kapsamadığı, ama sık kullanılan ara
+            // değerlere tek tıkla ulaşmak için. Aynı applyLeverage() /
+            // applyCustom() akışını kullanıyor, ayrı bir mantık değil.
+            document.querySelectorAll('.leverage-quick-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const val = parseInt(chip.dataset.leverageChip, 10);
+                    applyCustom(val);
+                });
             });
         }
     }

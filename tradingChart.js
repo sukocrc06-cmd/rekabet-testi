@@ -31,6 +31,7 @@ const TradingChart = (() => {
         sma200: '#EF5350',
         ema9: '#26C6DA',
         ema21: '#FFA726',
+        wma20: '#8D6E63',
         bbLine: 'rgba(66, 165, 245, 0.55)',
         bbFill: 'rgba(66, 165, 245, 0.06)',
         vwap: '#26A69A',
@@ -79,7 +80,6 @@ const TradingChart = (() => {
     let currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
 
     let chart = null;
-    let subChart = null;
     let candleSeries = null;      // always-present OHLC series; the price-scale anchor
                                    // for coordinate<->price conversions and drawing tools.
                                    // Hidden (visible:false) whenever an alternate chart
@@ -89,7 +89,44 @@ const TradingChart = (() => {
                                    // (those render directly on candleSeries).
     let volumeSeries = null;      // optional volume histogram, own price scale
     let overlaySeries = {};       // { sma20: LineSeries, ... }
-    let subSeries = {};           // active oscillator pane series
+
+    // ── Çoklu-osilatör paneli (18 Temmuz 2026, onuncu oturum) ──
+    // Artık aynı anda birden fazla gösterge (RSI + MACD + ADX vb.) aktif
+    // olabiliyor; her biri KENDİ hafif LightweightCharts örneğini alıyor
+    // (tek bir paylaşılan subChart yerine), tıpkı Dual-Chart panelinde
+    // olduğu gibi "singleton'ı çoğaltma" riskinden kaçınmak için ayrı,
+    // sade örnekler kullanıyoruz. Anahtar = osilatör id'si (rsi/macd/...).
+    // Değer = { el: <.tv-osc-pane DOM>, chart: LightweightCharts, series: {} }.
+    let oscillatorPanes = {};
+
+    const ACTIVE_OSC_STORAGE_KEY = 'optipulselab_active_oscillators_v1';
+    const OSCILLATOR_META = {
+        rsi:   { title: 'RSI (14)' },
+        macd:  { title: 'MACD (12,26,9)' },
+        stoch: { title: 'Stochastic (14,3)' },
+        atr:   { title: 'ATR (14)' },
+        adx:   { title: 'ADX (14)' },
+        obv:   { title: 'OBV' },
+        willr: { title: 'Williams %R (14)' }
+    };
+
+    function loadActiveOscillators() {
+        try {
+            const raw = localStorage.getItem(ACTIVE_OSC_STORAGE_KEY);
+            if (!raw) return ['rsi'];
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length) {
+                const filtered = arr.filter(id => OSCILLATOR_META[id]);
+                return filtered.length ? filtered : ['rsi'];
+            }
+            return ['rsi'];
+        } catch (e) { return ['rsi']; }
+    }
+
+    function saveActiveOscillators() {
+        try { localStorage.setItem(ACTIVE_OSC_STORAGE_KEY, JSON.stringify(state.activeOscillators)); } catch (e) {}
+    }
+
     let drawCanvas = null;
     let drawCtx = null;
     let chartContainer = null;
@@ -105,6 +142,8 @@ const TradingChart = (() => {
     let dualActive = false;
     let dualResolution = '1w';
     let dualRefreshTimer = null;
+    let dualOverlaySeries = {};
+    let dualOverlayActive = { sma20: false, ema9: false };
 
     // ── Fullscreen chart mode (18 Temmuz 2026, onuncu oturum) ──
     let fullscreenActive = false;
@@ -116,7 +155,7 @@ const TradingChart = (() => {
         resolution: '1d',      // '15m' | '1h' | '4h' | '1d' | '1w'
         priceScaleMode: 'normal', // 'normal' | 'log'
         indicators: null,
-        oscillator: 'rsi',
+        activeOscillators: loadActiveOscillators(),
         chartType: 'candles',
         showVolume: false,
         activeTool: 'cursor',
@@ -155,8 +194,7 @@ const TradingChart = (() => {
         }
 
         chartContainer = byId('tv-main-chart');
-        const subContainer = byId('tv-sub-chart');
-        if (!chartContainer || !subContainer) {
+        if (!chartContainer) {
             console.error('[TradingChart] Chart mount points not found in DOM.');
             return;
         }
@@ -171,15 +209,17 @@ const TradingChart = (() => {
             wickDownColor: COLORS.wickDown
         });
 
-        subChart = LightweightCharts.createChart(subContainer, baseChartOptions(subContainer, true));
-
-        // Sync sub-chart time scale to main chart
+        // Sync every active oscillator pane's time scale to the main chart.
+        // Each pane also pushes its own range back onto the main chart (wired
+        // per-pane in ensureOscillatorPane()), so scrolling/zooming any one
+        // of them keeps all panes + the main chart lined up together.
         chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-            if (range) subChart.timeScale().setVisibleLogicalRange(range);
+            if (range) {
+                Object.values(oscillatorPanes).forEach(p => {
+                    if (p.chart) p.chart.timeScale().setVisibleLogicalRange(range);
+                });
+            }
             redrawDrawings();
-        });
-        subChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-            if (range) chart.timeScale().setVisibleLogicalRange(range);
         });
 
         // Crosshair -> OHLC legend
@@ -190,14 +230,15 @@ const TradingChart = (() => {
         setupChartTypeMenu();
         setupResolutionBar();
         setupPriceScaleToggle();
-        setupOscillatorSelect();
+        setupOscillatorCheckboxes();
         setupOverlayCheckboxes();
         setupIndicatorModal();
         setupDrawingSelection();
         setupResize();
         setupDualChartControls();
         setupFullscreenControl();
-        setupSubpaneResize();
+        setupRailCollapse();
+        setupSubpanesContainer();
 
         window.addEventListener('resize', () => {
             resizeAll();
@@ -400,13 +441,15 @@ const TradingChart = (() => {
 
         const intraday = isIntradayResolution();
         if (chart) chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
-        if (subChart) subChart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+        Object.values(oscillatorPanes).forEach(p => {
+            if (p.chart) p.chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+        });
 
         applyChartType();
 
         state.indicators = window.DataController.calculateIndicators(state.candles);
         renderOverlays();
-        renderOscillatorPane();
+        renderAllOscillatorPanes();
 
         if (chart) chart.timeScale().fitContent();
 
@@ -452,6 +495,7 @@ const TradingChart = (() => {
             wickUpColor: COLORS.wickUp,
             wickDownColor: COLORS.wickDown
         });
+        dualOverlaySeries = {};
     }
 
     function destroyDualChart() {
@@ -463,7 +507,39 @@ const TradingChart = (() => {
             try { dualChart.remove(); } catch (e) { /* already gone */ }
             dualChart = null;
             dualSeries = null;
+            dualOverlaySeries = {};
         }
+    }
+
+    // Dual-Chart panelinin kendi sade overlay göstergeleri (SMA20/EMA9).
+    // Bilinçli olarak ana grafiğin overlaySeries/renderOverlays() motorunu
+    // ÇOĞALTMIYORUZ — sadece 2 sabit gösterge, ayrı, küçük bir yol.
+    function refreshDualOverlays(candles) {
+        if (!dualChart || !window.DataController) return;
+        Object.values(dualOverlaySeries).forEach(s => { try { dualChart.removeSeries(s); } catch (e) {} });
+        dualOverlaySeries = {};
+        if (!dualOverlayActive.sma20 && !dualOverlayActive.ema9) return;
+
+        const closes = candles.map(c => c.close);
+        const dates = candles.map(c => c.time);
+        if (dualOverlayActive.sma20) {
+            const sma20 = window.DataController.computeSMA(closes, 20);
+            dualOverlaySeries.sma20 = dualChart.addLineSeries({ color: COLORS.sma20, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+            dualOverlaySeries.sma20.setData(seriesFromValues(dates, sma20));
+        }
+        if (dualOverlayActive.ema9) {
+            const ema9 = window.DataController.computeEMA(closes, 9);
+            dualOverlaySeries.ema9 = dualChart.addLineSeries({ color: COLORS.ema9, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: LightweightCharts.LineStyle.Dashed });
+            dualOverlaySeries.ema9.setData(seriesFromValues(dates, ema9));
+        }
+    }
+
+    function toggleDualOverlay(key) {
+        dualOverlayActive[key] = !dualOverlayActive[key];
+        document.querySelectorAll('#tv-dual-overlay-row [data-doverlay]').forEach(b => {
+            b.classList.toggle('active', dualOverlayActive[b.dataset.doverlay]);
+        });
+        refreshDualChart();
     }
 
     function refreshDualChart() {
@@ -472,6 +548,7 @@ const TradingChart = (() => {
             time: c.date, open: c.open, high: c.high, low: c.low, close: c.close
         }));
         dualSeries.setData(candles);
+        refreshDualOverlays(candles);
         dualChart.timeScale().fitContent();
         const label = byId('tv-dual-pane-label');
         if (label && state.ticker) label.textContent = state.ticker + ' — Karşılaştırma';
@@ -517,6 +594,13 @@ const TradingChart = (() => {
                 btn.addEventListener('click', () => setDualResolution(btn.dataset.dres));
             });
         }
+
+        const overlayRow = byId('tv-dual-overlay-row');
+        if (overlayRow) {
+            overlayRow.querySelectorAll('[data-doverlay]').forEach(btn => {
+                btn.addEventListener('click', () => toggleDualOverlay(btn.dataset.doverlay));
+            });
+        }
     }
 
     /* ────────── Tam Ekran Grafik Modu (onuncu oturum) ────────── */
@@ -548,60 +632,173 @@ const TradingChart = (() => {
         }, 30);
     }
 
+    // (18 Temmuz 2026, onuncu oturum, ikinci tur) Sol dikey araç rayını
+    // daraltma/genişletme — kullanıcı tercihini localStorage'da saklıyoruz,
+    // tıpkı diğer küçük UI tercihleri gibi (bkz. optipulselab_sound_enabled_v1).
+    const RAIL_COLLAPSED_KEY = 'optipulselab_rail_collapsed_v1';
+
+    function setRailCollapsed(collapsed) {
+        const container = document.querySelector('.dashboard-container');
+        if (container) container.classList.toggle('tv-rail-collapsed', collapsed);
+        const arrow = byId('rail-toggle-arrow');
+        if (arrow) arrow.setAttribute('points', collapsed ? '9 18 15 12 9 6' : '15 18 9 12 15 6');
+        const btn = byId('btn-toggle-rail');
+        if (btn) btn.title = collapsed ? 'Araç rayını genişlet' : 'Araç rayını daralt';
+        try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+        setTimeout(resizeAll, 200);
+    }
+
+    function setupRailCollapse() {
+        const btn = byId('btn-toggle-rail');
+        if (!btn) return;
+        let collapsed = false;
+        try { collapsed = localStorage.getItem(RAIL_COLLAPSED_KEY) === '1'; } catch (e) {}
+        setRailCollapsed(collapsed);
+        btn.addEventListener('click', () => {
+            const container = document.querySelector('.dashboard-container');
+            const isCollapsed = container ? container.classList.contains('tv-rail-collapsed') : false;
+            setRailCollapsed(!isCollapsed);
+        });
+    }
+
     function setupFullscreenControl() {
         const btn = byId('btn-toggle-fullscreen');
         if (btn) btn.addEventListener('click', () => toggleFullscreen());
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && fullscreenActive) toggleFullscreen(false);
+            if (e.key === 'Escape' && fullscreenActive) { toggleFullscreen(false); return; }
+            // (18 Temmuz 2026, onuncu oturum, ikinci tur) "F" kısayolu tam
+            // ekranı aç/kapat — herhangi bir input/textarea'ya yazarken veya
+            // bir modal açıkken (arama kutusu vb. metin girişini bozmamak
+            // için) devre dışı, ayrıca Ctrl/Cmd/Alt ile kombinasyonları yok say.
+            if (e.key === 'f' || e.key === 'F') {
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                const tag = (e.target && e.target.tagName) || '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+                // Tüm modaller (gösterge/uyarı/SLTP/ısı haritası/kısayollar/
+                // yardım) aynı paylaşılan .indicator-modal-backdrop sınıfını
+                // kullanıyor — herhangi biri açıksa F kısayolunu tetikleme.
+                const anyModalOpen = document.querySelector('.indicator-modal-backdrop.open');
+                if (anyModalOpen) return;
+                toggleFullscreen();
+            }
         });
     }
 
     /* ────────── Osilatör panelini sürükleyerek yeniden boyutlandırma ────────── */
 
-    function setupSubpaneResize() {
-        const handle = byId('tv-subpane-resize-handle');
-        const wrap = byId('tv-subpane-wrap');
-        if (!handle || !wrap) return;
+    // (18 Temmuz 2026, onuncu oturum) Çoklu-osilatör paneli: her aktif
+    // gösterge kendi .tv-osc-pane'ini alıyor (bkz. ensureOscillatorPane()
+    // aşağıda), bu yüzden hem yükseklik-sürükleme hem sıralama-sürükleme
+    // artık DELEGASYON ile (#tv-subpanes-container üzerinde tek bir dinleyici,
+    // panel sayısı runtime'da değişse de yeniden bağlanmaya gerek yok) tek
+    // fonksiyonda birleştirildi — eski tekil setupSubpaneResize()'ın yerini alıyor.
+    function setupSubpanesContainer() {
+        const container = byId('tv-subpanes-container');
+        if (!container) return;
 
         const MIN_H = 90;
         const MAX_H = 420;
-        let dragging = false;
+        let resizingPane = null;
         let startY = 0;
         let startH = 0;
+        let draggingPane = null;
 
-        function onMove(e) {
-            if (!dragging) return;
+        function onResizeMove(e) {
+            if (!resizingPane) return;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             const delta = startY - clientY; // dragging UP increases pane height
             const newH = Math.min(MAX_H, Math.max(MIN_H, startH + delta));
-            wrap.style.flexBasis = newH + 'px';
+            resizingPane.style.flexBasis = newH + 'px';
         }
 
-        function onUp() {
-            if (!dragging) return;
-            dragging = false;
-            handle.classList.remove('dragging');
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('touchmove', onMove);
-            document.removeEventListener('touchend', onUp);
-            resizeAll();
+        function onResizeUp() {
+            if (!resizingPane) return;
+            resizingPane = null;
+            document.removeEventListener('mousemove', onResizeMove);
+            document.removeEventListener('mouseup', onResizeUp);
+            document.removeEventListener('touchmove', onResizeMove);
+            document.removeEventListener('touchend', onResizeUp);
+            resizeOscillatorPanes();
         }
 
-        function onDown(e) {
-            dragging = true;
-            handle.classList.add('dragging');
-            startY = e.touches ? e.touches[0].clientY : e.clientY;
-            startH = wrap.getBoundingClientRect().height;
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-            document.addEventListener('touchmove', onMove, { passive: true });
-            document.addEventListener('touchend', onUp);
-            e.preventDefault();
+        function onReorderMove(e) {
+            if (!draggingPane) return;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const siblings = Array.from(container.querySelectorAll('.tv-osc-pane:not(.dragging)'));
+            let after = null;
+            for (const sib of siblings) {
+                const box = sib.getBoundingClientRect();
+                if (clientY < box.top + box.height / 2) { after = sib; break; }
+            }
+            if (after) container.insertBefore(draggingPane, after);
+            else container.appendChild(draggingPane);
         }
 
-        handle.addEventListener('mousedown', onDown);
-        handle.addEventListener('touchstart', onDown, { passive: false });
+        function onReorderUp() {
+            if (!draggingPane) return;
+            draggingPane.classList.remove('dragging');
+            draggingPane = null;
+            document.removeEventListener('mousemove', onReorderMove);
+            document.removeEventListener('mouseup', onReorderUp);
+            document.removeEventListener('touchmove', onReorderMove);
+            document.removeEventListener('touchend', onReorderUp);
+            state.activeOscillators = Array.from(container.children).map(el => el.dataset.osc);
+            saveActiveOscillators();
+        }
+
+        container.addEventListener('mousedown', (e) => {
+            const resizeHandle = e.target.closest('.tv-subpane-resize-handle');
+            if (resizeHandle) {
+                resizingPane = resizeHandle.closest('.tv-osc-pane');
+                if (!resizingPane) return;
+                startY = e.clientY;
+                startH = resizingPane.getBoundingClientRect().height;
+                document.addEventListener('mousemove', onResizeMove);
+                document.addEventListener('mouseup', onResizeUp);
+                e.preventDefault();
+                return;
+            }
+            const dragHandle = e.target.closest('.tv-osc-drag-handle');
+            if (dragHandle) {
+                draggingPane = dragHandle.closest('.tv-osc-pane');
+                if (!draggingPane) return;
+                draggingPane.classList.add('dragging');
+                document.addEventListener('mousemove', onReorderMove);
+                document.addEventListener('mouseup', onReorderUp);
+                e.preventDefault();
+                return;
+            }
+            const closeBtn = e.target.closest('.tv-osc-close-btn');
+            if (closeBtn) {
+                const id = closeBtn.dataset.osc;
+                state.activeOscillators = state.activeOscillators.filter(o => o !== id);
+                saveActiveOscillators();
+                const chk = document.querySelector('.osc-checkbox[data-osc="' + id + '"]');
+                if (chk) chk.checked = false;
+                renderAllOscillatorPanes();
+            }
+        });
+
+        container.addEventListener('touchstart', (e) => {
+            const resizeHandle = e.target.closest('.tv-subpane-resize-handle');
+            if (resizeHandle) {
+                resizingPane = resizeHandle.closest('.tv-osc-pane');
+                if (!resizingPane) return;
+                startY = e.touches[0].clientY;
+                startH = resizingPane.getBoundingClientRect().height;
+                document.addEventListener('touchmove', onResizeMove, { passive: true });
+                document.addEventListener('touchend', onResizeUp);
+                return;
+            }
+            const dragHandle = e.target.closest('.tv-osc-drag-handle');
+            if (dragHandle) {
+                draggingPane = dragHandle.closest('.tv-osc-pane');
+                if (!draggingPane) return;
+                draggingPane.classList.add('dragging');
+                document.addEventListener('touchmove', onReorderMove, { passive: true });
+                document.addEventListener('touchend', onReorderUp);
+            }
+        }, { passive: true });
     }
 
     function formatCandleDate(ts) {
@@ -836,6 +1033,7 @@ const TradingChart = (() => {
             sma200: checked('chk-sma200'),
             ema9: checked('chk-ema9'),
             ema21: checked('chk-ema21'),
+            wma20: checked('chk-wma20'),
             bollinger: checked('chk-bollinger'),
             vwap: checked('chk-vwap')
         };
@@ -854,6 +1052,7 @@ const TradingChart = (() => {
         if (vis.sma200) addLine('sma200', ind.sma200, COLORS.sma200);
         if (vis.ema9)   addLine('ema9', ind.ema9, COLORS.ema9, { lineStyle: LightweightCharts.LineStyle.Dashed });
         if (vis.ema21)  addLine('ema21', ind.ema21, COLORS.ema21, { lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (vis.wma20)  addLine('wma20', ind.wma20, COLORS.wma20);
         if (vis.vwap)   addLine('vwap', ind.vwap, COLORS.vwap, { lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 2 });
 
         if (vis.bollinger) {
@@ -885,6 +1084,7 @@ const TradingChart = (() => {
         { key: 'sma200',    label: 'SMA200',     colorKey: 'sma200', chk: 'chk-sma200' },
         { key: 'ema9',      label: 'EMA9',       colorKey: 'ema9',   chk: 'chk-ema9' },
         { key: 'ema21',     label: 'EMA21',      colorKey: 'ema21',  chk: 'chk-ema21' },
+        { key: 'wma20',     label: 'WMA20',      colorKey: 'wma20',  chk: 'chk-wma20' },
         { key: 'bollinger', label: 'BB(20,2)',   colorKey: 'bbLine', chk: 'chk-bollinger' },
         { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' }
     ];
@@ -918,31 +1118,162 @@ const TradingChart = (() => {
         });
     }
 
-    /* ────────── Oscillator sub-pane ────────── */
+    /* ────────── Çoklu-osilatör paneli ────────── */
 
-    function setupOscillatorSelect() {
-        const sel = byId('oscillator-type-select');
-        if (!sel) return;
-        sel.addEventListener('change', () => {
-            state.oscillator = sel.value;
-            renderOscillatorPane();
+    // Her .osc-checkbox aynı anda birden fazla işaretlenebilir; işaretli
+    // olanların tam kümesi state.activeOscillators'ta tutulur ve her
+    // değişiklikte localStorage'a yazılır (setupSubpanesContainer()'daki
+    // sürükle-sırala da aynı diziyi günceller — bkz. onReorderUp()).
+    function setupOscillatorCheckboxes() {
+        const checkboxes = document.querySelectorAll('.osc-checkbox');
+        if (!checkboxes.length) return;
+        checkboxes.forEach(cb => {
+            cb.checked = state.activeOscillators.includes(cb.dataset.osc);
+            cb.addEventListener('change', () => {
+                const id = cb.dataset.osc;
+                if (cb.checked) {
+                    if (!state.activeOscillators.includes(id)) state.activeOscillators.push(id);
+                } else {
+                    state.activeOscillators = state.activeOscillators.filter(o => o !== id);
+                }
+                saveActiveOscillators();
+                renderAllOscillatorPanes();
+            });
         });
     }
 
-    // TradingView-style clickable oscillator list inside the indicator modal.
-    // Drives the (now hidden) native <select id="oscillator-type-select"> so
-    // the rest of the oscillator-rendering logic doesn't need to change.
-    function setupOscillatorButtons() {
-        const list = byId('indicator-oscillator-list');
-        const sel = byId('oscillator-type-select');
-        if (!list || !sel) return;
-        list.querySelectorAll('.indicator-osc-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                list.querySelectorAll('.indicator-osc-item').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                sel.value = btn.dataset.osc;
-                sel.dispatchEvent(new Event('change'));
-            });
+    // Belirli bir osilatör id'si için pane DOM'unu + kendi hafif chart
+    // örneğini oluşturur (zaten varsa mevcut olanı döndürür). Ayrı örnek
+    // kullanmamızın nedeni: ana grafiğin çizim/gösterge motorunu her panelde
+    // ÇOĞALTMAK yerine, Dual-Chart'ta olduğu gibi sade, salt-okunur bir
+    // fiyat/seri görünümü yeterli — mimari risk açısından çok daha güvenli.
+    function ensureOscillatorPane(id) {
+        if (oscillatorPanes[id]) return oscillatorPanes[id];
+        const container = byId('tv-subpanes-container');
+        if (!container || !window.LightweightCharts) return null;
+
+        const paneEl = document.createElement('div');
+        paneEl.className = 'tv-osc-pane';
+        paneEl.dataset.osc = id;
+        paneEl.style.flexBasis = '150px';
+        paneEl.innerHTML =
+            '<div class="tv-osc-pane-header">' +
+                '<span class="tv-osc-drag-handle" title="Sürükleyerek sırala">⋮⋮</span>' +
+                '<span class="tv-osc-title"></span>' +
+                '<span class="tv-osc-close-btn" data-osc="' + id + '" title="Paneli kapat">×</span>' +
+            '</div>' +
+            '<div class="tv-osc-chart-mount"></div>' +
+            '<div class="tv-subpane-resize-handle"><span></span></div>';
+        container.appendChild(paneEl);
+
+        const mount = paneEl.querySelector('.tv-osc-chart-mount');
+        const paneChart = LightweightCharts.createChart(mount, baseChartOptions(mount, true));
+        // Bu panelde kaydırma/yakınlaştırma yapılırsa ana grafiğe (ve
+        // oradan da diğer tüm panellere, init()'teki abonelik zinciriyle)
+        // yansısın.
+        paneChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+            if (range && chart) chart.timeScale().setVisibleLogicalRange(range);
+        });
+
+        const entry = { el: paneEl, chart: paneChart, series: {} };
+        oscillatorPanes[id] = entry;
+        return entry;
+    }
+
+    function destroyOscillatorPane(id) {
+        const entry = oscillatorPanes[id];
+        if (!entry) return;
+        try { entry.chart.remove(); } catch (e) {}
+        if (entry.el && entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+        delete oscillatorPanes[id];
+    }
+
+    // Belirli bir osilatör tipi için seri(ler)i verilen pane-chart üzerine
+    // kurar. Eski tekil renderOscillatorPane()'in tip-bazlı gövdesinin
+    // aynısı — sadece artık "hangi chart'a çizileceği" parametre olarak
+    // geliyor, ayrıca yeni 'willr' (Williams %R) dalı eklendi.
+    function buildOscillatorSeries(paneChart, type, ind, dates) {
+        const series = {};
+        const title = (OSCILLATOR_META[type] && OSCILLATOR_META[type].title) || type;
+
+        if (type === 'rsi') {
+            series.rsi = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.rsi.setData(seriesFromValues(dates, ind.rsi14));
+            series.rsi.createPriceLine({ price: 70, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '70' });
+            series.rsi.createPriceLine({ price: 30, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '30' });
+        } else if (type === 'macd') {
+            series.hist = paneChart.addHistogramSeries({ priceLineVisible: false, color: '#42A5F5' });
+            series.hist.setData(seriesFromValues(dates, ind.macd.histogram).map(p => ({
+                time: p.time, value: p.value, color: p.value >= 0 ? 'rgba(76,175,80,0.55)' : 'rgba(244,67,54,0.55)'
+            })));
+            series.macd = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.macd.setData(seriesFromValues(dates, ind.macd.macdLine));
+            series.signal = paneChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
+            series.signal.setData(seriesFromValues(dates, ind.macd.signalLine));
+        } else if (type === 'stoch') {
+            series.k = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.k.setData(seriesFromValues(dates, ind.stochastic.k));
+            series.d = paneChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
+            series.d.setData(seriesFromValues(dates, ind.stochastic.d));
+        } else if (type === 'atr') {
+            series.atr = paneChart.addLineSeries({ color: '#EF6C00', lineWidth: 1.5, priceLineVisible: false });
+            series.atr.setData(seriesFromValues(dates, ind.atr14));
+        } else if (type === 'adx') {
+            series.adx = paneChart.addLineSeries({ color: '#AB47BC', lineWidth: 1.5, priceLineVisible: false });
+            series.adx.setData(seriesFromValues(dates, ind.adx14));
+        } else if (type === 'obv') {
+            series.obv = paneChart.addLineSeries({ color: '#26A69A', lineWidth: 1.5, priceLineVisible: false });
+            series.obv.setData(seriesFromValues(dates, ind.obv));
+        } else if (type === 'willr') {
+            series.willr = paneChart.addLineSeries({ color: '#EC407A', lineWidth: 1.5, priceLineVisible: false });
+            series.willr.setData(seriesFromValues(dates, ind.willr14));
+            series.willr.createPriceLine({ price: -20, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '-20' });
+            series.willr.createPriceLine({ price: -80, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '-80' });
+        }
+
+        return { series, title };
+    }
+
+    // state.activeOscillators ile DOM'daki panelleri senkronize eder:
+    // artık aktif olmayanları yok eder, hâlâ/yeni aktif olanları
+    // oluşturur ya da yeniden çizer. resolution/sembol değişince (bkz.
+    // applyResolution()) ve checkbox tıklanınca bu fonksiyon çağrılır.
+    function renderAllOscillatorPanes() {
+        if (!chart || !candleSeries) return;
+        const active = state.activeOscillators || [];
+
+        Object.keys(oscillatorPanes).forEach(id => {
+            if (!active.includes(id)) destroyOscillatorPane(id);
+        });
+
+        if (!state.indicators || !state.candles.length) return;
+        const dates = state.candles.map(c => c.date);
+        const ind = state.indicators;
+
+        active.forEach(id => {
+            const entry = ensureOscillatorPane(id);
+            if (!entry) return;
+            Object.values(entry.series).forEach(s => { try { entry.chart.removeSeries(s); } catch (e) {} });
+            entry.series = {};
+            const built = buildOscillatorSeries(entry.chart, id, ind, dates);
+            entry.series = built.series;
+            const titleEl = entry.el.querySelector('.tv-osc-title');
+            if (titleEl) titleEl.textContent = built.title;
+        });
+
+        // Panellerin zaman eksenini ana grafikle hizala.
+        const range = chart.timeScale().getVisibleLogicalRange();
+        if (range) {
+            Object.values(oscillatorPanes).forEach(p => p.chart.timeScale().setVisibleLogicalRange(range));
+        }
+
+        resizeOscillatorPanes();
+    }
+
+    function resizeOscillatorPanes() {
+        Object.values(oscillatorPanes).forEach(p => {
+            const mount = p.el.querySelector('.tv-osc-chart-mount');
+            if (mount) p.chart.applyOptions({ width: mount.clientWidth, height: mount.clientHeight });
         });
     }
 
@@ -977,7 +1308,6 @@ const TradingChart = (() => {
             searchInput.addEventListener('input', () => filterIndicatorList(searchInput.value));
         }
 
-        setupOscillatorButtons();
         setupIndicatorCopyPaste();
     }
 
@@ -1012,9 +1342,9 @@ const TradingChart = (() => {
         copyBtn.addEventListener('click', () => {
             copiedIndicatorSettings = {
                 overlays: {},
-                oscillator: byId('oscillator-type-select') ? byId('oscillator-type-select').value : state.oscillator
+                activeOscillators: state.activeOscillators.slice()
             };
-            ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-bollinger', 'chk-vwap'].forEach(id => {
+            ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap'].forEach(id => {
                 const el = byId(id);
                 copiedIndicatorSettings.overlays[id] = el ? el.checked : false;
             });
@@ -1031,73 +1361,15 @@ const TradingChart = (() => {
                 if (el) el.checked = copiedIndicatorSettings.overlays[id];
             });
             renderOverlays();
-            const sel = byId('oscillator-type-select');
-            const list = byId('indicator-oscillator-list');
-            if (sel) {
-                sel.value = copiedIndicatorSettings.oscillator;
-                state.oscillator = sel.value;
-                if (list) {
-                    list.querySelectorAll('.indicator-osc-item').forEach(b => {
-                        b.classList.toggle('active', b.dataset.osc === sel.value);
-                    });
-                }
-                renderOscillatorPane();
-            }
+            state.activeOscillators = copiedIndicatorSettings.activeOscillators.slice();
+            saveActiveOscillators();
+            document.querySelectorAll('.osc-checkbox').forEach(cb => {
+                cb.checked = state.activeOscillators.includes(cb.dataset.osc);
+            });
+            renderAllOscillatorPanes();
             pasteBtn.textContent = 'Yapıştırıldı ✓';
             setTimeout(() => { pasteBtn.textContent = 'Yapıştır'; }, 1400);
         });
-    }
-
-    function renderOscillatorPane() {
-        if (!subChart || !chart || !candleSeries) return;
-        Object.values(subSeries).forEach(s => { try { subChart.removeSeries(s); } catch (e) {} });
-        subSeries = {};
-        if (!state.indicators || !state.candles.length) return;
-
-        const dates = state.candles.map(c => c.date);
-        const ind = state.indicators;
-        const type = state.oscillator;
-        const titleEl = byId('tv-oscillator-title');
-
-        if (type === 'rsi') {
-            subSeries.rsi = subChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.rsi.setData(seriesFromValues(dates, ind.rsi14));
-            subSeries.rsi.createPriceLine({ price: 70, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '70' });
-            subSeries.rsi.createPriceLine({ price: 30, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '30' });
-            if (titleEl) titleEl.textContent = 'RSI (14)';
-        } else if (type === 'macd') {
-            subSeries.hist = subChart.addHistogramSeries({ priceLineVisible: false, color: '#42A5F5' });
-            subSeries.hist.setData(seriesFromValues(dates, ind.macd.histogram).map(p => ({
-                time: p.time, value: p.value, color: p.value >= 0 ? 'rgba(76,175,80,0.55)' : 'rgba(244,67,54,0.55)'
-            })));
-            subSeries.macd = subChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.macd.setData(seriesFromValues(dates, ind.macd.macdLine));
-            subSeries.signal = subChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.signal.setData(seriesFromValues(dates, ind.macd.signalLine));
-            if (titleEl) titleEl.textContent = 'MACD (12,26,9)';
-        } else if (type === 'stoch') {
-            subSeries.k = subChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.k.setData(seriesFromValues(dates, ind.stochastic.k));
-            subSeries.d = subChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.d.setData(seriesFromValues(dates, ind.stochastic.d));
-            if (titleEl) titleEl.textContent = 'Stochastic (14,3)';
-        } else if (type === 'atr') {
-            subSeries.atr = subChart.addLineSeries({ color: '#EF6C00', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.atr.setData(seriesFromValues(dates, ind.atr14));
-            if (titleEl) titleEl.textContent = 'ATR (14)';
-        } else if (type === 'adx') {
-            subSeries.adx = subChart.addLineSeries({ color: '#AB47BC', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.adx.setData(seriesFromValues(dates, ind.adx14));
-            if (titleEl) titleEl.textContent = 'ADX (14)';
-        } else if (type === 'obv') {
-            subSeries.obv = subChart.addLineSeries({ color: '#26A69A', lineWidth: 1.5, priceLineVisible: false });
-            subSeries.obv.setData(seriesFromValues(dates, ind.obv));
-            if (titleEl) titleEl.textContent = 'OBV';
-        }
-
-        // Keep sub-chart time range in sync with main chart after redraw
-        const range = chart.timeScale().getVisibleLogicalRange();
-        if (range) subChart.timeScale().setVisibleLogicalRange(range);
     }
 
     /* ────────── Crosshair -> OHLC legend ────────── */
@@ -1256,6 +1528,21 @@ const TradingChart = (() => {
             { id: 'gann_fan', label: 'Gann Yelpazesi' },
             { id: 'elliott', label: 'Elliott Dalgası (Manuel)' }
         ] },
+        // (18 Temmuz 2026, onuncu oturum, ikinci tur) Kullanıcı isteği:
+        // "çizgiler - fibonacci - grafik desenleri - tahmin kısımları ayrı
+        // ayrı sol tarafta olsun". Çizgiler ve Fibonacci zaten ayrı rail
+        // ikonlarıydı (yukarıda); burada aynı desende iki YENİ kategori
+        // ekliyoruz. Elliott Dalgası'ndaki gibi dürüstlük ilkesi geçerli:
+        // ABCD deseni kullanıcının 4 noktayı elle işaretlediği görsel bir
+        // araç — otomatik desen TANIMA yapmıyor. Tahmin/Projeksiyon aracı
+        // da düz bir doğrusal ekstrapolasyon — YATIRIM TAVSİYESİ DEĞİLDİR,
+        // sadece mevcut eğimin görsel devamı.
+        { id: 'patterns', label: 'Desenler', tools: [
+            { id: 'abcd', label: 'ABCD Deseni (Manuel)' }
+        ] },
+        { id: 'forecast', label: 'Tahmin', tools: [
+            { id: 'trend_projection', label: 'Trend Projeksiyonu (Doğrusal — yatırım tavsiyesi değildir)' }
+        ] },
         { id: 'shapes', label: 'Şekiller', tools: [
             { id: 'rect', label: 'Dikdörtgen' },
             { id: 'ellipse', label: 'Elips' },
@@ -1293,6 +1580,8 @@ const TradingChart = (() => {
             fib_time: '<line x1="4" y1="3" x2="4" y2="21"></line><line x1="10" y1="3" x2="10" y2="21"></line><line x1="16" y1="3" x2="16" y2="21"></line><line x1="21" y1="3" x2="21" y2="21"></line>',
             gann_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="12" y2="3"></line><line x1="3" y1="21" x2="21" y2="12"></line><line x1="3" y1="21" x2="21" y2="17"></line><circle cx="3" cy="21" r="1.6" fill="currentColor"></circle>',
             elliott: '<polyline points="2,18 7,6 11,14 16,3 20,11"></polyline><circle cx="2" cy="18" r="1.4" fill="currentColor"></circle><circle cx="20" cy="11" r="1.4" fill="currentColor"></circle>',
+            abcd: '<polyline points="3,19 9,6 14,15 21,3"></polyline><circle cx="3" cy="19" r="1.6" fill="currentColor"></circle><circle cx="9" cy="6" r="1.6" fill="currentColor"></circle><circle cx="14" cy="15" r="1.6" fill="currentColor"></circle><circle cx="21" cy="3" r="1.6" fill="currentColor"></circle>',
+            trend_projection: '<line x1="3" y1="19" x2="12" y2="9"></line><line x1="12" y1="9" x2="21" y2="2" stroke-dasharray="2.5 2.5"></line><circle cx="3" cy="19" r="1.6" fill="currentColor"></circle>',
             rect: '<rect x="4" y="6" width="16" height="12" rx="1"></rect>',
             ellipse: '<ellipse cx="12" cy="12" rx="9" ry="6"></ellipse>',
             triangle: '<path d="M12 4l9 16H3z"></path>',
@@ -1511,7 +1800,7 @@ const TradingChart = (() => {
     // tıklayarak 0-1-2-3-4-5 dalga noktalarını işaretlediği bir araç (klasik
     // 5 dalgalı itki + düzeltme sayımı). `state.pendingPoints` bu tıklamalar
     // arasında birikir; gerekli nokta sayısına ulaşınca çizim tamamlanır.
-    const MULTI_CLICK_TOOLS = { elliott: 6 };
+    const MULTI_CLICK_TOOLS = { elliott: 6, abcd: 4 };
 
     function priceRangeApprox() {
         if (!state.candles.length) return 1;
@@ -1749,7 +2038,7 @@ const TradingChart = (() => {
     }
 
     function drawShape(shape, isSelected) {
-        if (shape.type === 'brush' || shape.type === 'elliott') {
+        if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
             if (!shape.points || shape.points.length < 2) return;
             const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
             if (pts.length < 2) return;
@@ -1772,6 +2061,17 @@ const TradingChart = (() => {
                 pts.forEach((p, i) => {
                     drawCtx.fillText(WAVE_LABELS[i] !== undefined ? WAVE_LABELS[i] : String(i), p.x + 5, p.y - 5);
                 });
+            } else if (shape.type === 'abcd') {
+                // (18 Temmuz 2026, onuncu oturum, ikinci tur) A-B-C-D deseni:
+                // kullanıcının elle işaretlediği 4 nokta, sadece etiketleme —
+                // Elliott aracıyla aynı dürüstlük ilkesi (otomatik desen
+                // TANIMA yapılmıyor).
+                const ABCD_LABELS = ['A', 'B', 'C', 'D'];
+                drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+                drawCtx.font = 'bold 11px "Fira Code", monospace';
+                pts.forEach((p, i) => {
+                    drawCtx.fillText(ABCD_LABELS[i] !== undefined ? ABCD_LABELS[i] : String(i), p.x + 5, p.y - 5);
+                });
             }
             drawCtx.restore();
             return;
@@ -1793,6 +2093,32 @@ const TradingChart = (() => {
             drawCtx.moveTo(a.x, a.y);
             drawCtx.lineTo(b.x, b.y);
             drawCtx.stroke();
+        } else if (shape.type === 'trend_projection') {
+            // (18 Temmuz 2026, onuncu oturum, ikinci tur) Doğrusal trend
+            // projeksiyonu: p1->p2 SOLID segment + aynı vektörün bir katı
+            // kadar daha DASHED devamı — basit ekstrapolasyon, YATIRIM
+            // TAVSİYESİ DEĞİLDİR. Üçüncü bir nokta saklamıyoruz; projeksiyon
+            // ucu her zaman p1/p2'den render anında hesaplanıyor, böylece
+            // seçim/taşıma/kopyalama gibi genel p1/p2 mantığı değişmeden
+            // çalışıyor.
+            drawCtx.beginPath();
+            drawCtx.moveTo(a.x, a.y);
+            drawCtx.lineTo(b.x, b.y);
+            drawCtx.stroke();
+            const projX = b.x + (b.x - a.x);
+            const projY = b.y + (b.y - a.y);
+            drawCtx.save();
+            drawCtx.setLineDash([6, 4]);
+            drawCtx.beginPath();
+            drawCtx.moveTo(b.x, b.y);
+            drawCtx.lineTo(projX, projY);
+            drawCtx.stroke();
+            drawCtx.restore();
+            drawCtx.save();
+            drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+            drawCtx.font = '9px "Fira Code", monospace';
+            drawCtx.fillText('Projeksiyon (doğrusal)', projX + 4, projY - 4);
+            drawCtx.restore();
         } else if (shape.type === 'ray') {
             const ext = extendLineToEdge(a, b, rect);
             drawCtx.beginPath();
@@ -2025,7 +2351,7 @@ const TradingChart = (() => {
         for (let i = state.drawings.length - 1; i >= 0; i--) {
             const shape = state.drawings[i];
 
-            if (shape.type === 'brush' || shape.type === 'elliott') {
+            if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
                 if (!shape.points || shape.points.length < 2) continue;
                 const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
                 for (let j = 0; j < pts.length - 1; j++) {
@@ -2040,6 +2366,10 @@ const TradingChart = (() => {
 
             if (shape.type === 'trend' || shape.type === 'arrow' || shape.type === 'ray' || shape.type === 'extended' || shape.type === 'channel') {
                 if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
+            } else if (shape.type === 'trend_projection') {
+                if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
+                const projX = b.x + (b.x - a.x), projY = b.y + (b.y - a.y);
+                if (distToSegment(x, y, b.x, b.y, projX, projY) <= HIT_TOLERANCE) return i;
             } else if (shape.type === 'horizontal' || shape.type === 'hray') {
                 if (Math.abs(y - a.y) <= HIT_TOLERANCE) return i;
             } else if (shape.type === 'vline') {
@@ -2104,7 +2434,7 @@ const TradingChart = (() => {
         };
 
         let clone;
-        if (copiedDrawing.type === 'brush' || copiedDrawing.type === 'elliott') {
+        if (copiedDrawing.type === 'brush' || copiedDrawing.type === 'elliott' || copiedDrawing.type === 'abcd') {
             clone = { type: copiedDrawing.type, points: (copiedDrawing.points || []).map(shiftPoint) };
             if (clone.points.length < 2) return false;
         } else {
@@ -2226,10 +2556,7 @@ const TradingChart = (() => {
         if (chart && chartContainer) {
             chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
         }
-        const subContainer = byId('tv-sub-chart');
-        if (subChart && subContainer) {
-            subChart.applyOptions({ width: subContainer.clientWidth, height: subContainer.clientHeight });
-        }
+        resizeOscillatorPanes();
         const dualContainer = byId('tv-main-chart-2');
         if (dualChart && dualContainer) {
             dualChart.applyOptions({ width: dualContainer.clientWidth, height: dualContainer.clientHeight });
@@ -2257,7 +2584,7 @@ const TradingChart = (() => {
             timeScale: { borderColor: c.border }
         };
         if (chart) chart.applyOptions(opts);
-        if (subChart) subChart.applyOptions(opts);
+        Object.values(oscillatorPanes).forEach(p => { if (p.chart) p.chart.applyOptions(opts); });
     }
 
     return Object.freeze({
@@ -2265,7 +2592,7 @@ const TradingChart = (() => {
         loadSymbol,
         updateLastPrice,
         renderOverlays,
-        renderOscillatorPane,
+        renderAllOscillatorPanes,
         getLastClose,
         setTheme,
         setChartType,
@@ -2286,7 +2613,9 @@ const TradingChart = (() => {
         debugGetCandleCount: () => state.candles.length,
         debugIsDualActive: () => dualActive,
         debugGetDualResolution: () => dualResolution,
-        debugIsFullscreenActive: () => fullscreenActive
+        debugIsFullscreenActive: () => fullscreenActive,
+        debugGetActiveOscillators: () => state.activeOscillators.slice(),
+        debugGetOscillatorPaneCount: () => Object.keys(oscillatorPanes).length
     });
 })();
 

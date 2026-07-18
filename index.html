@@ -200,6 +200,12 @@
 
                         <div class="tv-drawing-toolbar" id="chart-toolbar" role="group" aria-label="Çizim araçları"></div>
 
+                        <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur) Sol dikey aracı daraltma/
+                             genişletme tutamacı — sadece 981px+ masaüstü rayı için görünür. -->
+                        <button type="button" class="tv-tool-btn" id="btn-toggle-rail" title="Araç rayını daralt/genişlet">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline id="rail-toggle-arrow" points="15 18 9 12 15 6"></polyline></svg>
+                        </button>
+
                         <button type="button" class="tv-scale-toggle-btn" id="btn-price-scale-toggle" title="Fiyat Ölçeği: Doğrusal / Logaritmik">
                             <span id="price-scale-mode-label">Lin</span>
                         </button>
@@ -243,6 +249,13 @@
                         <div class="tv-chart-pane tv-chart-pane-2" id="tv-chart-pane-2">
                             <div class="tv-dual-pane-header">
                                 <span class="tv-dual-pane-label" id="tv-dual-pane-label">Karşılaştırma</span>
+                                <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur) Dual-Chart panelinin
+                                     kendi temel overlay göstergeleri — SMA20/EMA9 — ana grafiğin tam
+                                     çizim/gösterge motorunu çoğaltmadan, sade toggle butonlarıyla. -->
+                                <div class="tv-dual-overlay-row" id="tv-dual-overlay-row" role="group" aria-label="Karşılaştırma grafiği göstergeleri">
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="sma20">SMA20</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="ema9">EMA9</button>
+                                </div>
                                 <div class="tv-dual-res-row" id="tv-dual-res-row" role="group" aria-label="İkinci grafik zaman dilimi">
                                     <button type="button" class="tv-res-btn" data-dres="1h">1H</button>
                                     <button type="button" class="tv-res-btn" data-dres="4h">4H</button>
@@ -295,19 +308,13 @@
                         </div>
                     </div>
 
-                    <div class="tv-subpane-wrap" id="tv-subpane-wrap">
-                        <!-- (18 Temmuz 2026, onuncu oturum) "İndikatör taşıma": osilatör
-                             panelinin YÜKSEKLİĞİNİ bu tutamaçtan sürükleyerek ayarlayabilme —
-                             gerçek, çalışan bir sürükle-bırak etkileşimi (bkz. tradingChart.js
-                             setupSubpaneResize()). -->
-                        <div class="tv-subpane-resize-handle" id="tv-subpane-resize-handle" title="Sürükleyerek yüksekliği ayarla" role="separator" aria-orientation="horizontal">
-                            <span></span>
-                        </div>
-                        <div class="tv-subpane-header">
-                            <span id="tv-oscillator-title" class="tv-osc-title">RSI (14)</span>
-                        </div>
-                        <div id="tv-sub-chart" class="tv-sub-chart"></div>
-                    </div>
+                    <!-- (18 Temmuz 2026, onuncu oturum) Çoklu osilatör paneli konteyneri —
+                         her aktif gösterge (bkz. yukarıdaki #indicator-oscillator-list
+                         checkbox'ları) burada kendi .tv-osc-pane'ini JS ile alıyor
+                         (tradingChart.js → ensureOscillatorPane()/renderAllOscillatorPanes()).
+                         Panel başlığındaki ⋮⋮ tutamacı sürükle-sırala, panelin üstündeki
+                         ince çizgi sürükle-yükseklik-ayarı sağlıyor. -->
+                    <div class="tv-subpanes-container" id="tv-subpanes-container"></div>
                 </section>
             </main>
 
@@ -385,6 +392,16 @@
                             <input type="number" id="leverage-custom-input" class="form-input leverage-custom-input" min="1" max="20" step="1" placeholder="ör. 7">
                             <span class="leverage-custom-suffix">x</span>
                             <button type="button" class="btn-chip-action" id="btn-leverage-custom-apply">Uygula</button>
+                        </div>
+                        <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur) Manuel kaldıraç için
+                             hızlı-seçim chip'leri — hazır 1/2/5/10x'in kapsamadığı ara
+                             değerlere tek tıkla ulaşmak için (bkz. tradingEngine.js
+                             setupLeverageSelector()). -->
+                        <div class="leverage-quick-chip-row" role="group" aria-label="Hızlı kaldıraç seçimi">
+                            <button type="button" class="leverage-quick-chip" data-leverage-chip="3">3x</button>
+                            <button type="button" class="leverage-quick-chip" data-leverage-chip="7">7x</button>
+                            <button type="button" class="leverage-quick-chip" data-leverage-chip="15">15x</button>
+                            <button type="button" class="leverage-quick-chip" data-leverage-chip="20">20x</button>
                         </div>
                     </div>
 
@@ -674,27 +691,58 @@
                             <span class="custom-checkbox"></span>
                             <span class="checkbox-text">VWAP (Teal)</span>
                         </label>
+                        <label class="checkbox-label indicator-search-item" data-search="wma weighted moving average">
+                            <input type="checkbox" id="chk-wma20">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">WMA 20 (Pembe)</span>
+                        </label>
                     </div>
                 </div>
 
+                <!-- (18 Temmuz 2026, onuncu oturum) Osilatör paneli artık ÇOKLU seçim —
+                     birden fazla gösterge aynı anda alt-panel olarak açılabiliyor, her
+                     panelin başlığındaki ⋮⋮ tutamacından sürükleyerek SIRALANABİLİYOR
+                     (bkz. tradingChart.js setupSubpanesContainer()/renderAllOscillatorPanes()).
+                     Williams %R yeni eklendi (çeşitlendirme). -->
                 <div class="indicator-modal-category" data-category-label="osilatör alt panel momentum">
-                    <div class="indicator-subgroup-label">Osilatör Paneli (Alt Grafik — tek seferde bir tane aktif)</div>
-                    <div class="indicator-oscillator-list" id="indicator-oscillator-list">
-                        <button type="button" class="indicator-osc-item indicator-search-item active" data-osc="rsi" data-search="rsi relative strength index momentum">RSI (14)</button>
-                        <button type="button" class="indicator-osc-item indicator-search-item" data-osc="macd" data-search="macd moving average convergence divergence">MACD (12, 26, 9)</button>
-                        <button type="button" class="indicator-osc-item indicator-search-item" data-osc="stoch" data-search="stochastic momentum">Stochastic (14, 3)</button>
-                        <button type="button" class="indicator-osc-item indicator-search-item" data-osc="atr" data-search="atr average true range volatilite">ATR (14)</button>
-                        <button type="button" class="indicator-osc-item indicator-search-item" data-osc="adx" data-search="adx average directional index trend">ADX (14)</button>
-                        <button type="button" class="indicator-osc-item indicator-search-item" data-osc="obv" data-search="obv on balance volume hacim">OBV</button>
+                    <div class="indicator-subgroup-label">Osilatör Paneli (Alt Grafik — birden fazla seçilebilir, sürükleyerek sıralanabilir)</div>
+                    <div class="indicator-checkbox-group" id="indicator-oscillator-list">
+                        <label class="checkbox-label indicator-search-item" data-search="rsi relative strength index momentum">
+                            <input type="checkbox" class="osc-checkbox" data-osc="rsi" checked>
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">RSI (14)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="macd moving average convergence divergence">
+                            <input type="checkbox" class="osc-checkbox" data-osc="macd">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">MACD (12, 26, 9)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="stochastic momentum">
+                            <input type="checkbox" class="osc-checkbox" data-osc="stoch">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Stochastic (14, 3)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="atr average true range volatilite">
+                            <input type="checkbox" class="osc-checkbox" data-osc="atr">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">ATR (14)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="adx average directional index trend">
+                            <input type="checkbox" class="osc-checkbox" data-osc="adx">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">ADX (14)</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="obv on balance volume hacim">
+                            <input type="checkbox" class="osc-checkbox" data-osc="obv">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">OBV</span>
+                        </label>
+                        <label class="checkbox-label indicator-search-item" data-search="williams %r williams r momentum">
+                            <input type="checkbox" class="osc-checkbox" data-osc="willr">
+                            <span class="custom-checkbox"></span>
+                            <span class="checkbox-text">Williams %R (14)</span>
+                        </label>
                     </div>
-                    <select id="oscillator-type-select" style="display:none;" aria-hidden="true" tabindex="-1">
-                        <option value="rsi">RSI (14)</option>
-                        <option value="macd">MACD (12, 26, 9)</option>
-                        <option value="stoch">Stochastic (14, 3)</option>
-                        <option value="atr">ATR (14)</option>
-                        <option value="adx">ADX (14)</option>
-                        <option value="obv">OBV</option>
-                    </select>
                 </div>
 
                 <div class="indicator-modal-empty" id="indicator-modal-empty" style="display:none;">Eşleşen gösterge bulunamadı.</div>
