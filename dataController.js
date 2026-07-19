@@ -1783,7 +1783,7 @@ const DataController = (() => {
             // 'local' (Chrome distinguishes the two — using the wrong value makes
             // Chrome block the request outright with a CORS address-space-mismatch
             // error before it ever reaches the network).
-            fetch(`http://127.0.0.1:8000/api/v1/backtest/status/${taskId}`, { targetAddressSpace: 'loopback' })
+            fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/backtest/status/${taskId}`, window.optipulseFetchOpts())
                 .then(res => {
                     if (!res.ok) throw new Error(`Status check failed: ${res.status}`);
                     return res.json();
@@ -1833,7 +1833,7 @@ const DataController = (() => {
             isFetchingOhlcv = true;
             console.log(`[DataController] Fetching latest OHLCV data for: ${ticker}`);
             
-            fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { targetAddressSpace: 'loopback' })
+            fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/ohlcv/${ticker}`, window.optipulseFetchOpts())
                 .then(res => {
                     if (!res.ok) {
                         throw { status: res.status, message: `Server error: ${res.statusText}` };

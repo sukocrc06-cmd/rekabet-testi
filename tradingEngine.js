@@ -204,7 +204,7 @@ const TradingEngine = (() => {
     // backend'i kapatmışsa, ya da HTTPS/Vercel ortamında Local Network
     // Access izni yoksa) sessizce sadece mevcut simülasyona devam edilir —
     // hiçbir hata kullanıcıya sızmaz, işlevsellik bozulmaz.
-    const LIVE_FEED_URL_BASE = 'ws://127.0.0.1:8000/ws/live/';
+    const LIVE_FEED_URL_BASE = (window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_WS : 'ws://127.0.0.1:8000') + '/ws/live/';
     // (18 Temmuz 2026, dokuzuncu oturum) Otomatik yeniden bağlanma: sabit
     // bir aralık yerine küçük bir üstel geri çekilme (backoff) kullanılıyor
     // (3sn → 6sn → 12sn → 24sn, 30sn'de tavan) — backend gerçekten kapalıysa
@@ -333,20 +333,19 @@ const TradingEngine = (() => {
     // sessizce hiçbir şey yapmadan bir sonraki turu bekliyor — mevcut
     // simülasyon kesintisiz devam ediyor, hiçbir hata kullanıcıya sızmıyor.
     const WATCHLIST_SYNC_INTERVAL_MS = 90000;
-    const WATCHLIST_SYNC_URL = 'http://127.0.0.1:8000/api/v1/quotes';
+    const WATCHLIST_SYNC_URL = (window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000') + '/api/v1/quotes';
 
     async function syncWatchlistPrices() {
         if (!DC || !Array.isArray(DC.BIST100) || !DC.BIST100.length) return;
         const tickers = DC.BIST100.map(s => s.symbol);
         let json;
         try {
-            const res = await fetch(WATCHLIST_SYNC_URL, {
+            const res = await fetch(WATCHLIST_SYNC_URL, window.optipulseFetchOpts({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tickers }),
-                signal: AbortSignal.timeout(15000),
-                targetAddressSpace: 'loopback'
-            });
+                signal: AbortSignal.timeout(15000)
+            }));
             if (!res.ok) return;
             json = await res.json();
         } catch (e) {

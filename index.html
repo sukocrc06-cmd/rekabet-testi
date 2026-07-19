@@ -258,6 +258,21 @@
                         <div class="tv-overlay-legend" id="tv-overlay-legend"></div>
                     </div>
 
+                    <!-- (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel
+                         verileri") Ana araç çubuğunun hemen altında, kendi ince satırında;
+                         sıkışık .tv-toolbar flex satırının içine eklenmedi (bu araç
+                         çubuğunun geçmişte birkaç kez taşma/kırpılma hatası yaşadığı
+                         belgelenmişti — bkz. proje dokümanı üçüncü/sekizinci oturum). Veri
+                         yfinance'ten geliyor ve gecikmeli olabilir; title tooltip'i bunu
+                         açıkça belirtiyor (bkz. Yardım modalındaki "Veri Kaynağı Notu"). -->
+                    <div class="tv-fundamentals-bar" id="tv-fundamentals-bar" title="Kaynak: yfinance — genelde birkaç dakika gecikmeli, yatırım tavsiyesi değildir.">
+                        <span id="tv-fund-pe">F/K: --</span>
+                        <span class="tv-fundamentals-sep">·</span>
+                        <span id="tv-fund-mcap">Piyasa Değeri: --</span>
+                        <span class="tv-fundamentals-sep">·</span>
+                        <span id="tv-fund-div">Temettü Verimi: --</span>
+                    </div>
+
                     <!-- Zaman dilimi şeridi: TradingView'daki gerçek konumu — ana araç
                          çubuğunun hemen altında, mum grafiğinin üstünde. -->
                     <div class="tv-resolution-bar" id="tv-resolution-bar" role="group" aria-label="Zaman dilimi">
@@ -1048,11 +1063,16 @@
                 <div class="indicator-modal-category">
                     <div class="indicator-subgroup-label">Veri Kaynağı Notu</div>
                     <p class="help-text">
-                        Sembol adının yanındaki küçük nokta, o an ekrandaki fiyatın gerçek zamanlı yfinance
+                        Sembol adının yanındaki küçük nokta, o an ekrandaki fiyatın gerçek yfinance
                         akışından mı (yeşil, yanıp sönen) yoksa yerel simülasyondan mı (gri) geldiğini gösterir.
                         Backend sunucusu çalışmıyorsa veya bir sembol için canlı veri geçici olarak
                         alınamıyorsa, uygulama otomatik olarak gerçekçi bir simülasyona döner — bu bir hata
                         değildir, kasıtlı bir tasarım kararıdır.
+                        <strong>Önemli:</strong> yeşil noktayla gösterilen veri GERÇEKTİR ama
+                        <strong>anlık/gerçek-zamanlı değildir</strong> — yfinance ücretsiz veri kaynağı olduğundan
+                        fiyatlar genelde birkaç dakika gecikmeli gelir (borsanın kendi anlık/ücretli veri
+                        akışıyla birebir aynı milisaniyede değildir). Sembol başlığının altındaki F/K, piyasa
+                        değeri ve temettü verimi gibi temel (fundamental) bilgiler için de aynı gecikme geçerlidir.
                     </p>
                 </div>
             </div>
@@ -1071,6 +1091,7 @@
     <!-- TradingView Lightweight Charts (used by the main trading chart) -->
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <!-- Data Controller -->
+    <script src="config.js"></script>
     <script src="dataController.js"></script>
     <!-- Canvas Chart Renderer (legacy backtest charts) -->
     <script src="chartRenderer.js"></script>

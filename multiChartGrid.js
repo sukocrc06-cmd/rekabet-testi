@@ -125,7 +125,9 @@ const MultiChartGrid = (() => {
     // simüle veri üretimine sorunsuzca düşer.
     async function fetchCellCandles(symbol) {
         try {
-            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${symbol}`, { signal: AbortSignal.timeout(5000), targetAddressSpace: 'loopback' });
+            const backendHttp = window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000';
+            const fetchOpts = window.optipulseFetchOpts ? window.optipulseFetchOpts({ signal: AbortSignal.timeout(5000) }) : { signal: AbortSignal.timeout(5000) };
+            const res = await fetch(`${backendHttp}/api/v1/ohlcv/${symbol}`, fetchOpts);
             if (res.ok) {
                 const json = await res.json();
                 if (json && Array.isArray(json.data) && json.data.length > 5) {

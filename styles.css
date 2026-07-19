@@ -3079,6 +3079,28 @@ body.compact-mode .status-item {
 
 /* Zaman dilimi (resolution) şeridi — gerçek TradingView konumu: ana araç
  * çubuğunun hemen altında, mum grafiğinin üstünde. */
+/* (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel verileri")
+   Kendi ince satırı, sıkışık .tv-toolbar flex satırının dışında — bu
+   araç çubuğunun geçmişte birkaç kez taşma/kırpılma hatası yaşadığı
+   belgelenmişti, o riski tekrar almamak için ayrı bir satıra kondu. */
+.tv-fundamentals-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 14px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.tv-fundamentals-sep {
+    opacity: 0.5;
+}
+
 .tv-resolution-bar {
     display: flex;
     align-items: center;

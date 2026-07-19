@@ -407,12 +407,11 @@ document.addEventListener('DOMContentLoaded', () => {
             trade_count: state.lastResult.metrics.totalTrades
         };
 
-        fetch('http://127.0.0.1:8000/api/v1/backtest/export', {
+        fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/backtest/export`, window.optipulseFetchOpts({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(reqBody),
-            targetAddressSpace: 'loopback'
-        })
+            body: JSON.stringify(reqBody)
+        }))
         .then(res => {
             if (!res.ok) throw new Error('PDF generation failed');
             return res.blob();
@@ -587,15 +586,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Try running via real FastAPI backend ──
             console.log(`[Frontend] Initiating backtest run for ${state.selectedAsset} on engine: ${state.engine}`);
-            fetch('http://127.0.0.1:8000/api/v1/backtest/run', {
+            fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/backtest/run`, window.optipulseFetchOpts({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ticker: state.selectedAsset,
                     engine_id: state.engine
-                }),
-                targetAddressSpace: 'loopback'
-            })
+                })
+            }))
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP Error ${res.status}: Backend server returned error response`);
                 return res.json();
@@ -657,7 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             })
             .catch(err => {
-                const targetUrl = 'http://127.0.0.1:8000/api/v1/backtest/run';
+                const targetUrl = `${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/backtest/run`;
                 console.error(`[Frontend Connection Debug] Failed to reach: ${targetUrl}. Method: POST. Error: ${err.message || err}`);
                 showNotice('Server offline. Using offline simulation mode.');
                 
@@ -1072,7 +1070,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // two) so Chrome correctly recognizes this as a loopback request
         // under its Local Network Access (LNA) permission model instead of
         // blocking it with an address-space mismatch error.
-        fetch('http://127.0.0.1:8000/api/v1/health', { targetAddressSpace: 'loopback' })
+        fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/health`, window.optipulseFetchOpts())
             .then(res => {
                 if (!res.ok) throw new Error('Unhealthy status');
                 return res.json();
@@ -1112,12 +1110,19 @@ document.addEventListener('DOMContentLoaded', () => {
             target.title = 'Backend sunucusuna ulaşılamıyor — fiyatlar tamamen yerel simülasyondan geliyor.';
             return;
         }
+        // (18 Temmuz 2026, onuncu oturum, beşinci tur — Madde: "veri gecikme/
+        // güncellik etiketini netleştir") yfinance ücretsiz veri kaynağı
+        // gerçek ama genelde birkaç dakika gecikmeli oluyor (borsanın kendi
+        // gerçek zamanlı/ücretli veri akışıyla birebir aynı anda değil) —
+        // önceden bu ayrım tooltip metninde netleşmiyordu, "gerçek zamanlı"
+        // ifadesi yanlış bir kesinlik izlenimi verebiliyordu. Artık her iki
+        // dalda da bu netleştirilmiş.
         if (lastLiveFeedStatus.active && lastLiveFeedStatus.symbol) {
             const secsAgo = lastLiveFeedStatus.lastTickAt ? Math.round((Date.now() - lastLiveFeedStatus.lastTickAt) / 1000) : null;
-            target.title = lastLiveFeedStatus.symbol + ' için gerçek zamanlı yfinance verisi akıyor' +
-                (secsAgo !== null ? ' (son güncelleme ' + secsAgo + 'sn önce).' : '.');
+            target.title = lastLiveFeedStatus.symbol + ' için gerçek yfinance verisi akıyor (genelde birkaç dakika gecikmeli — anlık/ücretli borsa verisi değildir)' +
+                (secsAgo !== null ? '; son güncelleme ' + secsAgo + 'sn önce.' : '.');
         } else {
-            target.title = 'Backend çalışıyor. Şu an gösterilen fiyatlar yerel simülasyon — canlı veri akışı henüz bağlanmadı veya bu sembol için kullanılamıyor.';
+            target.title = 'Backend çalışıyor. Şu an gösterilen fiyatlar yerel simülasyon — canlı veri akışı henüz bağlanmadı veya bu sembol için kullanılamıyor. (Bağlandığında da yfinance verisi genelde birkaç dakika gecikmeli olur.)';
         }
     }
     // (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük
@@ -1140,7 +1145,7 @@ document.addEventListener('DOMContentLoaded', () => {
             lastLiveFeedStatus.symbol === currentSymbol;
         dot.classList.toggle('is-live', !!isLiveForCurrentSymbol);
         dot.title = isLiveForCurrentSymbol
-            ? 'Gerçek zamanlı yfinance verisi akıyor'
+            ? 'Gerçek yfinance verisi akıyor (genelde birkaç dakika gecikmeli)'
             : 'Yerel simülasyon fiyatı';
     }
     window.__optipulseSetLiveFeedStatus = (status) => {

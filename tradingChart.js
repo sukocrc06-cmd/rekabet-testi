@@ -319,7 +319,7 @@ const TradingChart = (() => {
     // symbol selection.
     async function fetchOhlcvWithRetry(ticker) {
         const attempt = async (timeoutMs) => {
-            const res = await fetch(`http://127.0.0.1:8000/api/v1/ohlcv/${ticker}`, { signal: AbortSignal.timeout(timeoutMs), targetAddressSpace: 'loopback' });
+            const res = await fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/ohlcv/${ticker}`, window.optipulseFetchOpts({ signal: AbortSignal.timeout(timeoutMs) }));
             if (!res.ok) return null;
             const json = await res.json();
             if (!json || !Array.isArray(json.data) || json.data.length <= 5) return null;
@@ -353,6 +353,60 @@ const TradingChart = (() => {
         return null;
     }
 
+    // (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel verileri")
+    // F/K, piyasa değeri, temettü verimi — backend'in yeni /api/v1/fundamentals
+    // ucundan çekiliyor. Grafiğin kendisini HİÇ geciktirmiyor: loadSymbol()
+    // içinde "await" edilmeden, ayrı bir kısa zaman aşımıyla çağrılıyor —
+    // backend kapalıysa veya bu sembol için veri yoksa satır sessizce "--"
+    // göstermeye devam eder, hiçbir hata kullanıcıya sızmaz (projedeki
+    // "sessiz/gerçekçi yedek" ilkesiyle tutarlı, bkz. fetchOhlcvWithRetry).
+    function formatMarketCap(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+        return String(Math.round(v));
+    }
+    function formatPE(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        return Number(v).toFixed(1);
+    }
+    function formatDividendYield(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        // yfinance sürümüne göre dividendYield bazen kesir (0.032), bazen
+        // zaten yüzde (3.2) olarak geliyor — backend'deki yorumda da
+        // belirtildi. >1 olan değerleri "zaten yüzde" kabul ediyoruz.
+        const pct = v > 1 ? v : v * 100;
+        return pct.toFixed(2) + '%';
+    }
+    async function fetchFundamentals(ticker) {
+        const peEl = document.getElementById('tv-fund-pe');
+        const mcapEl = document.getElementById('tv-fund-mcap');
+        const divEl = document.getElementById('tv-fund-div');
+        if (!peEl || !mcapEl || !divEl) return;
+        // Sembol değişir değişmez placeholder'a dön — önceki sembolün eski
+        // verisi yeni fetch tamamlanana kadar ekranda asılı kalmasın.
+        peEl.textContent = 'F/K: --';
+        mcapEl.textContent = 'Piyasa Değeri: --';
+        divEl.textContent = 'Temettü Verimi: --';
+        try {
+            const backendHttp = window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000';
+            const fetchOpts = window.optipulseFetchOpts
+                ? window.optipulseFetchOpts({ signal: AbortSignal.timeout(8000) })
+                : { signal: AbortSignal.timeout(8000) };
+            const res = await fetch(`${backendHttp}/api/v1/fundamentals/${ticker}`, fetchOpts);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (state.ticker !== ticker) return; // kullanıcı bu sırada başka bir sembole geçtiyse eski veriyi yazma
+            peEl.textContent = 'F/K: ' + formatPE(data.trailingPE);
+            mcapEl.textContent = 'Piyasa Değeri: ₺' + formatMarketCap(data.marketCap);
+            divEl.textContent = 'Temettü Verimi: ' + formatDividendYield(data.dividendYield);
+        } catch (e) {
+            // Sessizce yoksay — backend kapalıysa/erişilemezse satır "--"
+            // göstermeye devam eder, bu bir hata değil beklenen bir durumdur.
+        }
+    }
+
     async function loadSymbol(ticker) {
         if (!chart || !candleSeries) {
             console.warn('[TradingChart] Chart not initialized (library failed to load?) — skipping loadSymbol.');
@@ -367,6 +421,7 @@ const TradingChart = (() => {
 
         state.ticker = ticker;
         setSymbolHeader(ticker, null, null);
+        fetchFundamentals(ticker); // fire-and-forget, chart yüklemesini beklemez
 
         let candles = await fetchOhlcvWithRetry(ticker);
 

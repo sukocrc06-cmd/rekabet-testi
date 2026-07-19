@@ -7,6 +7,7 @@ from typing import List
 import yfinance as yf
 import io
 import gc
+import os
 import requests
 import pandas as pd
 import numpy as np
@@ -429,6 +430,54 @@ def get_data(ticker: str):
                 record["Date"] = str(record["Date"])
 
         return {"ticker": ticker, "data": data}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": _friendly_fetch_error(e)}
+        )
+
+# (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel verileri")
+# F/K (trailing P/E), piyasa değeri ve temettü verimi gibi temel/fundamental
+# veriler yfinance'in .get_info()/.info sözlüğünden geliyor — bu, fiyat
+# geçmişini çeken .history() çağrısından çok daha ağır/yavaş bir uç nokta
+# (onlarca alanlı tam bir sözlük döndürüyor), bu yüzden AYRI ve daha UZUN
+# bir TTL ile önbelleğe alınıyor (temel veriler gün içinde neredeyse hiç
+# değişmez — F/K ve piyasa değeri fiyatla birlikte kısmen değişse de, saatlik
+# tazeleme pratikte yeterli ve gereksiz Yahoo Finance yükünü önlüyor).
+_FUNDAMENTALS_CACHE_TTL_SEC = 6 * 3600
+_fundamentals_cache = {}  # formatted_ticker -> (timestamp, dict)
+
+
+@app.get("/api/v1/fundamentals/{ticker}")
+def get_fundamentals(ticker: str):
+    try:
+        formatted = format_ticker(ticker)
+        now = time.time()
+        cached = _fundamentals_cache.get(formatted)
+        if cached and (now - cached[0]) < _FUNDAMENTALS_CACHE_TTL_SEC:
+            return {"ticker": ticker, **cached[1], "cached": True}
+
+        stock = yf.Ticker(formatted, session=session)
+        info = {}
+        try:
+            # Newer yfinance versions expose get_info(); older ones only have
+            # the .info property. Try both so this keeps working regardless
+            # of which yfinance version the user's environment has installed.
+            info = stock.get_info() if hasattr(stock, "get_info") else stock.info
+        except Exception:
+            info = {}
+
+        # dividendYield in yfinance is typically a fraction (0.032 == 3.2%),
+        # but this has varied across library versions/data revisions — the
+        # frontend treats any value > 1 as "already a percent" defensively
+        # rather than assuming one convention blindly.
+        data = {
+            "trailingPE": info.get("trailingPE"),
+            "marketCap": info.get("marketCap"),
+            "dividendYield": info.get("dividendYield"),
+        }
+        _fundamentals_cache[formatted] = (now, data)
+        return {"ticker": ticker, **data, "cached": False}
     except Exception as e:
         return JSONResponse(
             status_code=500,
@@ -949,4 +998,20 @@ def export_report(request: PDFRequest):
             status_code=500,
             content={"status": "error", "message": f"Failed to generate report PDF: {str(e)}"}
         )
+
+# (18 Temmuz 2026, onuncu oturum, beşinci tur — bulut dağıtımı hazırlığı)
+# README_DEPLOY.md bu bloğun burada olduğunu iddia ediyordu ama gerçekte hiç
+# yoktu (bulut host'un enjekte ettiği PORT ortam değişkenini okuyup uvicorn'u
+# ona göre başlatan bir çalıştırıcı). Render/Railway gibi platformlar "Start
+# Command" alanına açıkça `uvicorn main:app --host 0.0.0.0 --port $PORT`
+# yazıldığında zaten bu bloğa ihtiyaç duymuyor (komut PORT'u kendisi enjekte
+# ediyor) — ama bazı platformlar/otomatik-algılama modları sadece `python
+# main.py` çalıştırabiliyor; bu blok o durumda da doğru portu dinlemeyi
+# garanti ediyor. Yerelde (bu dosya doğrudan `python main.py` ile
+# çalıştırıldığında) PORT ortam değişkeni yoksa varsayılan olarak 8000'i
+# kullanmaya devam ediyor, yani mevcut yerel iş akışı hiç değişmiyor.
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 # EOF
