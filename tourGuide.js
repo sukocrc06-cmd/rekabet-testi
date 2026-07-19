@@ -44,6 +44,31 @@ const TourGuide = (() => {
     }
     function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+    // ────────── Mobil kayar (drawer) panel desteği (19 Temmuz 2026, on
+    // birinci oturum) ──────────
+    // 980px altında sol "Piyasa" paneli (#sidebar-panel) ve sağ işlem paneli
+    // (#trading-panel) artık sabit sütun değil, header'daki ikonlarla açılıp
+    // kapanan kayar (off-canvas) panellere dönüşüyor (bkz. app.js
+    // setupMobileDrawers()). Tur bunu bilmeden önce, ör. izleme listesi veya
+    // Stop-Loss/Take-Profit adımlarında hedef element ekranın tamamen
+    // dışında kalıyor, tur kartı "solda... bakın" derken görünürde hiçbir
+    // şey olmuyordu. Adımlara eklenen `mobilePanel: 'sidebar' | 'trade'`
+    // alanı, o adıma girerken ilgili drawer'ı (tıklama tabanlı toggle yerine
+    // doğrudan class ekleyerek — olası bir çift-tıklama/kapanma yarışını
+    // önlemek için) açıyor, diğerini kapatıyor.
+    function applyMobileDrawer(step) {
+        if (window.innerWidth > 980) return;
+        const sidebar = byId('sidebar-panel');
+        const tradePanel = byId('trading-panel');
+        const backdrop = byId('mobile-drawer-backdrop');
+        if (!sidebar || !tradePanel) return;
+        const wantSidebar = step.mobilePanel === 'sidebar';
+        const wantTrade = step.mobilePanel === 'trade';
+        sidebar.classList.toggle('drawer-open', wantSidebar);
+        tradePanel.classList.toggle('drawer-open', wantTrade);
+        if (backdrop) backdrop.classList.toggle('visible', wantSidebar || wantTrade);
+    }
+
     function buildSteps() {
         return [
             {
@@ -175,6 +200,7 @@ const TourGuide = (() => {
             },
             {
                 setup: async () => { closeAllAppModals(); },
+                mobilePanel: 'sidebar',
                 selector: () => byId('watchlist-body')?.closest('.form-group') || byId('watchlist-body'),
                 title: 'Sadeleştirilmiş İzleme Listesi',
                 desc: 'Sol taraftaki izleme listesine bakın — daha sade bir tasarıma kavuştu, arama kutusuyla semboller arasında hızlıca gezinebilir, her satırdaki küçük grafikle (sparkline) son fiyat hareketini görebilirsiniz.'
@@ -196,6 +222,7 @@ const TourGuide = (() => {
                         chk.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 },
+                mobilePanel: 'trade',
                 selector: '#qt-sltp-row',
                 title: 'Stop-Loss / Take-Profit',
                 desc: 'Sağdaki emir panelinde şimdi açılan alanlara bakın — emir girerken ya da açık bir pozisyonda sonradan Stop-Loss / Take-Profit seviyeleri belirleyebilirsiniz. Fiyat o seviyeye ulaştığında pozisyon otomatik kapanır.'
@@ -211,6 +238,7 @@ const TourGuide = (() => {
                     const btn1x = document.querySelector('.leverage-btn[data-leverage="1"]');
                     if (btn1x && !btn1x.classList.contains('active')) btn1x.click();
                 },
+                mobilePanel: 'trade',
                 selector: () => document.querySelector('.leverage-selector')?.closest('.form-group') || document.querySelector('.leverage-selector'),
                 title: 'Kaldıraç / Marj Sistemi',
                 desc: 'Emir panelinde hazır 1x/2x/5x/10x düğmeleri, 1-20x arası serbest manuel giriş ve 3x/7x/15x/20x hızlı-seçim çipleriyle kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
@@ -226,24 +254,28 @@ const TourGuide = (() => {
                     const marketTab = byId('qt-order-market');
                     if (marketTab && !marketTab.classList.contains('active')) marketTab.click();
                 },
+                mobilePanel: 'trade',
                 selector: '#qt-oco-row',
                 title: 'Gelişmiş Emirler: OCO / Trailing Stop',
                 desc: '"OCO" sekmesinde üst ve alt tetikleyici fiyat girerek bekleyen bir emir çifti oluşturabilirsiniz — biri gerçekleşince diğeri otomatik iptal olur. SL/TP alanında ise sabit bir stop yerine fiyatı lehte takip eden "Trailing Stop" seçilebiliyor.'
             },
             {
                 setup: async () => { closeAllAppModals(); switchPanelTab('orderbook'); },
+                mobilePanel: 'trade',
                 selector: '#panel-tab-orderbook',
                 title: 'Emir Defteri (Order Book)',
                 desc: 'Sağdaki panel şimdi "Emir Defteri" sekmesinde — Binance tarzı simüle edilmiş alım/satım derinliği, canlı değişen fiyat kademeleri ve orta fiyat çizgisiyle.'
             },
             {
                 setup: async () => { switchPanelTab('trades'); },
+                mobilePanel: 'trade',
                 selector: '#panel-tab-trades',
                 title: 'Son İşlemler Akışı',
                 desc: 'Şimdi "Son İşlemler" sekmesindesiniz — simüle edilmiş canlı işlem akışı (trade tape), her işlemin fiyatı, miktarı ve saatiyle birlikte akıyor.'
             },
             {
                 setup: async () => { switchPanelTab('performance'); },
+                mobilePanel: 'trade',
                 selector: '#panel-tab-performance',
                 title: 'Portföy Performans Analitiği',
                 desc: '"Performans" sekmesinde toplam K/Z, kazanma oranı, profit factor ve canlı özkaynak eğrisiyle performansınızı tek ekrandan takip edebilirsiniz.'
@@ -257,6 +289,7 @@ const TourGuide = (() => {
             },
             {
                 setup: async () => { closeAllAppModals(); switchPanelTab('trade'); },
+                mobilePanel: 'trade',
                 selector: '#btn-export-history-csv',
                 title: 'İşlem Geçmişini CSV Olarak İndir',
                 desc: 'Sağ paneldeki "Son Emirler" bölümünün yanındaki CSV düğmesiyle tüm işlem geçmişinizi Excel uyumlu (Türkçe karakter destekli) bir dosya olarak dışa aktarabilirsiniz.'
@@ -458,6 +491,7 @@ const TourGuide = (() => {
         currentIndex = index;
         const step = STEPS[index];
 
+        applyMobileDrawer(step);
         if (step.setup) {
             try { await step.setup(); } catch (e) { console.warn('[TourGuide] setup failed', e); }
         }
@@ -511,6 +545,8 @@ const TourGuide = (() => {
         window.removeEventListener('resize', scheduleReposition);
         window.removeEventListener('scroll', scheduleReposition, true);
         if (cardEl) cardEl.classList.remove('tour-visible');
+        // Mobilde bir drawer açık kalmışsa tur biterken/kapanırken kapat.
+        if (window.__optipulseCloseMobileDrawers) window.__optipulseCloseMobileDrawers();
     }
 
     /* ────────── Wiring ────────── */

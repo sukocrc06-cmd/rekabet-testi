@@ -1298,6 +1298,61 @@ body {
     .header-balance-label {
         display: none;
     }
+
+    /* (19 Temmuz 2026, on birinci oturum) .header-status (Engine/Latency)
+       zaten "Market Time"/"Market" öğelerini .text-hide-mobile ile 640px'te
+       gizliyordu ama Engine + Latency kaldığı için ~390px genişlikte
+       .logo-area (188px) + .header-actions (277px) tek başına viewport'u
+       aşıyor, .header-status'a hiç yer kalmayınca da flex-shrink onu
+       neredeyse 0 genişliğe sıkıştırıp bozuk görünmesine yol açıyordu.
+       Bu iki öğe de sadece tanı amaçlı (demo motorunun canlı olduğunu
+       gösteren dekoratif bilgi) — dar ekranda tamamen gizlemek, gerçek
+       işlevsellikten (alım/satım, bakiye, tema, menü) hiçbir şey
+       kaybettirmeden header'ı sığdırıyor. */
+    .header-status {
+        display: none;
+    }
+
+    /* Header'daki geri kalan öğeler (logo, drawer düğmeleri, bakiye, sessize
+       al, tema, ☰ menü) hepsi gerçek işlevsel kontroller — hiçbiri
+       gizlenemez. Bunun yerine her biri biraz daha kompakt hale getirilip
+       toplam genişlik 390px'lik bir telefonda taşmaya en yakın hale
+       getiriliyor (kalan küçük bir taşma varsa zaten .dashboard-header'ın
+       mevcut overflow-x:auto'su — bkz. yukarıdaki "Responsive Adjustments"
+       bölümü — yatay kaydırmayla telafi ediyor). */
+    .pulse-indicator {
+        display: none;
+    }
+
+    .logo-area h1 {
+        font-size: 13px;
+    }
+
+    .header-balance-pill {
+        padding: 5px 8px;
+        gap: 4px;
+    }
+
+    .header-balance-value {
+        font-size: 12px;
+    }
+
+    .btn-icon {
+        width: 30px;
+        height: 30px;
+    }
+
+    .dashboard-header {
+        padding: 0 6px;
+    }
+
+    .logo-area {
+        gap: 5px;
+    }
+
+    .header-actions {
+        gap: 3px;
+    }
 }
 
 /* --- Competition Panel (Right Sidebar) --- */
@@ -4143,6 +4198,54 @@ body.compact-mode .status-item {
 @media (max-width: 980px) {
     #btn-toggle-rail {
         display: none;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBİL ARAÇ ÇUBUĞU YENİDEN DÜZENİ (19 Temmuz 2026, on birinci oturum)
+   980px altında #chart-toolbar (sol dikey ray yerine, yukarıdaki
+   "min-width:981px" bloğu devre dışı kaldığı için) yeniden .tv-toolbar'ın
+   İÇİNE, yatay akışa dönüyor. Ama tek satırlık .tv-toolbar zaten sembol adı +
+   grafik tipi menüsü + fiyat ölçeği/göstergeler/alarmlar düğmeleriyle dolu —
+   ~20 gerçek çizim aracı da eklenince satır genişliği 1100px'i aşıp 390px'lik
+   bir telefonda aracın büyük kısmı tek bir belirsiz yatay kaydırmanın
+   arkasında ekran dışında kalıyordu (ölçüldü: 1124px içerik / 390px viewport,
+   çizim rayı left:333px'te başlıyordu). Araçların KENDİSİ hâlâ değişmiyor —
+   yalnızca çizim rayına ve gösterge chip şeridine kendi tam genişlikte, kendi
+   yatay kaydırmalı satırları veriyoruz; üstteki satır (sembol/grafik
+   tipi/ölçek/göstergeler/alarmlar) böylece her zaman doğrudan görünür
+   kalıyor. */
+@media (max-width: 980px) {
+    .tv-toolbar {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 48px;
+        row-gap: 6px;
+        padding: 8px 10px;
+    }
+
+    #chart-toolbar.tv-drawing-toolbar {
+        order: 5;
+        flex: 1 1 100%;
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        border-left: none;
+        border-top: 1px solid var(--tint-06);
+        padding-left: 0;
+        padding-top: 6px;
+        scrollbar-width: none;
+    }
+
+    #chart-toolbar.tv-drawing-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .tv-overlay-legend {
+        order: 6;
+        flex: 1 1 100%;
+        width: 100%;
     }
 }
 
