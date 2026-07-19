@@ -1616,8 +1616,17 @@ const TradingEngine = (() => {
         if (marketTab) marketTab.classList.toggle('active', type === 'MARKET');
         if (limitTab) limitTab.classList.toggle('active', type === 'LIMIT');
         if (ocoTab) ocoTab.classList.toggle('active', type === 'OCO');
-        if (limitRow) limitRow.style.display = type === 'LIMIT' ? 'flex' : 'none';
-        if (ocoRow) ocoRow.style.display = type === 'OCO' ? 'flex' : 'none';
+        // BULUNAN GERÇEK HATA (18 Temmuz 2026, onuncu oturum, beşinci tur):
+        // bu iki satır önceden 'flex' kullanıyordu — #qt-limit-row/#qt-oco-row
+        // birer .form-group (varsayılan block/dikey düzen); 'flex' verilince
+        // flex-direction varsayılanı 'row' olduğundan içindeki label+input
+        // (limit) veya iki tetikleyici alanı + ipucu metni (OCO) yan yana
+        // sıkışıp etiketler birkaç kelimeye bölünerek dar sütunlara
+        // dönüşüyordu (kullanıcının bildirdiği "OCO Tetikleyicileri" ekranı
+        // buydu). Doğru değer 'block' — .form-group'un zaten kendi normal
+        // dikey akışı.
+        if (limitRow) limitRow.style.display = type === 'LIMIT' ? 'block' : 'none';
+        if (ocoRow) ocoRow.style.display = type === 'OCO' ? 'block' : 'none';
 
         // OCO bekleyen bir emir — hangi yönde gerçekleşeceği önceden
         // bilinmediğinden (tetikleyen fiyata bağlı), AL/SAT yön seçici ve

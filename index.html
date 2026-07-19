@@ -470,18 +470,25 @@
 
                     <!-- OCO (One-Cancels-Other) bekleyen emir: fiyat iki tetikleyiciden
                          hangisine önce ulaşırsa o yönde piyasa emri gerçekleşir, diğer
-                         tetikleyici otomatik iptal olur (17 Temmuz 2026, yedinci oturum). -->
+                         tetikleyici otomatik iptal olur (17 Temmuz 2026, yedinci oturum).
+                         (18 Temmuz 2026, onuncu oturum, beşinci tur) Kart görünümüne
+                         kavuşturuldu — bkz. .qt-sltp-box ile aynı desen; alanlar artık
+                         her zaman dikey/tam genişlik (bkz. tradingEngine.js'teki
+                         setOrderType() düzeltmesi — kök neden buradaki HTML değil,
+                         satırı 'flex' yapan JS'ti). -->
                     <div class="form-group" id="qt-oco-row" style="display:none;">
                         <label>OCO Tetikleyicileri</label>
-                        <div class="qt-sltp-field" style="margin-bottom:8px;">
-                            <label for="qt-oco-upper">Üst Tetik — Kırılım AL (₺)</label>
-                            <input type="number" id="qt-oco-upper" class="form-input" min="0" step="0.01" placeholder="0.00">
+                        <div class="qt-oco-box">
+                            <div class="qt-sltp-field qt-oco-field">
+                                <label for="qt-oco-upper">Üst Tetik — Kırılım AL (₺)</label>
+                                <input type="number" id="qt-oco-upper" class="form-input" min="0" step="0.01" placeholder="0.00">
+                            </div>
+                            <div class="qt-sltp-field qt-oco-field">
+                                <label for="qt-oco-lower">Alt Tetik — Kırılım SAT (₺)</label>
+                                <input type="number" id="qt-oco-lower" class="form-input" min="0" step="0.01" placeholder="0.00">
+                            </div>
+                            <p class="oco-hint">Fiyat üst tetiği yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT emri gerçekleşir — hangisi önce olursa diğeri otomatik iptal edilir.</p>
                         </div>
-                        <div class="qt-sltp-field">
-                            <label for="qt-oco-lower">Alt Tetik — Kırılım SAT (₺)</label>
-                            <input type="number" id="qt-oco-lower" class="form-input" min="0" step="0.01" placeholder="0.00">
-                        </div>
-                        <p class="oco-hint">Fiyat üst tetiği yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT emri gerçekleşir — hangisi önce olursa diğeri otomatik iptal edilir.</p>
                     </div>
 
                     <!-- (üçüncü tur, 18 Temmuz 2026) SL/TP bölümü yeniden düzenlendi:
@@ -994,10 +1001,11 @@
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>K</kbd> veya <kbd>/</kbd></span><span class="shortcut-desc">Komut paletini aç (sembol ara / hızlı işlem)</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="shortcut-desc">İlgili grafik sekmesine geç</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>[</kbd> / <kbd>]</kbd></span><span class="shortcut-desc">Önceki / sonraki grafik sekmesi</span></div>
-                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Açık pencereyi kapat</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Açık pencereyi / tam ekranı kapat</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">Bu pencereyi aç/kapat</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">Tam ekran grafik modunu aç/kapat</span></div>
                     <div class="shortcut-row"><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">Koyu / Açık temayı değiştir</span></div>
-                    <div class="shortcut-row"><span class="shortcut-keys">Tanıtım Turu</span><span class="shortcut-desc">Üstteki düğmeyle özellikleri gezen sunum turunu başlat</span></div>
+                    <div class="shortcut-row"><span class="shortcut-keys">Tanıtım Turu</span><span class="shortcut-desc">☰ menüsündeki düğmeyle özellikleri gezen sunum turunu başlat</span></div>
                 </div>
                 <div class="indicator-modal-category" data-category-label="panel">
                     <div class="indicator-subgroup-label">Panel</div>

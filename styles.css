@@ -2788,6 +2788,31 @@ body.compact-mode .status-item {
     border-top: 1px solid var(--tint-06);
 }
 
+/* OCO Tetikleyicileri kartı (18 Temmuz 2026, onuncu oturum, beşinci tur) —
+   .qt-sltp-box ile aynı görsel dil: hafif dolgulu kart, alanlar HER ZAMAN
+   dikey/tam genişlik (uzun etiketler — "Üst Tetik — Kırılım AL (₺)" — bir
+   yan-yana ızgarada sıkışıp kelime kelime bölünürdü, bu yüzden SL/TP
+   kutusundaki iki-sütunlu satırdan bilinçli olarak farklı, tek sütun). */
+.qt-oco-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 10px;
+    background-color: var(--tint-03);
+    border: 1px solid var(--tint-06);
+    border-radius: var(--radius-sm);
+}
+
+.qt-oco-field {
+    flex: none;
+    width: 100%;
+}
+
+.qt-oco-box .oco-hint {
+    margin-top: 0;
+}
+
 .qt-trailing-field {
     margin-top: 8px;
 }

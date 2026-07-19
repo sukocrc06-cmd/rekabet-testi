@@ -49,7 +49,35 @@ const TourGuide = (() => {
             {
                 welcome: true,
                 title: 'OptiPulseLab Özellik Turu',
-                desc: 'Eklenen 16 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
+                desc: 'Eklenen 23 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
+            },
+            // (18 Temmuz 2026, onuncu oturum, dördüncü tur özelliği — bu turda
+            // tanıtım turuna eklendi) Header artık taşmıyor; ikincil butonlar
+            // (Tur/Isı Haritası/Kısayollar/Yardım/Kompakt Görünüm/Reset) bu
+            // ☰ menüye taşındı.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    // ÖNEMLİ: bu adıma geçişi tetikleyen "İleri" tıklamasının
+                    // olay balonlanması (bubbling) henüz document'e ulaşmadan
+                    // burada senkron biçimde .click() çağrılırsa, o dış olay
+                    // document'e vardığında "menünün dışına tıklandı" sanıp
+                    // menüyü anında kapatıyordu (header-menu-dropdown'ın
+                    // dışarı-tıklama-ile-kapan mantığı — bkz. tradingChart.js
+                    // setupHeaderMenu()). Bir sonraki event loop turuna (0ms)
+                    // erteleyerek bu yarış durumunu ortadan kaldırıyoruz.
+                    await wait(0);
+                    const dropdown = byId('header-menu-dropdown');
+                    if (dropdown && !dropdown.classList.contains('open')) byId('btn-header-menu')?.click();
+                    await wait(150);
+                },
+                teardown: () => {
+                    const dropdown = byId('header-menu-dropdown');
+                    if (dropdown && dropdown.classList.contains('open')) byId('btn-header-menu')?.click();
+                },
+                selector: '#header-menu-dropdown',
+                title: 'Sadeleşen Header + "☰" Menü',
+                desc: 'Header artık genişlemiyor/taşmıyor. Sık kullanılmayan işlemler (Tanıtım Turu, Isı Haritası, Kısayollar, Yardım, Kompakt Görünüm, Reset) buradaki tek bir menüde toplandı. "Kompakt Görünüm" izleme listesini ve durum çubuğunu daha sık aralıklı gösterir.'
             },
             {
                 setup: async () => { closeAllAppModals(); },
@@ -70,19 +98,73 @@ const TourGuide = (() => {
                 },
                 selector: '#tv-grid-view',
                 title: '2x2 Çoklu Grafik Izgarası',
-                desc: 'Sekmelerin yanı sıra artık dört sembolü aynı anda küçük ızgara halinde de izleyebilirsiniz — her hücrenin sembolünü ayrı ayrı değiştirebilir, sağ üstteki ⤢ ile bir hücreyi tek tıkla ana (tam özellikli) grafiğe büyütebilirsiniz.'
+                desc: 'Sekmelerin yanı sıra artık dört sembolü aynı anda küçük ızgara halinde de izleyebilirsiniz — her hücrenin sembolünü ayrı ayrı değiştirebilir, isteğe bağlı SMA20/EMA9 göstergelerini açabilir, sağ üstteki ⤢ ile bir hücreyi tek tıkla ana (tam özellikli) grafiğe büyütebilirsiniz.'
+            },
+            // (birinci tur özelliği — bu turda tanıtım turuna eklendi) Aynı
+            // sembolü, biri tam özellikli biri bağımsız çözünürlüklü iki
+            // grafikte karşılaştırmalı gösteriyor — 2x2 ızgaradan farkı: orada
+            // 4 FARKLI sembol var, burada TEK sembolün iki görünümü.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    const btn = byId('btn-toggle-dual-chart');
+                    if (btn && !btn.classList.contains('active')) btn.click();
+                    await wait(200);
+                },
+                teardown: () => {
+                    const btn = byId('btn-toggle-dual-chart');
+                    if (btn && btn.classList.contains('active')) btn.click();
+                },
+                selector: '#tv-chart-area-single',
+                title: 'Dual-Chart: Aynı Sembol, İki Grafik',
+                desc: 'Ana (tam özellikli, çizim araçlı) grafiğin yanında ikinci, sade bir "karşılaştırma" paneli açılıyor — kendi bağımsız zaman dilimi (1H/4H/1D/1W) ve SMA20/EMA9 göstergeleriyle. İkisi de aynı sembolü, farklı açılardan gösteriyor.'
+            },
+            // (birinci tur özelliği — bu turda tanıtım turuna eklendi) Header,
+            // sol izleme listesi ve sağ işlem panelini gizleyip grafiği tüm
+            // viewport'a büyütüyor.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    const btn = byId('btn-toggle-fullscreen');
+                    if (btn && !btn.classList.contains('active')) btn.click();
+                    await wait(200);
+                },
+                teardown: () => {
+                    const btn = byId('btn-toggle-fullscreen');
+                    if (btn && btn.classList.contains('active')) btn.click();
+                },
+                selector: '#btn-toggle-fullscreen',
+                title: 'Tam Ekran Grafik Modu',
+                desc: 'Tam şu anda gördüğünüz gibi — header, izleme listesi ve işlem paneli gizlenip grafik tüm ekranı kaplıyor. Aynı düğmeye tekrar basarak ya da "Esc" ile normal görünüme dönebilirsiniz (turdan sonra otomatik geri dönecek).'
             },
             {
                 selector: '#chart-toolbar',
-                title: 'Çizim Araçları + Kopyala/Yapıştır',
-                desc: 'Grafiğin üstündeki araç çubuğunda trend çizgisi, yatay çizgi, dikdörtgen ve Fibonacci retracement bulunuyor. Çizimleri ve gösterge ayarlarını artık Ctrl+C / Ctrl+V ile kopyalayıp yapıştırabilirsiniz.'
+                title: 'Çizim Araçları (Sol Dikey Ray)',
+                desc: 'Çizim araçları artık ekranın en soluna sabitlenmiş dikey bir rayda — Çizgiler, Fibonacci, Gelişmiş (Gann/Elliott), Şekiller, Not & Ok, Ölçüm, Pozisyon, Desenler (ABCD) ve Tahmin (Trend Projeksiyonu) kategorileriyle, 20\'den fazla araç. Bir ikona basınca o grubun tüm seçenekleri hemen açılır. Çizimleri ve gösterge ayarlarını Ctrl+C / Ctrl+V ile kopyalayıp yapıştırabilir, rayı kenardaki okla daraltabilirsiniz.'
+            },
+            // (ikinci tur özelliği — bu turda tanıtım turuna eklendi) RSI/MACD
+            // gibi birden fazla osilatörü AYNI ANDA gösterip sürükleyerek
+            // yeniden sıralayabildiğiniz panel.
+            {
+                setup: async () => { closeAllAppModals(); },
+                selector: '#tv-subpanes-container',
+                title: 'Çoklu Osilatör Paneli (Sürükle-Sırala)',
+                desc: 'RSI, MACD, Stochastic, ADX gibi birden fazla osilatörü Göstergeler penceresinden işaretleyip AYNI ANDA, kendi ayrı panellerinde görebilirsiniz — ⋮⋮ tutamacından sürükleyerek sırayı değiştirebilir, alt kenarından yükseklik ayarlayabilir, × ile kapatabilirsiniz. Tercihiniz tarayıcınızda hatırlanır.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-indicators')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
                 selector: '#indicator-modal-backdrop .indicator-modal',
                 title: 'Göstergeler Artık Kenar Çubuğunda Değil',
-                desc: 'Göstergeler eskiden sol paneldeydi; şimdi az önce açılan bu pencerede, kaldırılabilir "chip" etiketleriyle yönetiliyor.'
+                desc: 'Göstergeler eskiden sol paneldeydi; şimdi az önce açılan bu pencerede, kaldırılabilir "chip" etiketleriyle yönetiliyor. Set genişledi: SMA/EMA/Bollinger/VWAP\'ın yanına Ichimoku Bulutu, Parabolic SAR, Pivot Noktaları, SuperTrend, CCI, Keltner ve Donchian Kanalları, MFI eklendi (sol raydaki "Göstergeler" flyout\'undan da hızlıca açıp kapatabilirsiniz).'
+            },
+            // (18 Temmuz 2026, onuncu oturum, beşinci tur özelliği — bu turda
+            // tanıtım turuna eklendi) Şirket temel verileri.
+            {
+                setup: async () => { closeAllAppModals(); },
+                selector: '#tv-fundamentals-bar',
+                title: 'Şirket Temel Verileri (F/K, Piyasa Değeri, Temettü)',
+                desc: 'Sembol başlığının hemen altında artık F/K oranı, piyasa değeri ve temettü verimi de görünüyor — yfinance\'ten gerçek veri, ama genelde birkaç dakika gecikmeli ve yatırım tavsiyesi değildir.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-alerts')?.click(); await wait(150); },
@@ -95,7 +177,7 @@ const TourGuide = (() => {
                 setup: async () => { closeAllAppModals(); },
                 selector: () => byId('watchlist-body')?.closest('.form-group') || byId('watchlist-body'),
                 title: 'Sadeleştirilmiş İzleme Listesi',
-                desc: 'Sol taraftaki izleme listesine bakın — daha sade bir tasarıma kavuştu, arama kutusuyla semboller arasında hızlıca gezinebilirsiniz.'
+                desc: 'Sol taraftaki izleme listesine bakın — daha sade bir tasarıma kavuştu, arama kutusuyla semboller arasında hızlıca gezinebilir, her satırdaki küçük grafikle (sparkline) son fiyat hareketini görebilirsiniz.'
             },
             {
                 setup: async () => {
@@ -129,9 +211,9 @@ const TourGuide = (() => {
                     const btn1x = document.querySelector('.leverage-btn[data-leverage="1"]');
                     if (btn1x && !btn1x.classList.contains('active')) btn1x.click();
                 },
-                selector: '.leverage-selector',
+                selector: () => document.querySelector('.leverage-selector')?.closest('.form-group') || document.querySelector('.leverage-selector'),
                 title: 'Kaldıraç / Marj Sistemi',
-                desc: 'Emir panelinde 1x-10x arası kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir, kalan kısım işlem büyüklüğünü büyütür. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
+                desc: 'Emir panelinde hazır 1x/2x/5x/10x düğmeleri, 1-20x arası serbest manuel giriş ve 3x/7x/15x/20x hızlı-seçim çipleriyle kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
             },
             {
                 setup: async () => {
@@ -179,12 +261,38 @@ const TourGuide = (() => {
                 title: 'İşlem Geçmişini CSV Olarak İndir',
                 desc: 'Sağ paneldeki "Son Emirler" bölümünün yanındaki CSV düğmesiyle tüm işlem geçmişinizi Excel uyumlu (Türkçe karakter destekli) bir dosya olarak dışa aktarabilirsiniz.'
             },
+            // (18 Temmuz 2026, onuncu oturum, dördüncü tur özelliği — bu turda
+            // tanıtım turuna eklendi) Ctrl+K / "/" ile açılan, sembol arama +
+            // hızlı işlemleri birleştiren komut paleti.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    if (window.__optipulseOpenCommandPalette) window.__optipulseOpenCommandPalette();
+                    await wait(150);
+                },
+                teardown: () => closeAllAppModals(),
+                selector: '#command-palette-backdrop .command-palette-modal',
+                title: 'Komut Paleti',
+                desc: '"Ctrl+K" veya "/" ile her yerden açılır — tek bir kutuda hem BIST100 sembol arayabilir hem de tema/ses/kompakt görünüm değiştirme, panel açma, reset gibi hızlı işlemleri çalıştırabilirsiniz. Ok tuşlarıyla gezinip Enter ile seçin.'
+            },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-shortcuts')?.click(); await wait(150); },
                 teardown: () => closeAllAppModals(),
                 selector: '#shortcuts-modal-backdrop .indicator-modal',
                 title: 'Klavye Kısayolları',
-                desc: 'Açılan pencerede tüm kısayolları görebilirsiniz: B/S ile alım-satım yönü, 1-9 ile grafik sekmeleri, T ile tema, ? ile bu pencere... Elinizi klavyeden kaldırmadan uygulamayı kullanabilirsiniz.'
+                desc: 'Açılan pencerede tüm kısayolları görebilirsiniz: B/S ile alım-satım yönü, 1-9 ile grafik sekmeleri, F ile tam ekran, T ile tema, ? ile bu pencere... Elinizi klavyeden kaldırmadan uygulamayı kullanabilirsiniz.'
+            },
+            // (bu turda eklendi) Yardım/Hakkında modalı daha önce turda hiç
+            // yoktu; ayrıca aynı turda düzeltilen bir hata yüzünden (bkz.
+            // filterIndicatorList() — Göstergeler modalı bir kez açıldığında
+            // bu modalın içeriğini kalıcı olarak "display:none" yapıyordu)
+            // önceden boş görünebiliyordu.
+            {
+                setup: async () => { closeAllAppModals(); byId('btn-open-help')?.click(); await wait(150); },
+                teardown: () => closeAllAppModals(),
+                selector: '#help-modal-backdrop .indicator-modal',
+                title: 'Yardım / Hakkında',
+                desc: 'Bu pencerede uygulamanın demo/simülasyon olduğunun açıklaması, temel özellik özeti ve veri kaynağı/gecikme notu yer alıyor — biri "bu gerçek mi?" diye sorarsa göstereceğiniz yer burası.'
             },
             {
                 setup: async () => { closeAllAppModals(); },
@@ -195,7 +303,7 @@ const TourGuide = (() => {
             {
                 finish: true,
                 title: 'Tur Tamamlandı',
-                desc: 'Bu turda 16 özelliği gördünüz: çoklu grafik sekmeleri, 2x2 grafik ızgarası, çizim kopyala/yapıştır, taşınan göstergeler paneli, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi, OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, klavye kısayolları ve koyu/açık tema. Turu istediğiniz an "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
+                desc: 'Bu turda 23 özelliği gördünüz: sadeleşen header + ☰ menü, çoklu grafik sekmeleri, 2x2 grafik ızgarası, Dual-Chart, tam ekran grafik modu, sol dikey çizim rayı, çoklu osilatör paneli, genişletilmiş göstergeler (Ichimoku/PSAR/Pivot/SuperTrend/CCI/Keltner/Donchian/MFI), şirket temel verileri, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi (manuel + hızlı çipler), OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, komut paleti, klavye kısayolları, Yardım/Hakkında ve koyu/açık tema. Turu istediğiniz an "☰" menüsündeki "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
             }
         ];
     }

@@ -1481,7 +1481,17 @@ const TradingChart = (() => {
             if (match) anyVisible = true;
         });
         // Hide whole category blocks if every item inside is filtered out.
-        document.querySelectorAll('.indicator-modal-category').forEach(cat => {
+        // ÖNEMLİ (18 Temmuz 2026, onuncu oturum, beşinci tur — bulunan gerçek
+        // bir hata): bu sorgu önceden TÜM DOKÜMAN genelinde ".indicator-modal-category"
+        // arıyordu, ama bu sınıf Yardım/Hakkında ve Klavye Kısayolları modallarında
+        // da (data-category-label ile) kullanılıyor — o modallarda hiç
+        // ".indicator-search-item" elemanı olmadığından, Göstergeler modalı bir kez
+        // açılıp bu fonksiyon çalıştığında (arama kutusu her açılışta sıfırlanırken
+        // otomatik tetikleniyor), Yardım/Kısayollar modallarının TÜM bölümleri
+        // kalıcı olarak "display:none" oluyordu — bu modallar daha sonra açıldığında
+        // (ör. tanıtım turunda) tamamen boş görünüyordu. Artık sorgu SADECE
+        // Göstergeler modalının kendi içindeki kategorilerle sınırlı.
+        document.querySelectorAll('#indicator-modal-backdrop .indicator-modal-category').forEach(cat => {
             const visibleChildren = cat.querySelectorAll('.indicator-search-item:not([style*="display: none"])');
             cat.style.display = visibleChildren.length ? '' : 'none';
         });
@@ -2084,10 +2094,17 @@ const TradingChart = (() => {
                 return;
             }
 
+            // (18 Temmuz 2026, onuncu oturum, beşinci tur) Önceden bu buton
+            // doğrudan grubun SON KULLANILAN aracını seçiyordu — seçenekleri
+            // görmek için sadece 7x7px'lik minik ok işaretine (.tv-tool-caret)
+            // tam isabetle tıklamak gerekiyordu. Artık ikonun HERHANGİ bir
+            // yerine basmak (checklist grubu — "Göstergeler" — ile aynı
+            // davranış) o grubun tüm seçeneklerini gösteren flyout'u açıyor;
+            // araç seçimi flyout'taki bir öğeye tıklanınca gerçekleşiyor.
             const groupBtn = e.target.closest('.tv-tool-group-btn');
             if (groupBtn) {
-                selectTool(groupBtn.dataset.tool);
-                closeAllFlyouts();
+                const groupEl = groupBtn.closest('.tv-tool-group');
+                if (groupEl) toggleFlyout(groupEl.dataset.group);
                 return;
             }
 
