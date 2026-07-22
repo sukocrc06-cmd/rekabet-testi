@@ -545,38 +545,25 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
     # kaynakla gerçek veriye düzenli aralıklarla "check-in" yapmak.
     LIVE_POLL_INTERVAL_SEC = 12
     try:
-        # Fetch initial historical candles to populate the chart
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
-        hist = _cached_history(stock, formatted, "3mo", "1d", timeout=10)
-        if hist.empty:
-            raise ValueError("No historical data found for this ticker")
-        data = hist.reset_index().to_dict(orient="records")
 
-        for record in data:
-            if "Date" in record:
-                record["Date"] = str(record["Date"])
-
-        formatted_candles = []
-        for record in data:
-            formatted_candles.append({
-                "date": str(record.get("Date", ""))[:10],
-                "open": float(record.get("Open", 0.0)),
-                "high": float(record.get("High", 0.0)),
-                "low": float(record.get("Low", 0.0)),
-                "close": float(record.get("Close", 0.0)),
-                "volume": float(record.get("Volume", 0.0))
-            })
-
-        # Push historical data as first payload
-        await websocket.send_json({
-            "type": "history",
-            "candles": formatted_candles
-        })
-
-        while True:
-            await asyncio.sleep(LIVE_POLL_INTERVAL_SEC)
-
+        # (22 Temmuz 2026, on ikinci oturum, beşinci tur — "canlı veri
+        # noktası 20-30 saniye gri kalıyor" sorunu) Bu uç önceden burada
+        # KENDİ BAŞINA ayrı bir "3mo" geçmiş veri çekip bunu bir "history"
+        # mesajı olarak gönderiyordu. Ancak frontend (tradingEngine.js →
+        # openLiveSocket'in onmessage'ı) yalnızca "type":"tick" mesajlarını
+        # işliyor — "history" mesajını hiç okumuyor (grafik zaten ayrı bir
+        # REST isteğiyle, çok daha kapsamlı "period=max" veriyle çiziliyor).
+        # Yani bu ikinci geçmiş veri çekimi TAMAMEN boşa gidiyordu, ama ilk
+        # gerçek fiyat (tick) ancak bu bittikten sonra gönderilebiliyordu —
+        # her sembol geçişinde gereksiz bir tam yfinance isteği kadar (Render
+        # üzerinde birkaç saniye) fazladan gecikme ekliyordu. Kaldırıldı;
+        # artık bağlantı kurulur kurulmaz doğrudan gerçek fiyata geçiliyor.
+        async def fetch_and_send_tick() -> bool:
+            """Bir gerçek fiyat çekip varsa 'tick' olarak gönderir; başarılıysa
+            True döner (çağıran taraf bunu sadece loglama/tanı amaçlı kullanır,
+            akışı etkilemez)."""
             real_price = _extract_fast_price(stock)
             if real_price is None:
                 # Yedek yol: son 1 günlük/1 dakikalık barın kapanışı.
@@ -597,7 +584,7 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
                 # kendi simülasyonuna kesintisiz devam ediyor (REST OHLCV
                 # fetch'teki yedek-yola-düşme mantığıyla aynı defense-in-
                 # depth prensibi).
-                continue
+                return False
 
             await websocket.send_json({
                 "type": "tick",
@@ -605,6 +592,23 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
                 "price": round(real_price, 2),
                 "source": "live"
             })
+            return True
+
+        # (22 Temmuz 2026, on ikinci oturum, dördüncü tur — "canlı veri
+        # göstergesi hemen yeşile dönmüyor" sorunu) Önceden ilk gerçek 'tick'
+        # ancak LIVE_POLL_INTERVAL_SEC (12sn) sonra gönderiliyordu — bu yüzden
+        # sayfa yeni açıldığında/sembol değiştiğinde frontend'deki yeşil nokta
+        # 12 saniye boyunca gri kalıyor, biri tam o an bakarsa "canlı değil"
+        # sanısına kapılabiliyordu (hoca sunumu öncesi bu yanlış izlenimi hiç
+        # istemiyoruz). Artık geçmiş veriden hemen sonra bir "tick" daha
+        # deneniyor — bağlantı kurulduktan ~1 saniye içinde gerçek fiyat
+        # varsa nokta hemen yeşile dönüyor, yoksa döngü periyodik denemeye
+        # devam ediyor.
+        await fetch_and_send_tick()
+
+        while True:
+            await asyncio.sleep(LIVE_POLL_INTERVAL_SEC)
+            await fetch_and_send_tick()
     except WebSocketDisconnect:
         pass
     except Exception as e:
