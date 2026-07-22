@@ -92,6 +92,20 @@ const TradingChart = (() => {
     // yüzden her zaman son N günlük bir dilimden türetiliyor.
     const INTRADAY_SOURCE_WINDOW_DAYS = 90;
 
+    // (22 Temmuz 2026, on ikinci oturum — "grafik boşlukları/incelmiş mumlar"
+    // incelemesi) fitContent() intraday çözünürlüklerde (15dk/1sa/4sa) TÜM
+    // 90 günlük türetilmiş seriyi (4sa'da ~180, 1sa'da ~720, 15dk'da ~2880
+    // bar) tek ekrana sığdırmaya çalışıyordu — bu, her mumu aşırı derecede
+    // ince/sıkıştırılmış hale getirip (özellikle düşük oynaklıklı dönemlerde
+    // neredeyse görünmez), kullanıcıya "boşluk varmış" gibi bir izlenim
+    // verebiliyordu (aslında veri eksik değil, sadece piksel başına çok
+    // fazla bar düşüyor). Şimdi intraday'e geçilince varsayılan görünüm son
+    // birkaç günlük bir pencereye odaklanıyor — her mum rahat bir genişlik
+    // kazanıyor; kullanıcı yine de dilerse manuel olarak dışarı zoom
+    // yapabilir (fitContent() gibi TAM veriyi engellemiyor, sadece
+    // BAŞLANGIÇ görünümünü makul bir varsayılana çekiyor).
+    const DEFAULT_INTRADAY_VISIBLE_BARS = 60;
+
     // Lightweight Charts renders to <canvas> internally, so its background/
     // text/grid colors are set via JS options, not CSS — this mirrors the
     // page's [data-theme] attribute (read once at load; kept in sync by
@@ -465,11 +479,41 @@ const TradingChart = (() => {
 
         // Lightweight Charts requires strictly ascending unique time values
         const seen = new Set();
+        const preDedupCount = candles.length;
         candles = candles.filter(c => {
             if (seen.has(c.date)) return false;
             seen.add(c.date);
             return true;
         }).sort((a, b) => a.date - b.date);
+
+        // (22 Temmuz 2026, on ikinci oturum — "grafik boşlukları" incelemesi)
+        // Bu dedup/sıralama koruması zaten vardı ama SESSİZCE çalışıyordu —
+        // yinelenen/sırasız bir gün varsa hiçbir iz bırakmadan atılıyordu. Bu
+        // durum, intraday (15dk/1sa/4sa) görünümde beklenmeyen bir günün
+        // eksik kalmasına yol açabilir (synthesizeIntradayCandles yalnızca
+        // state.dailyCandles'ta VAR OLAN günleri işler). Artık en azından
+        // konsola uyarı düşüyor — bu, gerçek bir backend veri sorununu
+        // (örn. yfinance'ın bazı BIST günleri için sağladığı yinelenen/
+        // sırasız satırlar) sessizce gizlemek yerine görünür kılıyor.
+        if (candles.length !== preDedupCount) {
+            console.warn(`[TradingChart] ${ticker}: ${preDedupCount - candles.length} yinelenen/sırasız günlük mum atıldı (grafik "boşluk" görünümüne katkıda bulunabilir).`);
+        }
+
+        // Ardışık günler arasında normal hafta sonu/tatilin (≈2-4 gün) çok
+        // ötesinde bir boşluk varsa, bu muhtemelen backend'in (yfinance)
+        // bazı işlem günlerini hiç döndürmediği anlamına gelir — VERİ
+        // UYDURULMUYOR (eksik günler doldurulmuyor), sadece tanı amaçlı
+        // konsola not düşülüyor ki ileride "neden grafikte boşluk var"
+        // sorusu tekrar sorulduğunda kanıt olsun.
+        const GAP_WARN_DAYS = 5;
+        for (let i = 1; i < candles.length; i++) {
+            const gapDays = (candles[i].date - candles[i - 1].date) / 86400;
+            if (gapDays > GAP_WARN_DAYS) {
+                const d1 = new Date(candles[i - 1].date * 1000).toISOString().slice(0, 10);
+                const d2 = new Date(candles[i].date * 1000).toISOString().slice(0, 10);
+                console.warn(`[TradingChart] ${ticker}: ${d1} ile ${d2} arasında ${gapDays.toFixed(1)} günlük olağandışı bir veri boşluğu var (backend/yfinance kaynaklı olabilir).`);
+            }
+        }
 
         // `state.dailyCandles` is the permanent source of truth; `state.candles`
         // (set inside applyResolution()) is whatever the active resolution
@@ -560,7 +604,14 @@ const TradingChart = (() => {
         renderOverlays();
         renderAllOscillatorPanes();
 
-        if (chart) chart.timeScale().fitContent();
+        if (chart) {
+            if (intraday && state.candles.length > DEFAULT_INTRADAY_VISIBLE_BARS) {
+                const total = state.candles.length;
+                chart.timeScale().setVisibleLogicalRange({ from: total - DEFAULT_INTRADAY_VISIBLE_BARS, to: total - 1 });
+            } else {
+                chart.timeScale().fitContent();
+            }
+        }
 
         // Drawings anchored to a different resolution's time axis simply
         // won't line up with any bar in the new series — dataPointToPixel()
