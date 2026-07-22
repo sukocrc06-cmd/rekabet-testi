@@ -2659,13 +2659,15 @@ const TradingEngine = (() => {
     }
 
     /* ────────── Profil paneli (madde 7, 22 Temmuz 2026, on ikinci oturum) ──────────
-       Sol üstteki (hamburgerin yanındaki) profil simgesine tıklanınca açılan
-       panel: bakiye/özkaynak/açık K-Z/pozisyon sayısı (computeAccountSnapshot
-       ile TEK kaynaktan) ve kalıcı bir profil ismi ayarı. Açılma/kapanma
-       deseni tradingChart.js'teki setupHeaderMenu()/setupChartTypeMenu() ile
-       birebir aynı (position:fixed + getBoundingClientRect, dışarı tıklama/
-       Escape ile kapanma) — burada SOLA hizalı açılıyor (soldaki simgeden
-       tetiklendiği için). */
+       Header'ın en sağındaki profil simgesine tıklanınca açılan panel:
+       bakiye/özkaynak/açık K-Z/pozisyon sayısı (computeAccountSnapshot ile TEK
+       kaynaktan) ve kalıcı bir profil ismi ayarı. Açılma/kapanma deseni
+       tradingChart.js'teki setupHeaderMenu()/setupChartTypeMenu() ile birebir
+       aynı (position:fixed + getBoundingClientRect, dışarı tıklama/Escape ile
+       kapanma). (22 Temmuz 2026, ikinci tur) Simge başlangıçta soldaydı (SOLA
+       hizalı açılıyordu); kullanıcı isteğiyle header-actions'ın sonuna, en
+       sağa taşındı — açılma artık header-menu-dropdown ile aynı şekilde SAĞA
+       hizalı (aksi halde 240px'lik panel viewport dışına taşardı). */
     const PROFILE_NAME_STORAGE_KEY = 'optipulselab_profile_name_v1';
     const DEFAULT_PROFILE_NAME = 'Kullanıcı';
 
@@ -2720,8 +2722,11 @@ const TradingEngine = (() => {
             if (window.__optipulseCloseAllFlyouts) window.__optipulseCloseAllFlyouts();
             const rect = btn.getBoundingClientRect();
             dropdown.style.top = (rect.bottom + 6) + 'px';
-            dropdown.style.left = rect.left + 'px';
-            dropdown.style.right = 'auto';
+            // Sağa hizalı açılır — artık header'ın en sağındaki butondan
+            // tetiklendiği için (bkz. tradingChart.js setupHeaderMenu() ile
+            // aynı desen), sola taşarsa viewport dışına çıkar.
+            dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+            dropdown.style.left = 'auto';
             dropdown.classList.add('open');
             renderProfilePanel();
         };

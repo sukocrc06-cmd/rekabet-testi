@@ -334,11 +334,11 @@ body {
     margin: 4px 2px;
 }
 
-/* (22 Temmuz 2026, on ikinci oturum — madde 7 "profil paneli") Sol üstteki
-   profil simgesi ve açılır paneli — açılma/kapanma deseni yukarıdaki
+/* (22 Temmuz 2026, on ikinci oturum) Profil simgesi ve açılır paneli — artık
+   header-actions'ın en sağında (kullanıcı isteğiyle logo-area'dan buraya
+   taşındı, bkz. index.html). Açılma/kapanma deseni yukarıdaki
    .header-menu-dropdown ile birebir aynı (bkz. tradingEngine.js
-   setupProfilePanel()), yalnızca SOLA hizalı açılıyor (sağdaki hamburger
-   menüsü sağa hizalı açılıyordu). */
+   setupProfilePanel()), aynı şekilde SAĞA hizalı açılıyor. */
 .profile-panel-wrap {
     position: relative;
     flex-shrink: 0;
