@@ -378,6 +378,38 @@ const DataController = (() => {
             prevClose = close;
         }
 
+        // (22 Temmuz 2026, on ikinci oturum, dördüncü tur) "Fiyat tutarsızlığı"
+        // düzeltmesi — kullanıcının hocası gerçek ALBRK fiyatının (~₺8.30)
+        // sitedeki simüle "bugün" fiyatından (₺18.71) çok saptığını fark etti.
+        // Kök neden: TRADING_DAYS onuncu/on ikinci oturumda 30'dan 750'ye
+        // (~3 yıl) çıkarıldığında, STOCK_PROFILES.basePrice'ın rolü sessizce
+        // değişti. basePrice her zaman "ARAŞTIRILMIŞ, GERÇEK, BUGÜNKÜ fiyat"
+        // olarak yazılıyor (bkz. claude/bist100-price-anchors-*.md) — ama
+        // yukarıdaki döngü onu "geçmişin BAŞLANGIÇ fiyatı" olarak kullanıp
+        // oradan bugüne doğru drift+volatiliteyle birikimli olarak büyütüyor/
+        // küçültüyordu. 30 günlük eski pencerede bu sapma gözden kaçacak
+        // kadar küçüktü; 750 günlük pencerede (özellikle drift>0 olan
+        // hisselerde) birikimli büyüme gerçek fiyatın 2-3 katına kadar
+        // çıkabiliyor. Düzeltme: rastgele yürüyüşün ŞEKLİ (günlük getiriler,
+        // volatilite deseni, iniş-çıkışlar) AYNI kalıyor, ama tüm seri tek
+        // bir ölçek katsayısıyla yeniden ölçekleniyor ki SON (yani "bugünkü")
+        // kapanış tam olarak basePrice'a eşit olsun — "bugün" artık HER ZAMAN
+        // araştırılan gerçek fiyatı gösteriyor, geçmiş sadece o noktaya varan
+        // gerçekçi/rastgele bir yol oluyor (gerçek 3 yıl öncesini temsil ettiği
+        // iddiası zaten yoktu — bu tamamen sentetik bir yedek veri).
+        if (candles.length > 0 && profile.basePrice > 0) {
+            const lastClose = candles[candles.length - 1].close;
+            if (lastClose > 0) {
+                const scale = profile.basePrice / lastClose;
+                candles.forEach(c => {
+                    c.open = +(c.open * scale).toFixed(2);
+                    c.high = +(c.high * scale).toFixed(2);
+                    c.low = +(c.low * scale).toFixed(2);
+                    c.close = +(c.close * scale).toFixed(2);
+                });
+            }
+        }
+
         return candles;
     }
 

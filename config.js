@@ -24,9 +24,16 @@
    gerektirir, ws:// değil.)
    ════════════════════════════════════════════════════════════════════ */
 (function () {
+    // (22 Temmuz 2026, on ikinci oturum, dördüncü tur) Backend Render.com'a
+    // taşındı (https://rekabet-testi.onrender.com) — artık sadece
+    // kullanıcının kendi bilgisayarında değil, İNTERNETTEN erişilebilen
+    // her bilgisayarda (hoca dahil) gerçek veri/canlı akış çalışıyor.
+    // ÖNEMLİ: Render'ın ücretsiz katmanı 15 dakika boşta kalınca uyuyor,
+    // ilk istekte ~1 dakika uyanma süresi olabiliyor — bir sunumdan hemen
+    // önce siteyi bir kez açıp "ısıtmak" bu gecikmeyi önler.
     window.OPTIPULSE_CONFIG = {
-        BACKEND_HTTP: 'http://127.0.0.1:8000',
-        BACKEND_WS: 'ws://127.0.0.1:8000'
+        BACKEND_HTTP: 'https://rekabet-testi.onrender.com',
+        BACKEND_WS: 'wss://rekabet-testi.onrender.com'
     };
 
     // Chrome'un Local Network Access (LNA) politikası, hedef adres GERÇEKTEN
