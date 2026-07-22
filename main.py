@@ -10,9 +10,20 @@ import gc
 import os
 import re
 import requests
-import pandas as pd
-import numpy as np
 import time
+import logging
+
+# (22 Temmuz 2026, on ikinci oturum — "gürültülü/ölü kodu temizle") yfinance,
+# bir sembol için veri bulunamadığında ("possibly delisted; no timezone
+# found" gibi) kendi iç logger'ı üzerinden doğrudan konsola/terminale
+# basıyor — bu bizim kodumuzdan gelmiyor, kütüphanenin kendi davranışı.
+# `/api/v1/quotes` toplu isteğinde onlarca sembol aynı anda denendiği için
+# bu satırlar art arda tekrarlanıp gerçek hataları (rate-limit vb.) görmeyi
+# zorlaştırıyordu. yfinance'in logger seviyesini yükselterek bu tekrarlı
+# iç mesajları susturuyoruz; bunun yerine `/api/v1/quotes` kendi TEK
+# özet satırını basıyor (bkz. aşağıdaki get_quotes) — böylece hangi
+# sembollerin veri döndürmediği hâlâ görünür kalıyor, sadece gürültü değil.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # Keep FPDF import as was
 from fpdf import FPDF
@@ -194,257 +205,17 @@ class PDFReport(FPDF):
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Page {self.page_no()} | CONFIDENTIAL - SANDBOX MODE NON-LIVE", align="C")
 
-def analyze_stock_logic(ticker: str) -> dict:
-    try:
-        formatted = format_ticker(ticker)
-        stock = yf.Ticker(formatted, session=session)
-        df = _cached_history(stock, formatted, "6mo", "1d", timeout=5)
-
-        if df.empty:
-            return {}
-            
-        # Calculate SMA20 and EMA20 for standard signal logic
-        df['SMA20'] = df['Close'].rolling(window=20).mean()
-        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-
-        try:
-            import pandas_ta as ta
-            df['RSI14'] = ta.rsi(df['Close'], length=14)
-            macd_df = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-            if macd_df is not None:
-                df['MACD'] = macd_df['MACD_12_26_9']
-                df['MACD_Signal'] = macd_df['MACDs_12_26_9']
-            else:
-                df['MACD'] = df['Close'].ewm(span=12, adjust=False).mean() - df['Close'].ewm(span=26, adjust=False).mean()
-                df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-                
-            bb_df = ta.bbands(df['Close'], length=20, std=2)
-            if bb_df is not None:
-                df['BB_Upper'] = bb_df['BBU_20_2.0']
-                df['BB_Lower'] = bb_df['BBL_20_2.0']
-            else:
-                df['BB_Upper'] = df['SMA20'] + 2 * df['Close'].rolling(window=20).std()
-                df['BB_Lower'] = df['SMA20'] - 2 * df['Close'].rolling(window=20).std()
-        except ImportError:
-            # Fallback native pandas indicator calculations
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / (loss + 1e-9)
-            df['RSI14'] = 100 - (100 / (1 + rs))
-            
-            ema12 = df['Close'].ewm(span=12, adjust=False).mean()
-            ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-            df['MACD'] = ema12 - ema26
-            df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-            
-            rolling_std = df['Close'].rolling(window=20).std()
-            df['BB_Upper'] = df['SMA20'] + 2 * rolling_std
-            df['BB_Lower'] = df['SMA20'] - 2 * rolling_std
-            
-        feature_cols = ['SMA20', 'EMA20', 'RSI14', 'MACD', 'BB_Upper', 'BB_Lower']
-        df_clean = df.dropna(subset=feature_cols).copy()
-        
-        if len(df_clean) < 10:
-            return {}
-            
-        latest = df_clean.iloc[-1]
-        
-        close = float(latest['Close'])
-        sma = float(latest['SMA20'])
-        ema = float(latest['EMA20'])
-        rsi = float(latest['RSI14'])
-        macd = float(latest['MACD'])
-        signal = float(latest['MACD_Signal'])
-        bb_upper = float(latest['BB_Upper'])
-        bb_lower = float(latest['BB_Lower'])
-        
-        buy_signals = 0
-        sell_signals = 0
-        
-        if close > sma:
-            buy_signals += 1
-        else:
-            sell_signals += 1
-            
-        if close > ema:
-            buy_signals += 1
-        else:
-            sell_signals += 1
-            
-        rsi_condition = "Neutral"
-        if rsi < 30:
-            rsi_condition = "Oversold (Buy)"
-            buy_signals += 2
-        elif rsi > 70:
-            rsi_condition = "Overbought (Sell)"
-            sell_signals += 2
-        elif rsi < 45:
-            rsi_condition = "Slightly Bearish"
-            sell_signals += 0.5
-        elif rsi > 55:
-            rsi_condition = "Slightly Bullish"
-            buy_signals += 0.5
-            
-        macd_signal = "HOLD"
-        if macd > signal:
-            macd_signal = "BUY"
-            buy_signals += 1.5
-        else:
-            macd_signal = "SELL"
-            sell_signals += 1.5
-            
-        bb_condition = "Inside Bands"
-        if close > bb_upper:
-            bb_condition = "Price Above Upper Band"
-            sell_signals += 1
-        elif close < bb_lower:
-            bb_condition = "Price Below Lower Band"
-            buy_signals += 1
-            
-        if buy_signals > sell_signals + 1:
-            overall_signal = "BUY"
-        elif sell_signals > buy_signals + 1:
-            overall_signal = "SELL"
-        else:
-            overall_signal = "HOLD"
-            
-        total_signals = buy_signals + sell_signals
-        confidence = (max(buy_signals, sell_signals) / total_signals) * 100.0 if total_signals > 0 else 50.0
-        confidence = max(60.0, min(95.0, confidence))
-        alpha_val = (confidence - 50.0) * 0.18
-        
-        # Simple simulated backtest metrics
-        df_backtest = df.dropna(subset=['SMA20', 'EMA20']).copy()
-        trades_pnl = []
-        pos = False
-        entry_p = 0.0
-        for idx, row in df_backtest.iterrows():
-            if row['EMA20'] > row['SMA20'] and not pos:
-                pos = True
-                entry_p = row['Close']
-            elif row['EMA20'] < row['SMA20'] and pos:
-                pos = False
-                trades_pnl.append(row['Close'] - entry_p)
-                
-        win_rate = 50.0
-        if trades_pnl:
-            wins = [p for p in trades_pnl if p > 0]
-            win_rate = (len(wins) / len(trades_pnl)) * 100.0
-            
-        peaks = df['Close'].cummax()
-        drawdowns = (df['Close'] - peaks) / (peaks + 1e-9) * 100
-        max_dd = float(drawdowns.min())
-        
-        # Sharpe Ratio calculation
-        df['Returns'] = df['Close'].pct_change()
-        returns = df['Returns'].dropna()
-        sharpe = 0.0
-        if len(returns) > 5:
-            avg_return = returns.mean()
-            std_return = returns.std()
-            if std_return > 0:
-                sharpe = (avg_return / std_return) * np.sqrt(252)
-                
-        # Beta calculation against XU100 (BIST 100)
-        beta = 1.0
-        try:
-            xu100 = yf.Ticker("XU100.IS", session=session)
-            xu100_df = xu100.history(period="6mo", interval="1d", timeout=5)
-            if not xu100_df.empty:
-                xu100_df['Market_Returns'] = xu100_df['Close'].pct_change()
-                combined = pd.concat([df['Returns'], xu100_df['Market_Returns']], axis=1).dropna()
-                if len(combined) > 5:
-                    cov = combined.cov().iloc[0, 1]
-                    market_var = combined.iloc[:, 1].var()
-                    if market_var > 0:
-                        beta = cov / market_var
-        except Exception as e:
-            print(f"Error calculating Beta: {e}")
-            
-        # Get historical series for Chart.js sub-chart
-        df_chart = df.dropna(subset=['RSI14']).copy()
-        rsi_series = [{"date": str(idx)[:10], "value": float(val)} for idx, val in df_chart['RSI14'].items()]
-        macd_series = []
-        if 'MACD' in df_chart.columns:
-            macd_series = [{"date": str(idx)[:10], "macd": float(row['MACD']), "signal": float(row['MACD_Signal'])} for idx, row in df_chart.iterrows()]
-            
-        return {
-            "ticker": formatted,
-            "close": round(close, 2),
-            "sma20": round(sma, 2),
-            "ema20": round(ema, 2),
-            "rsi14": round(rsi, 2),
-            "rsi_condition": rsi_condition,
-            "macd": round(macd, 2),
-            "macd_signal": round(signal, 2),
-            "bb_upper": round(bb_upper, 2),
-            "bb_lower": round(bb_lower, 2),
-            "bb_condition": bb_condition,
-            "overall_signal": overall_signal,
-            "confidence": f"{confidence:.1f}%",
-            "alpha_generation": f"+{alpha_val:.1f}%",
-            "win_rate": f"{win_rate:.1f}%",
-            "max_drawdown": f"{max_dd:.1f}%",
-            "sharpe_ratio": round(sharpe, 2),
-            "beta": round(beta, 2),
-            "rsi_series": rsi_series,
-            "macd_series": macd_series
-        }
-    except Exception as e:
-        print(f"Error in analyze_stock_logic: {e}")
-        return {}
-
 @app.get("/")
 async def get_index():
     with open("index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
-@app.post("/run-analysis")
-async def run_analysis(request: Request = None):
-    ticker = "THYAO"
-    if request:
-        try:
-            data = await request.json()
-            ticker = data.get("ticker", "THYAO")
-        except Exception:
-            pass
-            
-    analysis = analyze_stock_logic(ticker)
-    print(f"Done: {ticker}")
-    
-    if not analysis:
-        return {
-            "status": "success",
-            "message": "Analysis Complete",
-            "ticker": ticker,
-            "win_rate": "68.5%",
-            "max_drawdown": "-12.0%",
-            "sharpe_ratio": 1.45,
-            "beta": 1.05,
-            "rsi14": 52.3,
-            "macd": 0.15,
-            "bb_upper": 312.4,
-            "bb_lower": 284.1,
-            "rsi_series": [],
-            "macd_series": []
-        }
-        
-    return {
-        "status": "success",
-        "message": "Analysis Complete",
-        "ticker": analysis.get("ticker", ticker),
-        "win_rate": analysis["win_rate"],
-        "max_drawdown": analysis["max_drawdown"],
-        "sharpe_ratio": analysis["sharpe_ratio"],
-        "beta": analysis["beta"],
-        "rsi14": analysis["rsi14"],
-        "macd": analysis["macd"],
-        "bb_upper": analysis["bb_upper"],
-        "bb_lower": analysis["bb_lower"],
-        "rsi_series": analysis["rsi_series"],
-        "macd_series": analysis["macd_series"]
-    }
+# (22 Temmuz 2026, on ikinci oturum — "gürültülü/ölü kodu temizle") Burada
+# önceden ~250 satırlık bir `analyze_stock_logic()` fonksiyonu ve onu çağıran
+# `/run-analysis` uç noktası vardı. Frontend'de (`app.js`, `index.html`,
+# `tradingChart.js`, `tradingEngine.js` dahil tüm dosyalarda) bu uç noktaya
+# HİÇBİR çağrı bulunamadı (grep ile doğrulandı) — tamamen ölü kod olduğu
+# için kaldırıldı. Kullanıcı bu temizliği bu oturumda ayrıca onayladı.
 
 @app.get("/api/v1/health")
 async def health_check():
@@ -635,6 +406,13 @@ def get_quotes(request: QuotesRequest):
                     quotes[original] = round(float(close_series.iloc[-1]), 2)
             except Exception:
                 continue
+        # yfinance kendi "possibly delisted" gürültüsünü artık bastırıyor
+        # (bkz. dosya başındaki logging.getLogger("yfinance") ayarı) — bunun
+        # yerine hangi sembollerin bu turda veri döndürmediğini TEK bir özet
+        # satırda gösteriyoruz, böylece bilgi kaybolmuyor sadece sadeleşiyor.
+        missing = [original for original in formatted_map.values() if original not in quotes]
+        if missing:
+            print(f"[quotes] {len(missing)}/{len(formatted_map)} sembol için veri dönmedi (muhtemelen geçici/delisted): {missing}")
     except Exception as e:
         print(f"[quotes] Batch download failed ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
 
