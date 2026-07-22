@@ -318,27 +318,38 @@ const DataController = (() => {
     // özelliği) Her STOCK_PROFILES girdisine bir `logoDomain` alanı eklendi
     // (97 BIST100 şirketinin resmi kurumsal web sitesi kök alan adı — web
     // araştırmasıyla tek tek doğrulanıp toplandı). Bu fonksiyon, o alan
-    // adını Clearbit'in ücretsiz/anahtarsız logo servisine (logo.clearbit.com)
-    // besleyerek gerçek şirket logosu görselinin URL'sini üretiyor. yfinance
+    // adını gerçek şirket logosu görselinin URL'sine çeviriyor. yfinance
     // BIST hisseleri için doğrudan bir logo alanı sağlamadığından bu,
-    // projenin "gerçek veri" ilkesine en yakın, ücretsiz/pratik yol —
-    // Clearbit'in kendisi de gerçek bir üçüncü taraf servis (uydurma/sahte
-    // görsel üretmiyor, sadece şirketin gerçek web sitesinden logosunu
-    // getiriyor). Alan adı bilinmiyorsa veya Clearbit o alan adı için bir
-    // logo bulamazsa null döner — çağıran taraf (bkz. tradingEngine.js
-    // renderWatchlistRows / tradingChart.js setSymbolHeader) bunu renkli
-    // baş harf rozetine (fallback) düşürüyor, kırık bir görsel ikonu asla
-    // görünmüyor.
+    // projenin "gerçek veri" ilkesine en yakın, pratik yol.
+    //
+    // (22 Temmuz 2026, on ikinci oturum, yedinci tur — düzeltme) İlk
+    // denemede Clearbit'in ücretsiz/anahtarsız logo servisi (logo.clearbit.com)
+    // kullanılmıştı, ama Clearbit bu servisi 8 Aralık 2025'te TAMAMEN
+    // kapattı (bkz. HubSpot'un duyurusu) — canlı sitede TÜM logoların renkli
+    // rozete düşmesinin nedeni buydu, kodda bir hata değildi. Yerine
+    // Clearbit'in resmi önerdiği Logo.dev'e geçildi — kullanıcının kendi
+    // (kalıcı olarak ücretsiz, ayda 500.000 istek limitli) Logo.dev
+    // hesabından aldığı bir "Publishable key" (config.js'teki
+    // LOGO_DEV_TOKEN — bilerek herkese açık/frontend'de kullanılmaya uygun
+    // bir anahtar türü, gizli değil) gerekiyor.
+    //
+    // Alan adı bilinmiyorsa, token tanımlı değilse veya Logo.dev o alan adı
+    // için bir logo bulamazsa null döner — çağıran taraf (bkz.
+    // tradingEngine.js renderWatchlistRows / tradingChart.js
+    // setSymbolHeader) bunu renkli baş harf rozetine (fallback) düşürüyor,
+    // kırık bir görsel ikonu asla görünmüyor.
     function getLogoUrl(ticker, size = 64) {
         const cleanTicker = (ticker || '').replace('.IS', '').toUpperCase();
         const profile = STOCK_PROFILES[cleanTicker];
         if (!profile || !profile.logoDomain) return null;
-        return `https://logo.clearbit.com/${profile.logoDomain}?size=${size}`;
+        const token = window.OPTIPULSE_CONFIG && window.OPTIPULSE_CONFIG.LOGO_DEV_TOKEN;
+        if (!token) return null;
+        return `https://img.logo.dev/${profile.logoDomain}?token=${token}&size=${size}&format=png`;
     }
 
     // Bir sembol için, üçüncü taraf logo servisi hiç yoksa ya da o servis
     // bu alan adı için bir görsel döndürmezse (ör. yeni/az bilinen bir
-    // şirket, Clearbit'in kendi veritabanında olmayabilir) kullanılacak
+    // şirket, Logo.dev'in kendi veritabanında olmayabilir) kullanılacak
     // basit, deterministik renkli baş harf rozeti — aynı sembol her zaman
     // aynı rengi/harfleri üretir, kırık bir görsel ikonu asla görünmez.
     function getLogoFallback(ticker) {

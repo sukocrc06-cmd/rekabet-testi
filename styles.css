@@ -1844,7 +1844,7 @@ body {
     min-width: 0;
 }
 
-/* Şirket logosu (Clearbit) + bulunamazsa/yüklenemezse renkli baş harf
+/* Şirket logosu (Logo.dev) + bulunamazsa/yüklenemezse renkli baş harf
    rozeti — watchlist satırında, grafik sembol başlığında ve ısı
    haritasında ortak kullanılıyor (bkz. dataController.js buildLogoHtml). */
 .stock-logo-wrap {

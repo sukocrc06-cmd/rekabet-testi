@@ -31,9 +31,20 @@
     // ÖNEMLİ: Render'ın ücretsiz katmanı 15 dakika boşta kalınca uyuyor,
     // ilk istekte ~1 dakika uyanma süresi olabiliyor — bir sunumdan hemen
     // önce siteyi bir kez açıp "ısıtmak" bu gecikmeyi önler.
+    // (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
+    // İlk denemede Clearbit'in ücretsiz logo servisi kullanılmıştı, ama
+    // Clearbit bu servisi 8 Aralık 2025'te TAMAMEN kapattı — bu yüzden
+    // hiçbir logo yüklenmiyor, hepsi renkli baş harf rozetine düşüyordu.
+    // Yerine Logo.dev'e geçildi (Clearbit'in kendi önerdiği resmi yerine
+    // geçen servis) — kullanıcının kendi hesabından aldığı, "Publishable
+    // key" (yayınlanabilir, herkese açık kullanım için tasarlanmış, GİZLİ
+    // TUTULMASI GEREKMEYEN bir anahtar — Logo.dev'in kendi panelinde
+    // "Safe to share publicly" olarak işaretli). Logo.dev'in "Secret key"i
+    // KESİNLİKLE buraya veya herhangi bir frontend dosyasına yazılmamalı.
     window.OPTIPULSE_CONFIG = {
         BACKEND_HTTP: 'https://rekabet-testi.onrender.com',
-        BACKEND_WS: 'wss://rekabet-testi.onrender.com'
+        BACKEND_WS: 'wss://rekabet-testi.onrender.com',
+        LOGO_DEV_TOKEN: 'pk_WSsW7uNMSGWLW7W6gsrQcg'
     };
 
     // Chrome'un Local Network Access (LNA) politikası, hedef adres GERÇEKTEN
