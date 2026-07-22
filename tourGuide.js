@@ -74,7 +74,7 @@ const TourGuide = (() => {
             {
                 welcome: true,
                 title: 'OptiPulseLab Özellik Turu',
-                desc: 'Eklenen 23 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
+                desc: 'Eklenen 26 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için "İleri"ye basın, istediğiniz an "Turu Kapat" ile çıkabilirsiniz.'
             },
             // (18 Temmuz 2026, onuncu oturum, dördüncü tur özelliği — bu turda
             // tanıtım turuna eklendi) Header artık taşmıyor; ikincil butonlar
@@ -161,6 +161,52 @@ const TourGuide = (() => {
                 selector: '#btn-toggle-fullscreen',
                 title: 'Tam Ekran Grafik Modu',
                 desc: 'Tam şu anda gördüğünüz gibi — header, izleme listesi ve işlem paneli gizlenip grafik tüm ekranı kaplıyor. Aynı düğmeye tekrar basarak ya da "Esc" ile normal görünüme dönebilirsiniz (turdan sonra otomatik geri dönecek).'
+            },
+            // (22 Temmuz 2026, on ikinci oturum, üçüncü tur özelliği — bu turda
+            // tanıtım turuna eklendi) Sinyal Anlatıcısı: motorların AL/SAT
+            // kararlarını grafiğin üzerinde ok işareti olarak gösterir.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    const btn = byId('btn-toggle-signal-explainer');
+                    if (btn && !btn.classList.contains('active')) btn.click();
+                    await wait(200);
+                },
+                teardown: () => {
+                    const btn = byId('btn-toggle-signal-explainer');
+                    if (btn && btn.classList.contains('active')) btn.click();
+                },
+                selector: '#btn-toggle-signal-explainer',
+                title: 'Sinyal Anlatıcısı',
+                desc: 'Şimdi açılan bu düğmeyle grafik üzerinde AL/SAT ok işaretleri beliriyor. Bir işarete tıklarsanız, motorun (SMA5/SMA20 kesişimi ya da RSI+MACD kombinasyonu) o sinyali NEDEN verdiğini açıklayan bir balon açılır. Gerçek bir emir veya backtest değildir — sadece motor mantığının görsel anlatımıdır.'
+            },
+            // (22 Temmuz 2026, on ikinci oturum, üçüncü tur özelliği — bu turda
+            // tanıtım turuna eklendi) Strateji Tekrarı / Zaman Makinesi: mevcut
+            // yüklü veriyi bar bar yeniden oynatan kontrol şeridi.
+            {
+                setup: async () => {
+                    closeAllAppModals();
+                    const btn = byId('btn-toggle-replay');
+                    if (btn && !btn.classList.contains('active')) btn.click();
+                    await wait(200);
+                },
+                teardown: () => {
+                    const btn = byId('btn-toggle-replay');
+                    if (btn && btn.classList.contains('active')) btn.click();
+                },
+                selector: '#tv-replay-bar',
+                title: 'Strateji Tekrarı (Zaman Makinesi)',
+                desc: 'Açılan bu şeritle geçmiş fiyat hareketini bar bar, oynat/durdur ve 1x/2x/5x hız seçenekleriyle yeniden izleyebilir, kaydırıcıyı sürükleyerek istediğiniz ana atlayabilirsiniz. Sinyal Anlatıcısı otomatik olarak birlikte açılır, böylece geçmişte hangi noktada neden AL/SAT sinyali verildiğini adım adım görebilirsiniz. Yeni veri çekmez — zaten yüklü olan geçmişi yeniden canlandırır.'
+            },
+            // (22 Temmuz 2026, on ikinci oturum, dördüncü tur — backend/fiyat
+            // düzeltmesi sonrası eklendi) Yeşil/gri canlı veri noktası daha
+            // önce turda hiç yoktu; hocanın "bu canlı mı?" sorusuna doğrudan
+            // yanıt veren gösterge burada.
+            {
+                setup: async () => { closeAllAppModals(); },
+                selector: '.tv-symbol-block',
+                title: 'Canlı Veri Göstergesi (Yeşil Nokta)',
+                desc: 'Sembol adının yanındaki küçük noktaya bakın — yanıp sönen YEŞİL nokta, bu sembol için gerçek zamanlı (WebSocket) canlı veri akışının aktif olduğu anlamına gelir; soluk GRİ nokta ise o an yerel simülasyon fiyatı gösterildiğini belirtir. Üzerine gelince (hover) hangi durumda olduğu yazıyla da görünür.'
             },
             {
                 selector: '#chart-toolbar',
@@ -336,7 +382,7 @@ const TourGuide = (() => {
             {
                 finish: true,
                 title: 'Tur Tamamlandı',
-                desc: 'Bu turda 23 özelliği gördünüz: sadeleşen header + ☰ menü, çoklu grafik sekmeleri, 2x2 grafik ızgarası, Dual-Chart, tam ekran grafik modu, sol dikey çizim rayı, çoklu osilatör paneli, genişletilmiş göstergeler (Ichimoku/PSAR/Pivot/SuperTrend/CCI/Keltner/Donchian/MFI), şirket temel verileri, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi (manuel + hızlı çipler), OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, komut paleti, klavye kısayolları, Yardım/Hakkında ve koyu/açık tema. Turu istediğiniz an "☰" menüsündeki "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
+                desc: 'Bu turda 26 özelliği gördünüz: sadeleşen header + ☰ menü, çoklu grafik sekmeleri, 2x2 grafik ızgarası, Dual-Chart, tam ekran grafik modu, Sinyal Anlatıcısı, Strateji Tekrarı (Zaman Makinesi), canlı veri göstergesi (yeşil/gri nokta), sol dikey çizim rayı, çoklu osilatör paneli, genişletilmiş göstergeler (Ichimoku/PSAR/Pivot/SuperTrend/CCI/Keltner/Donchian/MFI), şirket temel verileri, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi (manuel + hızlı çipler), OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, komut paleti, klavye kısayolları, Yardım/Hakkında ve koyu/açık tema. Turu istediğiniz an "☰" menüsündeki "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
             }
         ];
     }
