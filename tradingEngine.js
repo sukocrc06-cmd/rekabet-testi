@@ -182,10 +182,49 @@ const TradingEngine = (() => {
         sampleEquity();
         if (byId('panel-tab-performance')?.classList.contains('active')) renderPerformanceTab();
         if (byId('heatmap-modal-backdrop')?.classList.contains('open')) renderHeatmap();
+        // (22 Temmuz 2026, on ikinci oturum — madde 7) Profil paneli açıkken
+        // bakiye/özkaynak/K-Z rakamları da canlı tik ile birlikte tazelensin.
+        if (byId('profile-panel-dropdown')?.classList.contains('open')) renderProfilePanel();
     }
 
     function getPrice(symbol) {
         return priceProfiles[symbol] ? priceProfiles[symbol].price : null;
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum — ızgara ekranı anlık fiyat) 2x2
+    // ızgara görünümü (multiChartGrid.js) her hücrede anlık fiyat/değişim
+    // göstermek için priceProfiles'a doğrudan erişemiyor (module-level
+    // private state) — bu küçük dışa açık yardımcı, watchlist'teki günlük
+    // değişim yüzdesi hesabıyla (bkz. renderWatchlistPrices, ~satır 1371)
+    // birebir aynı formülü tekrar kullanıyor, tek gerçek kaynak (priceProfiles)
+    // hâlâ burada.
+    function getChangePercent(symbol) {
+        const p = priceProfiles[symbol];
+        if (!p || !p.dayOpen) return null;
+        return ((p.price - p.dayOpen) / p.dayOpen) * 100;
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum — ızgara canlı fiyat çapası) Herhangi
+    // bir sembolün simüle canlı tick fiyatını bilinen GERÇEK/güncel son
+    // kapanışa yeniden çapalıyor — selectSymbol() içindeki aynı re-anchor
+    // mantığının (bkz. yukarısı, ~satır 1526) genel amaçlı, dışa açık hali.
+    // multiChartGrid.js her hücre yüklendiğinde kendi (backend'den ya da
+    // simüle yedekten) getirdiği mum serisinin son kapanışıyla bunu çağırır
+    // — aksi halde ızgaranın kendi bağımsız mum verisi ile priceProfiles'ın
+    // uzun süredir biriken ayrı simülasyonu arasında büyük, gerçekçi
+    // olmayan bir sıçrama oluşabilir (iki ayrı rastgele yürüyüş aynı
+    // sembol için farklı sonlara varır). Sembol o an aktif sembolse ilgili
+    // panelleri de tazeler.
+    function syncPriceAnchor(symbol, lastClose) {
+        const p = priceProfiles[symbol];
+        if (!p || !lastClose) return;
+        p.price = lastClose;
+        p.dayOpen = lastClose;
+        renderWatchlistPrices();
+        if (symbol === state.activeSymbol) {
+            updateActiveSymbolTicket();
+            renderOrderBook(symbol);
+        }
     }
 
     /* ════════════════════════════════════════════════
@@ -2556,7 +2595,12 @@ const TradingEngine = (() => {
     // leverage=1'de eski "balance + longValue - shortValue" formülüyle
     // matematiksel olarak birebir aynı sonucu verir (bkz. placeOrder'daki
     // yorum) — sadece kaldıraç>1 için doğru şekilde genelleşiyor.
-    function renderAccountSummary() {
+    // (22 Temmuz 2026, on ikinci oturum — madde 7 "profil paneli") Hesap
+    // özetinin (bakiye/özkaynak/açık K-Z/kullanılan marj) hesaplama mantığı
+    // burada TEK YERDE toplandı — hem renderAccountSummary() (header/ticket
+    // panelleri) hem de dışa açık getAccountSnapshot() (profil paneli) aynı
+    // hesabı kullanıyor, iki ayrı kopya birbirinden sapmasın diye.
+    function computeAccountSnapshot() {
         let usedMargin = 0, openPnl = 0;
         Object.keys(portfolio.positions).forEach(symbol => {
             const pos = portfolio.positions[symbol];
@@ -2570,6 +2614,21 @@ const TradingEngine = (() => {
             }
         });
         const equity = portfolio.balance + usedMargin + openPnl;
+        return {
+            balance: portfolio.balance,
+            equity,
+            openPnl,
+            usedMargin,
+            positionsCount: Object.keys(portfolio.positions).length
+        };
+    }
+
+    function getAccountSnapshot() {
+        return computeAccountSnapshot();
+    }
+
+    function renderAccountSummary() {
+        const { usedMargin, openPnl, equity } = computeAccountSnapshot();
 
         // Balance now lives in the header pill (top right) rather than the trade ticket itself
         const headerBalEl = byId('header-balance-value');
@@ -2596,6 +2655,94 @@ const TradingEngine = (() => {
                 marginLevelEl.textContent = '--';
                 marginLevelEl.className = 'acct-value';
             }
+        }
+    }
+
+    /* ────────── Profil paneli (madde 7, 22 Temmuz 2026, on ikinci oturum) ──────────
+       Sol üstteki (hamburgerin yanındaki) profil simgesine tıklanınca açılan
+       panel: bakiye/özkaynak/açık K-Z/pozisyon sayısı (computeAccountSnapshot
+       ile TEK kaynaktan) ve kalıcı bir profil ismi ayarı. Açılma/kapanma
+       deseni tradingChart.js'teki setupHeaderMenu()/setupChartTypeMenu() ile
+       birebir aynı (position:fixed + getBoundingClientRect, dışarı tıklama/
+       Escape ile kapanma) — burada SOLA hizalı açılıyor (soldaki simgeden
+       tetiklendiği için). */
+    const PROFILE_NAME_STORAGE_KEY = 'optipulselab_profile_name_v1';
+    const DEFAULT_PROFILE_NAME = 'Kullanıcı';
+
+    function loadProfileName() {
+        try {
+            const raw = localStorage.getItem(PROFILE_NAME_STORAGE_KEY);
+            if (raw && raw.trim()) return raw.trim();
+        } catch (e) { /* private mode */ }
+        return DEFAULT_PROFILE_NAME;
+    }
+
+    function saveProfileName(name) {
+        try { localStorage.setItem(PROFILE_NAME_STORAGE_KEY, name); } catch (e) { /* ignore */ }
+    }
+
+    function applyProfileName(name) {
+        const display = (name && name.trim()) ? name.trim() : DEFAULT_PROFILE_NAME;
+        const nameEl = byId('profile-name-display');
+        const avatarEl = byId('profile-avatar');
+        if (nameEl) nameEl.textContent = display;
+        if (avatarEl) avatarEl.textContent = display.charAt(0);
+    }
+
+    function renderProfilePanel() {
+        const snap = computeAccountSnapshot();
+        const balEl = byId('profile-balance-value');
+        const eqEl = byId('profile-equity-value');
+        const pnlEl = byId('profile-pnl-value');
+        const posEl = byId('profile-positions-count');
+        if (balEl) balEl.textContent = fmtTRY(snap.balance);
+        if (eqEl) eqEl.textContent = fmtTRY(snap.equity);
+        if (pnlEl) {
+            pnlEl.textContent = (snap.openPnl >= 0 ? '+' : '') + fmtTRY(snap.openPnl);
+            pnlEl.className = 'profile-stat-value ' + (snap.openPnl >= 0 ? 'profit-text' : 'loss-text');
+        }
+        if (posEl) posEl.textContent = String(snap.positionsCount);
+    }
+
+    function setupProfilePanel() {
+        const btn = byId('btn-profile');
+        const dropdown = byId('profile-panel-dropdown');
+        const nameInput = byId('profile-name-input');
+        if (!btn || !dropdown) return;
+
+        const savedName = loadProfileName();
+        applyProfileName(savedName);
+        if (nameInput) nameInput.value = savedName === DEFAULT_PROFILE_NAME ? '' : savedName;
+
+        const close = () => dropdown.classList.remove('open');
+        const open = () => {
+            if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            if (window.__optipulseCloseAllFlyouts) window.__optipulseCloseAllFlyouts();
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.top = (rect.bottom + 6) + 'px';
+            dropdown.style.left = rect.left + 'px';
+            dropdown.style.right = 'auto';
+            dropdown.classList.add('open');
+            renderProfilePanel();
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdown.classList.contains('open')) close(); else open();
+        });
+        document.addEventListener('click', (e) => {
+            if (dropdown.classList.contains('open') && !dropdown.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dropdown.classList.contains('open')) close();
+        });
+
+        if (nameInput) {
+            nameInput.addEventListener('input', () => {
+                const name = nameInput.value;
+                saveProfileName(name.trim() ? name : DEFAULT_PROFILE_NAME);
+                applyProfileName(name);
+            });
         }
     }
 
@@ -2654,6 +2801,7 @@ const TradingEngine = (() => {
         setupThemeToggle();
         setupCompactMode();
         setupMuteToggle();
+        setupProfilePanel();
         renderPositions();
         renderOrders();
         renderAccountSummary();
@@ -2681,6 +2829,8 @@ const TradingEngine = (() => {
         init,
         selectSymbol,
         getPrice,
+        getChangePercent,
+        syncPriceAnchor,
         closePosition,
         resetPortfolio,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı

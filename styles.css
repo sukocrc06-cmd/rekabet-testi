@@ -334,6 +334,115 @@ body {
     margin: 4px 2px;
 }
 
+/* (22 Temmuz 2026, on ikinci oturum — madde 7 "profil paneli") Sol üstteki
+   profil simgesi ve açılır paneli — açılma/kapanma deseni yukarıdaki
+   .header-menu-dropdown ile birebir aynı (bkz. tradingEngine.js
+   setupProfilePanel()), yalnızca SOLA hizalı açılıyor (sağdaki hamburger
+   menüsü sağa hizalı açılıyordu). */
+.profile-panel-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.profile-panel-dropdown {
+    display: none;
+    position: fixed;
+    z-index: 620;
+    width: 240px;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    padding: 12px;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.profile-panel-dropdown.open {
+    display: flex;
+}
+
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 10px;
+}
+
+.profile-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background-color: var(--gold-dim);
+    border: 1px solid var(--gold-border);
+    color: var(--gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 15px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+}
+
+.profile-header-text {
+    min-width: 0;
+}
+
+.profile-name-display {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-header-sub {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.profile-panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 0;
+}
+
+.profile-stat-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+}
+
+.profile-stat-label {
+    color: var(--text-muted);
+}
+
+.profile-stat-value {
+    font-family: 'Fira Code', monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.profile-stat-value.profit-text { color: var(--success); }
+.profile-stat-value.loss-text { color: var(--danger); }
+
+.profile-settings-label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.profile-name-input {
+    width: 100%;
+    font-size: 12px;
+    padding: 6px 8px;
+}
+
 /* --- Header Balance Pill (demo trading balance, top right) --- */
 .header-balance-pill {
     display: flex;
@@ -1249,11 +1358,25 @@ body {
     }
 
     .logo-area {
-        gap: 8px;
+        gap: 6px;
     }
 
     .logo-area h1 {
-        font-size: 15px;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+    }
+
+    /* (22 Temmuz 2026, on ikinci oturum — madde 7) Yeni profil simgesi
+       logo-area'ya ikinci bir ikon buton olarak eklendiğinde, dar ekranda
+       (bkz. az önceki header taşması düzeltmesi) yer açmak için hem bu
+       butonlar hem de yanındaki mobil "Piyasa Paneli" hamburgerı biraz
+       küçültülüyor — .btn-icon'un GENEL (uygulama genelindeki diğer ikon
+       butonları etkileyecek) tanımına dokunulmadan, yalnızca logo-area
+       kapsamında. */
+    .logo-area .btn-icon {
+        width: 28px;
+        height: 28px;
+        padding: 6px;
     }
 
     .header-status {
@@ -1352,6 +1475,28 @@ body {
 
     .header-actions {
         gap: 3px;
+    }
+
+    /* (22 Temmuz 2026, on ikinci oturum — madde 7) Bu blok, ~390px genişlikte
+       header'ın taşmaması için her pikselin zaten hesaba katıldığı, önceki
+       oturumda dikkatle ayarlanmış bir düzen — yeni profil simgesi eklemek
+       bunu yeniden taşırdı. En dar telefonlarda (bu breakpoint) profil
+       simgesi gizleniyor; 421px ve üzerinde (tablet ve masaüstü dahil)
+       normal şekilde görünmeye devam ediyor. Fonksiyonellik kaybı yok —
+       bakiye zaten header'daki BAKİYE rozetinde görünür durumda kalıyor. */
+    .profile-panel-wrap {
+        display: none;
+    }
+}
+
+/* (22 Temmuz 2026, on ikinci oturum) 421-549px arası dar telefon/phablet
+   aralığında da (bu proje kapsamındaki test genişliği olan 390px'in dışında
+   ama yine de dar) profil simgesini gizli tutuyoruz — ölçüm yapılıp bu
+   aralığın (özellikle ~480-549px) yeni ikonla taşmaya başladığı görüldü;
+   550px ve üzerinde header zaten taşmadan sığıyor. */
+@media (max-width: 549px) {
+    .profile-panel-wrap {
+        display: none;
     }
 }
 
@@ -3401,39 +3546,103 @@ body.compact-mode .status-item {
     background-color: var(--gold-dim);
 }
 
-/* (18 Temmuz 2026, onuncu oturum, üçüncü tur) Izgara hücresi için sade
-   SMA20/EMA9 overlay aç/kapa butonu — bkz. multiChartGrid.js
-   toggleCellOverlay()/refreshCellOverlay(). */
-.tv-grid-indicator-btn {
-    background: transparent;
+/* (22 Temmuz 2026, on ikinci oturum) Tek aç/kapa butonu yerine hücre başına
+   İKİ FARKLI gösterge arasında seçim yapılabilen bir <select> — bkz.
+   multiChartGrid.js refreshCellOverlay() (mode: 'none' | 'trend' | 'bollinger'). */
+.tv-grid-indicator-select {
+    background-color: var(--bg-input);
     border: 1px solid var(--tint-14);
     color: var(--text-muted);
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 3px 3px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     flex-shrink: 0;
+    max-width: 78px;
     transition: var(--transition-fast);
 }
 
-.tv-grid-indicator-btn:hover {
+.tv-grid-indicator-select:hover {
     color: var(--text-primary);
     border-color: var(--gold-border);
 }
 
-.tv-grid-indicator-btn.active {
-    background-color: var(--gold-dim);
-    border-color: var(--gold);
-    color: var(--gold);
+/* (22 Temmuz 2026, on ikinci oturum) Hücre başına anlık fiyat/değişim rozeti
+   — bkz. multiChartGrid.js tickGrid(). Piyasa kapalıyken son fiyatta donuk
+   kalır (isMarketOpenNow() kontrolü tickGrid() içinde). */
+.tv-grid-price-badge {
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'Fira Code', monospace;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
-.tv-grid-cell-chart {
+.tv-grid-price-badge.up { color: var(--success); }
+.tv-grid-price-badge.down { color: var(--danger); }
+
+.tv-grid-cell-chart-wrap {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+}
+
+.tv-grid-cell-chart {
+    position: absolute;
+    inset: 0;
+}
+
+/* (22 Temmuz 2026, on ikinci oturum) Izgara hücresi başına sade çizim
+   katmanı — ana grafiğin (tradingChart.js) tam çizim motorunu 4 kopyaya
+   çıkarmak yerine, bu dosyanın başındaki mimari felsefeye sadık kalarak
+   yalnızca 2 araç (trend çizgisi + yatay çizgi) ve bir "temizle" butonu
+   sunuluyor — bkz. multiChartGrid.js redrawCellCanvas()/setupDrawToolbar(). */
+.tv-grid-draw-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    cursor: crosshair;
+}
+
+.tv-grid-draw-toolbar {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    z-index: 3;
+    display: flex;
+    gap: 2px;
+    background-color: rgba(0, 0, 0, 0.35);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+
+.tv-grid-draw-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    line-height: 1;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.tv-grid-draw-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--gold-border);
+}
+
+.tv-grid-draw-btn.active {
+    background-color: var(--gold-dim);
+    border-color: var(--gold);
+    color: var(--gold);
 }
 
 .tv-ohlc-legend .ohlc-date {

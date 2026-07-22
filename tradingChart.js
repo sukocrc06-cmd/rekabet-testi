@@ -82,6 +82,16 @@ const TradingChart = (() => {
         { id: '1w',  kind: 'weekly' }
     ];
 
+    // (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Backend
+    // artık /api/v1/ohlcv için period="max" istiyor (bkz. main.py), yani
+    // state.dailyCandles bazı semboller için binlerce güne kadar uzayabilir.
+    // 1D/1W görünümleri bu TAM geçmişi kullanıyor (asıl istenen buydu), ama
+    // dakikalık/saatlik sentetik mumları yıllarca geriye götürmenin hiçbir
+    // anlamı yok — hem anlamsız (kimse 10 yıl önceki "15 dakikalık" mumla
+    // ilgilenmez) hem de gereksiz yere ağır olurdu. İntraday senteleme bu
+    // yüzden her zaman son N günlük bir dilimden türetiliyor.
+    const INTRADAY_SOURCE_WINDOW_DAYS = 90;
+
     // Lightweight Charts renders to <canvas> internally, so its background/
     // text/grid colors are set via JS options, not CSS — this mirrors the
     // page's [data-theme] attribute (read once at load; kept in sync by
@@ -188,6 +198,17 @@ const TradingChart = (() => {
     };
 
     let copiedDrawing = null;
+
+    // (19 Temmuz 2026, on ikinci oturum — çizim "taşıma" özelliği) Seçili bir
+    // çizime cursor aracıyla basıp sürüklemek onu kopyalamadan/silmeden
+    // olduğu yerde taşır. moveDrag, sürükleme başladığı andaki orijinal
+    // şeklin (JSON klonu) + başlangıç mum-indeksi/fiyatını tutar; her
+    // mousemove'da o ANDAKI imleç konumuyla başlangıç arasındaki fark
+    // (indexDelta/priceDelta) orijinal şekle uygulanıp state.drawings'e
+    // yazılır — böylece hata birikmeden (drift) her adımda orijinalden tutarlı
+    // şekilde hesaplanır, art arda küçük yuvarlama hatalarının toplanması
+    // önlenir.
+    let moveDrag = null;
 
     // Per-symbol drawing persistence so switching between multi-chart tabs
     // doesn't discard a symbol's trend lines / fib levels / rectangles.
@@ -334,7 +355,13 @@ const TradingChart = (() => {
         };
 
         try {
-            const first = await attempt(12000);
+            // (19 Temmuz 2026, on ikinci oturum) Backend'in kendi yfinance
+            // zaman aşımı "3mo" -> "max" geçişiyle 10sn'den 15sn'ye çıkarıldı
+          // (period="max" bazı semboller için çok daha fazla satır çekiyor,
+            // biraz daha uzun sürebilir) — istemci zaman aşımı da altıncı
+            // oturumdaki "istemci > backend" ilkesiyle tutarlı kalması için
+            // 12sn'den 18sn'ye çıkarıldı.
+            const first = await attempt(18000);
             if (first) return first;
         } catch (err) {
             console.warn('[TradingChart] Backend OHLCV fetch (1st attempt) failed:', err.message || err);
@@ -345,7 +372,7 @@ const TradingChart = (() => {
         // genuinely offline backend.
         await new Promise(r => setTimeout(r, 700));
         try {
-            const second = await attempt(12000);
+            const second = await attempt(18000);
             if (second) return second;
         } catch (err) {
             console.warn('[TradingChart] Backend OHLCV fetch (retry) failed, falling back to simulated data:', err.message || err);
@@ -426,7 +453,14 @@ const TradingChart = (() => {
         let candles = await fetchOhlcvWithRetry(ticker);
 
         if (!candles || candles.length < 5) {
-            candles = window.DataController.generateOHLCV(ticker, 90);
+            // (19 Temmuz 2026, on ikinci oturum) Önceden burada sabit "90"
+            // geçiliyordu — bu, dataController.js'in TRADING_DAYS varsayılanı
+            // 750'ye çıkarılsa bile bu çağrı noktasını hiç etkilemiyordu
+            // (asıl "tam geçmiş" isteğinin fallback yolda çalışmamasının kök
+            // nedeni buydu). Artık `days` argümanı hiç verilmiyor, böylece
+            // DataController.generateOHLCV kendi güncel TRADING_DAYS (750,
+            // ~3 yıllık simüle geçmiş) varsayılanını kullanıyor.
+            candles = window.DataController.generateOHLCV(ticker);
         }
 
         // Lightweight Charts requires strictly ascending unique time values
@@ -493,7 +527,8 @@ const TradingChart = (() => {
     function deriveCandlesForRes(resId) {
         const res = RESOLUTIONS.find(r => r.id === resId) || RESOLUTIONS[3];
         if (res.kind === 'intraday') {
-            return window.DataController.synthesizeIntradayCandles(state.dailyCandles, res.minutes);
+            const recentSlice = state.dailyCandles.slice(-INTRADAY_SOURCE_WINDOW_DAYS);
+            return window.DataController.synthesizeIntradayCandles(recentSlice, res.minutes);
         } else if (res.kind === 'weekly') {
             return window.DataController.aggregateWeeklyCandles(state.dailyCandles);
         }
@@ -1957,6 +1992,11 @@ const TradingChart = (() => {
     function closeAllFlyouts() {
         document.querySelectorAll('.tv-tool-flyout.open').forEach(f => f.classList.remove('open'));
     }
+    // (22 Temmuz 2026, on ikinci oturum — madde 7 "profil paneli") window.
+    // __optipulseCloseOtherModals ile aynı köprü deseni: tradingEngine.js'teki
+    // yeni profil paneli açılırken, bu dosyanın çizim araç flyout'larının
+    // açık kalmaması için dışa açılıyor.
+    window.__optipulseCloseAllFlyouts = closeAllFlyouts;
 
     function toggleFlyout(groupId) {
         const flyout = document.querySelector('.tv-tool-flyout[data-flyout="' + groupId + '"]');
@@ -2806,6 +2846,35 @@ const TradingChart = (() => {
         return true;
     }
 
+    // (19 Temmuz 2026, on ikinci oturum) Bir çizimi indexDelta (mum sayısı
+    // cinsinden zaman kayması) ve priceDelta (mutlak fiyat kayması) kadar
+    // öteleyip YENİ bir şekil nesnesi döndürür — orijinali mutasyona
+    // uğratmaz, moveDrag her mousemove'da bunu "orijinal + o anki toplam
+    // fark" olarak yeniden hesaplar. target/offset gibi tek bir sayı olan
+    // (nokta OLMAYAN) alanlar sadece fiyatça kayar, zaman kayması onlara
+    // uygulanmaz.
+    function translateShapePoints(shape, indexDelta, priceDelta) {
+        const shiftPoint = (point) => {
+            if (!point || point.time == null) return point;
+            const curIdx = state.candles.findIndex(c => c.date === point.time);
+            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (curIdx >= 0 ? curIdx : 0) + indexDelta));
+            const newTime = state.candles[newIdx] ? state.candles[newIdx].date : point.time;
+            return { time: newTime, price: point.price + priceDelta };
+        };
+
+        const moved = { type: shape.type };
+        if (shape.points) {
+            moved.points = shape.points.map(shiftPoint);
+        }
+        if (shape.p1) moved.p1 = shiftPoint(shape.p1);
+        if (shape.p2) moved.p2 = shiftPoint(shape.p2);
+        if (shape.apex) moved.apex = shiftPoint(shape.apex);
+        if (shape.offset !== undefined) moved.offset = shape.offset;
+        if (shape.target !== undefined) moved.target = shape.target + priceDelta;
+        if (shape.label !== undefined) moved.label = shape.label;
+        return moved;
+    }
+
     function setupDrawingSelection() {
         if (!chartContainer) return;
 
@@ -2822,10 +2891,57 @@ const TradingChart = (() => {
                 e.preventDefault();
                 e.stopPropagation();
                 selectDrawing(hitIndex);
+                // (19 Temmuz 2026, on ikinci oturum — "taşıma") Kilitli değilse,
+                // seçili çizimin üstüne basıp sürüklemek onu olduğu yerde
+                // taşır — kopyala/yapıştır/sil ile aynı seviyede temel bir
+                // düzenleme eylemi, ayrı bir "taşıma modu" seçmeye gerek yok.
+                if (!state.drawingsLocked) {
+                    const dp = pixelToDataPoint(x, y);
+                    if (dp.idx >= 0) {
+                        moveDrag = {
+                            index: hitIndex,
+                            startIdx: dp.idx,
+                            startPrice: dp.price,
+                            original: JSON.parse(JSON.stringify(state.drawings[hitIndex]))
+                        };
+                    }
+                }
             } else if (state.selectedDrawingIndex >= 0) {
                 selectDrawing(-1);
             }
         }, true);
+
+        // Sürükleme sırasında şekli sürekli yeniden hesapla (orijinalden +
+        // o anki toplam fark) — mousedown/mouseup'tan bağımsız, window
+        // seviyesinde dinliyoruz ki imleç çizim alanının dışına taşsa bile
+        // sürükleme kopmasın (onDrawMove/onDrawEnd'in zaten kullandığı
+        // desenin aynısı).
+        window.addEventListener('mousemove', (e) => {
+            if (!moveDrag) return;
+            const rect = chartContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const dp = pixelToDataPoint(x, y);
+            if (dp.idx < 0) return;
+            const indexDelta = dp.idx - moveDrag.startIdx;
+            const priceDelta = dp.price - moveDrag.startPrice;
+            state.drawings[moveDrag.index] = translateShapePoints(moveDrag.original, indexDelta, priceDelta);
+            redrawDrawings();
+        });
+
+        window.addEventListener('mouseup', () => {
+            moveDrag = null;
+        });
+
+        // Seçili çizimin üstündeyken (henüz sürüklemeden) fare imlecini
+        // "move" yaparak taşınabilir olduğunu gösterir — yeni özelliğin
+        // keşfedilebilirliği için ucuz ama gerçek bir ipucu.
+        chartContainer.addEventListener('mousemove', (e) => {
+            if (state.activeTool !== 'cursor' || moveDrag || state.drawingsLocked) return;
+            const rect = chartContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const hitIndex = hitTestDrawings(x, y);
+            chartContainer.style.cursor = hitIndex >= 0 ? 'move' : '';
+        });
 
         chartContainer.addEventListener('contextmenu', (e) => {
             if (state.activeTool !== 'cursor') return;

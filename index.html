@@ -29,6 +29,49 @@
                 <button type="button" class="btn btn-icon mobile-drawer-toggle" id="btn-toggle-sidebar" aria-label="Piyasa panelini aç/kapat" title="Piyasa Paneli">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                 </button>
+                <!-- (22 Temmuz 2026, on ikinci oturum — madde 7) Sol üst hamburgerin
+                     ("Piyasa Paneli", yalnızca mobilde görünür) yanına, her ekran
+                     boyutunda görünen bir profil simgesi/paneli eklendi: bakiye,
+                     özkaynak/portföy özeti ve isim ayarı — bkz. tradingEngine.js
+                     setupProfilePanel(). Açılma deseni tradingChart.js'teki
+                     setupHeaderMenu()/setupChartTypeMenu() ile birebir aynı. -->
+                <div class="profile-panel-wrap">
+                    <button type="button" class="btn btn-icon" id="btn-profile" title="Profil" aria-label="Profil">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                    </button>
+                    <div class="profile-panel-dropdown" id="profile-panel-dropdown">
+                        <div class="profile-panel-header">
+                            <div class="profile-avatar" id="profile-avatar">K</div>
+                            <div class="profile-header-text">
+                                <div class="profile-name-display" id="profile-name-display">Kullanıcı</div>
+                                <div class="profile-header-sub">OptiPulseLab Demo Hesabı</div>
+                            </div>
+                        </div>
+                        <div class="profile-panel-section">
+                            <div class="profile-stat-row">
+                                <span class="profile-stat-label">Bakiye</span>
+                                <span class="profile-stat-value" id="profile-balance-value">--</span>
+                            </div>
+                            <div class="profile-stat-row">
+                                <span class="profile-stat-label">Özkaynak (Portföy)</span>
+                                <span class="profile-stat-value" id="profile-equity-value">--</span>
+                            </div>
+                            <div class="profile-stat-row">
+                                <span class="profile-stat-label">Açık K/Z</span>
+                                <span class="profile-stat-value" id="profile-pnl-value">--</span>
+                            </div>
+                            <div class="profile-stat-row">
+                                <span class="profile-stat-label">Açık Pozisyon</span>
+                                <span class="profile-stat-value" id="profile-positions-count">--</span>
+                            </div>
+                        </div>
+                        <div class="header-menu-divider"></div>
+                        <div class="profile-panel-section">
+                            <label class="profile-settings-label" for="profile-name-input">Profil Ayarları — İsim</label>
+                            <input type="text" id="profile-name-input" class="form-input profile-name-input" placeholder="İsminizi girin..." maxlength="40">
+                        </div>
+                    </div>
+                </div>
                 <div class="pulse-indicator"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
                 <!-- (18 Temmuz 2026, onuncu oturum, dördüncü tur) "Şu an analiz
@@ -327,42 +370,100 @@
                          grafikler kullanılıyor — bir hücreye tıklamak o sembolü ana
                          (tekli) grafiğe "yükseltir". -->
                     <!-- (18 Temmuz 2026, onuncu oturum, üçüncü tur) Her hücreye sade
-                         SMA20/EMA9 overlay gösterge aç/kapa butonu eklendi
-                         (.tv-grid-indicator-btn) — Dual-Chart Panel 2'deki "sade
+                         gösterge desteği eklendi — Dual-Chart Panel 2'deki "sade
                          overlay" yaklaşımıyla aynı: hücrenin salt-okunur/kasıtlı
-                         basit mimarisi korunuyor, tam gösterge motoru eklenmiyor. -->
+                         basit mimarisi korunuyor, tam gösterge motoru eklenmiyor.
+                         (22 Temmuz 2026, on ikinci oturum) Tek aç/kapa butonu,
+                         hücre başına İKİ FARKLI gösterge arasında seçim yapılabilen
+                         bir <select>'e dönüştürüldü (Yok / SMA20+EMA9 / Bollinger).
+                         Ayrıca: anlık fiyat/değişim rozeti (.tv-grid-price-badge)
+                         ve hücre başına sade bir çizim katmanı (kenevir/trend +
+                         yatay çizgi, .tv-grid-draw-canvas + .tv-grid-draw-toolbar)
+                         eklendi — bkz. multiChartGrid.js. -->
                     <div class="tv-grid-view" id="tv-grid-view" style="display:none;">
                         <div class="tv-grid-cell" data-cell="0">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="0"></select>
-                                <button type="button" class="tv-grid-indicator-btn" data-cell="0" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
+                                <span class="tv-grid-price-badge" data-cell="0">—</span>
+                                <select class="tv-grid-indicator-select" data-cell="0" title="Gösterge seç">
+                                    <option value="none">Gösterge Yok</option>
+                                    <option value="trend">SMA+EMA</option>
+                                    <option value="bollinger">BB(20,2)</option>
+                                </select>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="0" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
-                            <div class="tv-grid-cell-chart" id="tv-grid-chart-0"></div>
+                            <div class="tv-grid-cell-chart-wrap">
+                                <div class="tv-grid-cell-chart" id="tv-grid-chart-0"></div>
+                                <canvas class="tv-grid-draw-canvas" data-cell="0"></canvas>
+                                <div class="tv-grid-draw-toolbar" data-cell="0">
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="0" data-tool="trend" title="Trend çizgisi çiz">╱</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="0" data-tool="hline" title="Yatay çizgi çiz">—</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="0" data-tool="clear" title="Çizimleri temizle">✕</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="tv-grid-cell" data-cell="1">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="1"></select>
-                                <button type="button" class="tv-grid-indicator-btn" data-cell="1" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
+                                <span class="tv-grid-price-badge" data-cell="1">—</span>
+                                <select class="tv-grid-indicator-select" data-cell="1" title="Gösterge seç">
+                                    <option value="none">Gösterge Yok</option>
+                                    <option value="trend">SMA+EMA</option>
+                                    <option value="bollinger">BB(20,2)</option>
+                                </select>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="1" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
-                            <div class="tv-grid-cell-chart" id="tv-grid-chart-1"></div>
+                            <div class="tv-grid-cell-chart-wrap">
+                                <div class="tv-grid-cell-chart" id="tv-grid-chart-1"></div>
+                                <canvas class="tv-grid-draw-canvas" data-cell="1"></canvas>
+                                <div class="tv-grid-draw-toolbar" data-cell="1">
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="1" data-tool="trend" title="Trend çizgisi çiz">╱</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="1" data-tool="hline" title="Yatay çizgi çiz">—</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="1" data-tool="clear" title="Çizimleri temizle">✕</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="tv-grid-cell" data-cell="2">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="2"></select>
-                                <button type="button" class="tv-grid-indicator-btn" data-cell="2" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
+                                <span class="tv-grid-price-badge" data-cell="2">—</span>
+                                <select class="tv-grid-indicator-select" data-cell="2" title="Gösterge seç">
+                                    <option value="none">Gösterge Yok</option>
+                                    <option value="trend">SMA+EMA</option>
+                                    <option value="bollinger">BB(20,2)</option>
+                                </select>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="2" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
-                            <div class="tv-grid-cell-chart" id="tv-grid-chart-2"></div>
+                            <div class="tv-grid-cell-chart-wrap">
+                                <div class="tv-grid-cell-chart" id="tv-grid-chart-2"></div>
+                                <canvas class="tv-grid-draw-canvas" data-cell="2"></canvas>
+                                <div class="tv-grid-draw-toolbar" data-cell="2">
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="2" data-tool="trend" title="Trend çizgisi çiz">╱</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="2" data-tool="hline" title="Yatay çizgi çiz">—</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="2" data-tool="clear" title="Çizimleri temizle">✕</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="tv-grid-cell" data-cell="3">
                             <div class="tv-grid-cell-header">
                                 <select class="tv-grid-symbol-select" data-cell="3"></select>
-                                <button type="button" class="tv-grid-indicator-btn" data-cell="3" title="SMA20/EMA9 göster/gizle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 5"></polyline></svg></button>
+                                <span class="tv-grid-price-badge" data-cell="3">—</span>
+                                <select class="tv-grid-indicator-select" data-cell="3" title="Gösterge seç">
+                                    <option value="none">Gösterge Yok</option>
+                                    <option value="trend">SMA+EMA</option>
+                                    <option value="bollinger">BB(20,2)</option>
+                                </select>
                                 <button type="button" class="tv-grid-promote-btn" data-cell="3" title="Bu sembolü ana grafiğe yükselt">⤢</button>
                             </div>
-                            <div class="tv-grid-cell-chart" id="tv-grid-chart-3"></div>
+                            <div class="tv-grid-cell-chart-wrap">
+                                <div class="tv-grid-cell-chart" id="tv-grid-chart-3"></div>
+                                <canvas class="tv-grid-draw-canvas" data-cell="3"></canvas>
+                                <div class="tv-grid-draw-toolbar" data-cell="3">
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="3" data-tool="trend" title="Trend çizgisi çiz">╱</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="3" data-tool="hline" title="Yatay çizgi çiz">—</button>
+                                    <button type="button" class="tv-grid-draw-btn" data-cell="3" data-tool="clear" title="Çizimleri temizle">✕</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

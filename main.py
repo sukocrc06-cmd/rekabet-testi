@@ -419,7 +419,16 @@ def get_data(ticker: str):
     try:
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
-        hist = _cached_history(stock, formatted, "3mo", "1d", timeout=10)
+        # (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Önceden
+        # sabit "3mo" (3 ay) isteniyordu; ana grafik bu yüzden çok kısıtlı bir
+        # pencereye hapsolmuştu ve geçmişe gidilemiyordu. Artık yfinance'in
+        # sunduğu TÜM geçmiş isteniyor (period="max" — sembolün borsaya
+        # kotasyon tarihinden bugüne kadarki tüm günlük barlar). Frontend
+        # tarafında (tradingChart.js) intraday (15m/1H/4H) sentetik mumlar
+        # yine de sadece son ~90 günlük bir dilimden türetiliyor — sadece
+        # 1D/1W görünümleri bu tam geçmişi kullanıyor, bu yüzden yükü
+        # gereksiz büyütmüyor.
+        hist = _cached_history(stock, formatted, "max", "1d", timeout=15)
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
         data = hist.reset_index().to_dict(orient="records")

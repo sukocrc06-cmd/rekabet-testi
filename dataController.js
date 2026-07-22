@@ -21,7 +21,13 @@
 const DataController = (() => {
 
     /* ──────────────── Constants ──────────────── */
-    const TRADING_DAYS = 30;
+    // (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") 30 -> 750
+    // işlem günü (~3 yıl) yükseltildi: bu, backend tamamen erişilemez
+    // olduğunda devreye giren SİMÜLE yedek veri üreticisidir (gerçek veri
+    // yolu artık main.py'de period="max" ile TÜM gerçek geçmişi çekiyor —
+    // bkz. main.py /api/v1/ohlcv). Bu sayı sadece o nadir yedek senaryoda
+    // kaç günlük simüle mum üretileceğini belirler.
+    const TRADING_DAYS = 750;
     const ANNUALIZE_FACTOR = 252;               // trading days / year
     const RISK_FREE_DAILY = 0.05 / ANNUALIZE_FACTOR; // ~5 % annual risk-free
 
@@ -328,14 +334,21 @@ const DataController = (() => {
 
         const candles = [];
         let prevClose = profile.basePrice;
-        // Anchor day 0 to 2026-06-01 using UTC field math (Date.UTC), not a
-        // local-time Date — this keeps candle timestamps 100% independent of
-        // whatever timezone this code happens to run in (sandbox vs. the
-        // user's own machine), which matters now that `date` is a unix-second
-        // timestamp consumed directly by Lightweight Charts' UTC-based axis
-        // formatting (see synthesizeIntradayCandles()'s comment for the full
-        // "treat UTC fields as TRT wall-clock" convention this app uses).
-        const startMs = Date.UTC(2026, 5, 1); // 2026-06-01T00:00:00Z
+        // (19 Temmuz 2026, on ikinci oturum) Önceden burada sabit bir tarih
+        // ("2026-06-01") yazılıydı — bu, yazıldığı günün "bugün"üne göre
+        // `days`=30 ile kabaca hizalanacak şekilde elle seçilmişti, ama
+        // gerçek zaman ilerledikçe (ve şimdi `days` 750'ye çıkınca) bu sabit
+        // değer gitgide bugünden uzaklaşıp anlamsızlaşırdı. Artık başlangıç,
+        // "bugün"den (UTC gece yarısı) geriye `days` işlem günü kadar
+        // hesaplanıyor — döngünün geri kalanı (hafta sonu atlama dahil)
+        // DEĞİŞMEDİ, sadece başlangıç noktası artık dinamik. Yine de UTC
+        // alan matematiği (Date.UTC) kullanılıyor, yerel saat dilimine
+        // bağımlı değil (bkz. synthesizeIntradayCandles()'daki "UTC alanları
+        // TRT duvar saati gibi okunuyor" kuralı).
+        const now = new Date();
+        const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+        const calendarDaysBack = Math.ceil(days * 7 / 5) + 10; // hafta sonları + güvenlik payı
+        const startMs = todayMs - calendarDaysBack * 86400000;
 
         for (let i = 0; i < days; i++) {
             const dayMs = startMs + i * 86400000;
