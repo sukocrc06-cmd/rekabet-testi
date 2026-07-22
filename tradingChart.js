@@ -177,8 +177,13 @@ const TradingChart = (() => {
     // Deliberately simple/read-only (no drawing tools, no overlay indicators)
     // for the same architectural-risk reason documented in multiChartGrid.js:
     // duplicating the full singleton chart/drawing engine for a second pane
-    // is far riskier than it's worth. It shows the SAME symbol as the main
-    // pane at an independently chosen resolution.
+    // is far riskier than it's worth. Varsayılan olarak AYNI sembolü ana
+    // panelle bağımsız bir çözünürlükte gösterir ("ayna" modu).
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği)
+    // Artık dualSymbol set edilirse FARKLI bir sembol de seçilebiliyor —
+    // gerçek anlamda "karşılaştırma". dualSymbol null iken davranış
+    // ESKİSİYLE BİREBİR AYNI (ana grafiği takip eder); bu yüzden mevcut
+    // hiçbir çağrı yeri bozulmadı, yalnızca yeni bir opsiyonel yol eklendi.
     let dualChart = null;
     let dualSeries = null;
     let dualActive = false;
@@ -186,6 +191,9 @@ const TradingChart = (() => {
     let dualRefreshTimer = null;
     let dualOverlaySeries = {};
     let dualOverlayActive = { sma20: false, ema9: false };
+    let dualSymbol = null;          // null = "ayna modu" (ana sembolü takip eder); aksi halde karşılaştırma sembolü
+    let dualDailyCandles = [];      // dualSymbol set edildiğinde onun BAĞIMSIZ günlük mum verisi
+    let dualSymbolLoadToken = 0;    // hızlı ardışık sembol değişimlerinde eski bir fetch'in geç gelip yeniyi ezmesini önler
 
     // ── Fullscreen chart mode (18 Temmuz 2026, onuncu oturum) ──
     let fullscreenActive = false;
@@ -568,23 +576,36 @@ const TradingChart = (() => {
     // the Dual-Chart companion pane (which has its OWN independent
     // resolution) can reuse the exact same daily->intraday/weekly derivation
     // logic without duplicating it.
-    function deriveCandlesForRes(resId) {
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur) Asıl senteze/agregasyona
+    // parametreli bir kök fonksiyon çıkarıldı — dual-chart panelinin artık
+    // FARKLI bir sembolün (dualDailyCandles) kendi günlük verisini de aynı
+    // yolla işleyebilmesi için. deriveCandlesForRes() (ana grafik) davranışı
+    // birebir aynı kalıyor, sadece bu ortak koda yönleniyor.
+    function deriveCandlesFromDaily(dailyCandles, resId) {
         const res = RESOLUTIONS.find(r => r.id === resId) || RESOLUTIONS[3];
         if (res.kind === 'intraday') {
-            const recentSlice = state.dailyCandles.slice(-INTRADAY_SOURCE_WINDOW_DAYS);
+            const recentSlice = dailyCandles.slice(-INTRADAY_SOURCE_WINDOW_DAYS);
             return window.DataController.synthesizeIntradayCandles(recentSlice, res.minutes);
         } else if (res.kind === 'weekly') {
-            return window.DataController.aggregateWeeklyCandles(state.dailyCandles);
+            return window.DataController.aggregateWeeklyCandles(dailyCandles);
         }
-        return state.dailyCandles;
+        return dailyCandles;
+    }
+
+    function deriveCandlesForRes(resId) {
+        return deriveCandlesFromDaily(state.dailyCandles, resId);
     }
 
     function deriveCandlesForResolution() {
         return deriveCandlesForRes(state.resolution);
     }
 
-    function isIntradayResolution() {
-        const res = RESOLUTIONS.find(r => r.id === state.resolution);
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur) resId parametresi eklendi
+    // (opsiyonel, verilmezse eskisi gibi state.resolution kullanılır) — dual-
+    // chart panelinin kendi bağımsız çözünürlüğü (dualResolution) için de
+    // aynı kontrolü tekrar yazmadan kullanabilmek için.
+    function isIntradayResolution(resId) {
+        const res = RESOLUTIONS.find(r => r.id === (resId || state.resolution));
         return !!(res && res.kind === 'intraday');
     }
 
@@ -702,16 +723,105 @@ const TradingChart = (() => {
         refreshDualChart();
     }
 
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur) dualSymbol set edilmişse
+    // (kullanıcı farklı bir sembol seçtiyse) BAĞIMSIZ dualDailyCandles
+    // kaynağı kullanılır; dualSymbol null iken ("ayna" modu, varsayılan/eski
+    // davranış) ana grafiğin state.dailyCandles'ı kullanılmaya devam eder.
     function refreshDualChart() {
-        if (!dualActive || !dualSeries || !state.dailyCandles.length) return;
-        const candles = deriveCandlesForRes(dualResolution).map(c => ({
+        if (!dualActive || !dualSeries) return;
+        const sourceDaily = dualSymbol ? dualDailyCandles : state.dailyCandles;
+        if (!sourceDaily.length) return;
+        const candles = deriveCandlesFromDaily(sourceDaily, dualResolution).map(c => ({
             time: c.date, open: c.open, high: c.high, low: c.low, close: c.close
         }));
         dualSeries.setData(candles);
         refreshDualOverlays(candles);
-        dualChart.timeScale().fitContent();
+        // (22 Temmuz 2026, on ikinci oturum, ikinci tur) Kullanıcı ekran
+        // görüntüsünde bu panelin (kendi bağımsız çözünürlüğü intraday —
+        // 1H/4H — iken) TÜM geçmişi fitContent() ile aşırı sıkıştırıp
+        // "çirkin" gösterdiğini fark etti. Ana grafikteki aynı sorunu daha
+        // önce bu oturumda düzeltmiştik (bkz. applyResolution()) ama bu
+        // ikinci panele hiç uygulanmamıştı — aynı "son N bar" varsayılan
+        // penceresi burada da uygulanıyor.
+        if (isIntradayResolution(dualResolution) && candles.length > DEFAULT_INTRADAY_VISIBLE_BARS) {
+            const total = candles.length;
+            dualChart.timeScale().setVisibleLogicalRange({ from: total - DEFAULT_INTRADAY_VISIBLE_BARS, to: total - 1 });
+        } else {
+            dualChart.timeScale().fitContent();
+        }
+        updateDualSymbolLabel();
+    }
+
+    function updateDualSymbolLabel() {
         const label = byId('tv-dual-pane-label');
-        if (label && state.ticker) label.textContent = state.ticker + ' — Karşılaştırma';
+        if (!label) return;
+        if (dualSymbol) {
+            label.textContent = dualSymbol + ' vs ' + (state.ticker || '');
+        } else if (state.ticker) {
+            label.textContent = state.ticker + ' — Karşılaştırma';
+        }
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur) loadSymbol()'daki asıl
+    // veri-edinme yolunun sadeleştirilmiş bir kopyası — dual-chart'ın
+    // bağımsız karşılaştırma sembolü için. Yinelenen/boşluk uyarılarını
+    // KASITLI OLARAK tekrarlamıyor (ana sembol için zaten bir kez
+    // gösteriliyor, aynı gürültüyü ikinci bir sembol için de basmak
+    // faydadan çok karmaşa katardı) — ama aynı dedup/sıralama korumasını
+    // (Lightweight Charts'ın kesin artan/tekil zaman gereksinimi) uyguluyor.
+    async function fetchDailyCandlesForCompare(ticker) {
+        let candles = await fetchOhlcvWithRetry(ticker);
+        if (!candles || candles.length < 5) {
+            candles = window.DataController.generateOHLCV(ticker);
+        }
+        const seen = new Set();
+        return candles.filter(c => {
+            if (seen.has(c.date)) return false;
+            seen.add(c.date);
+            return true;
+        }).sort((a, b) => a.date - b.date);
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği:
+    // "farklı bir sembolle karşılaştırma ekle") ticker boş bırakılırsa ya da
+    // ana sembolün kendisiyle aynıysa "ayna" moduna döner (dualSymbol=null,
+    // eski davranış). Geçersiz/bilinmeyen bir sembol girilirse (STOCK_
+    // PROFILES'ta yoksa) sessizce reddedilir ve kullanıcıya kısa bir toast
+    // ile bildirilir — mevcut sembol değişmeden kalır.
+    async function setDualSymbol(rawTicker) {
+        const normalized = (rawTicker || '').trim().toUpperCase();
+        if (!normalized || normalized === state.ticker) {
+            dualSymbol = null;
+            dualDailyCandles = [];
+            updateDualSymbolLabel();
+            refreshDualChart();
+            return;
+        }
+        const profiles = window.DataController && window.DataController.STOCK_PROFILES;
+        if (!profiles || !profiles[normalized]) {
+            if (window.TradingEngine && window.TradingEngine.showToast) {
+                window.TradingEngine.showToast(`"${normalized}" tanınan bir sembol değil.`);
+            }
+            return;
+        }
+        const myToken = ++dualSymbolLoadToken;
+        const candles = await fetchDailyCandlesForCompare(normalized);
+        if (myToken !== dualSymbolLoadToken) return; // daha yeni bir seçim bu isteği geçersiz kıldı
+        dualSymbol = normalized;
+        dualDailyCandles = candles;
+        updateDualSymbolLabel();
+        refreshDualChart();
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur) 5 saniyelik otomatik
+    // yenileme artık multiChartGrid.js'teki tickGrid() ile aynı desende —
+    // piyasa kapalıyken (hafta sonu/mesai dışı) veri zaten değişmeyeceği için
+    // gereksiz yeniden çizim/redraw yapılmıyor. Kullanıcının kendi tetiklediği
+    // çağrılar (panel açma, çözünürlük değiştirme) refreshDualChart()'ı
+    // doğrudan çağırmaya devam ediyor — piyasa durumundan bağımsız.
+    function dualChartTick() {
+        if (window.DataController && window.DataController.isMarketOpenNow && !window.DataController.isMarketOpenNow()) return;
+        refreshDualChart();
     }
 
     function setDualResolution(resId) {
@@ -738,7 +848,7 @@ const TradingChart = (() => {
                 resizeAll();
                 refreshDualChart();
             }, 30);
-            if (!dualRefreshTimer) dualRefreshTimer = setInterval(refreshDualChart, 5000);
+            if (!dualRefreshTimer) dualRefreshTimer = setInterval(dualChartTick, 5000);
         } else {
             destroyDualChart();
         }
@@ -761,6 +871,59 @@ const TradingChart = (() => {
                 btn.addEventListener('click', () => toggleDualOverlay(btn.dataset.doverlay));
             });
         }
+
+        setupDualSymbolPicker();
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği:
+    // "farklı bir sembolle karşılaştırma ekle") Etikete tıklamak onu gizleyip
+    // yerine bir <input> gösterir (Enter/blur ile onaylanır, Escape ile
+    // vazgeçilir) — panel varsayılan halinde (dokunulmamışken) görsel olarak
+    // eskisiyle birebir aynı kalması için "her zaman görünür input" yerine
+    // bu "tıkla-düzenle" deseni seçildi.
+    function setupDualSymbolPicker() {
+        const labelEl = byId('tv-dual-pane-label');
+        const input = byId('tv-dual-symbol-input');
+        const datalist = byId('tv-dual-symbol-datalist');
+        if (!labelEl || !input || !datalist) return;
+
+        const populateDatalist = () => {
+            const profiles = window.DataController && window.DataController.STOCK_PROFILES;
+            if (!profiles || datalist.children.length) return;
+            datalist.innerHTML = Object.keys(profiles).sort()
+                .map(t => '<option value="' + t + '"></option>')
+                .join('');
+        };
+
+        const enterEditMode = () => {
+            populateDatalist();
+            input.value = dualSymbol || '';
+            labelEl.style.display = 'none';
+            input.style.display = '';
+            input.focus();
+            input.select();
+        };
+        const exitEditMode = () => {
+            input.style.display = 'none';
+            labelEl.style.display = '';
+        };
+
+        labelEl.addEventListener('click', enterEditMode);
+        labelEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enterEditMode(); }
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                input.blur(); // blur handler'ı commit ediyor
+            } else if (e.key === 'Escape') {
+                exitEditMode();
+            }
+        });
+        input.addEventListener('blur', () => {
+            const val = input.value;
+            exitEditMode();
+            setDualSymbol(val);
+        });
     }
 
     /* ────────── Tam Ekran Grafik Modu (onuncu oturum) ────────── */
@@ -1715,6 +1878,7 @@ const TradingChart = (() => {
         const close = () => dropdown.classList.remove('open');
         const open = () => {
             if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            if (window.__optipulseCloseOtherSimpleDropdowns) window.__optipulseCloseOtherSimpleDropdowns('chart-type-dropdown');
             closeAllFlyouts();
             const rect = btn.getBoundingClientRect();
             dropdown.style.top = (rect.bottom + 6) + 'px';
@@ -1765,6 +1929,7 @@ const TradingChart = (() => {
         const close = () => dropdown.classList.remove('open');
         const open = () => {
             if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            if (window.__optipulseCloseOtherSimpleDropdowns) window.__optipulseCloseOtherSimpleDropdowns('header-menu-dropdown');
             closeAllFlyouts();
             const rect = btn.getBoundingClientRect();
             dropdown.style.top = (rect.bottom + 6) + 'px';

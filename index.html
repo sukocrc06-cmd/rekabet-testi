@@ -341,7 +341,16 @@
                              ör. sol tarafta 1D + çizim araçları, sağda 1W genel görünüm. -->
                         <div class="tv-chart-pane tv-chart-pane-2" id="tv-chart-pane-2">
                             <div class="tv-dual-pane-header">
-                                <span class="tv-dual-pane-label" id="tv-dual-pane-label">Karşılaştırma</span>
+                                <!-- (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği:
+                                     "farklı bir sembolle karşılaştırma ekle") Etikete tıklayınca gizli
+                                     input görünür hale gelip düzenlenebiliyor (bkz. tradingChart.js
+                                     setupDualSymbolPicker()) — varsayılan (dokunulmamış) durumda görsel
+                                     olarak eskisiyle birebir aynı, yalnızca artık tıklanabilir. Boş
+                                     bırakılırsa/ana sembolün kendisi yazılırsa "ayna" moduna (ana
+                                     grafiği takip etme, eski davranış) döner. -->
+                                <span class="tv-dual-pane-label" id="tv-dual-pane-label" tabindex="0" role="button" title="Karşılaştırma sembolünü değiştirmek için tıklayın">Karşılaştırma</span>
+                                <input type="text" id="tv-dual-symbol-input" class="tv-dual-symbol-input" list="tv-dual-symbol-datalist" placeholder="Sembol yaz (ör. AKBNK)..." maxlength="12" style="display:none;">
+                                <datalist id="tv-dual-symbol-datalist"></datalist>
                                 <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur) Dual-Chart panelinin
                                      kendi temel overlay göstergeleri — SMA20/EMA9 — ana grafiğin tam
                                      çizim/gösterge motorunu çoğaltmadan, sade toggle butonlarıyla. -->

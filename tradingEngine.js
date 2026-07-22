@@ -61,6 +61,27 @@ const TradingEngine = (() => {
     }
     window.__optipulseCloseOtherModals = closeOtherModals; // used by tradingChart.js's indicator modal
 
+    // (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği üzerine
+    // önceden not edilip bırakılan pürüz şimdi düzeltildi) Header'daki üç
+    // "basit" (position:fixed, .open class'lı, tam ekran olmayan) açılır
+    // menü — grafik tipi, hamburger (☰) ve profil — ALL_MODAL_BACKDROP_IDS'
+    // teki tam ekran modallardan ayrı bir kategori, bu yüzden closeOtherModals()
+    // bunları kapsamıyordu. Her birinin kendi tetikleyici butonu
+    // e.stopPropagation() kullandığı için (dropdown'un kendi dışına
+    // tıklamayı algılayabilmesi için gerekli), biri açıkken diğerine
+    // tıklamak document'in "dışarı tıklama" dinleyicisine hiç ulaşmıyor ve
+    // ilk açık kalıyordu. Artık her üçünün kendi open() fonksiyonu, açılışta
+    // diğer ikisini de bu ortak fonksiyonla kapatıyor.
+    const ALL_SIMPLE_DROPDOWN_IDS = ['chart-type-dropdown', 'header-menu-dropdown', 'profile-panel-dropdown'];
+    function closeOtherSimpleDropdowns(exceptId) {
+        ALL_SIMPLE_DROPDOWN_IDS.forEach(id => {
+            if (id === exceptId) return;
+            const el = byId(id);
+            if (el) el.classList.remove('open');
+        });
+    }
+    window.__optipulseCloseOtherSimpleDropdowns = closeOtherSimpleDropdowns; // used by tradingChart.js's chart-type/header menus
+
     function fmtTRY(v) {
         const sign = v < 0 ? '-' : '';
         return sign + '₺' + Math.abs(v).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2720,6 +2741,7 @@ const TradingEngine = (() => {
         const open = () => {
             if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
             if (window.__optipulseCloseAllFlyouts) window.__optipulseCloseAllFlyouts();
+            closeOtherSimpleDropdowns('profile-panel-dropdown');
             const rect = btn.getBoundingClientRect();
             dropdown.style.top = (rect.bottom + 6) + 'px';
             // Sağa hizalı açılır — artık header'ın en sağındaki butondan
@@ -2844,7 +2866,12 @@ const TradingEngine = (() => {
         // Türkçe yerel biçimden — binlik nokta/ondalık virgül — farklı bir
         // görünüm üretiyordu), tek bir merkezi fiyat biçimlendiricisi burada
         // dışa açılıyor.
-        fmtPrice
+        fmtPrice,
+        // (22 Temmuz 2026, on ikinci oturum, ikinci tur) tradingChart.js'teki
+        // dual-chart karşılaştırma sembolü seçicisinin geçersiz sembol
+        // girişinde kullanıcıya kısa bir geri bildirim verebilmesi için —
+        // ayrı bir toast mekanizması yazmak yerine mevcut olanı dışa açıyoruz.
+        showToast
     });
 })();
 

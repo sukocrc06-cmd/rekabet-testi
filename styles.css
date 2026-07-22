@@ -1417,21 +1417,35 @@ body {
     .competition-panel.trading-panel {
         width: 92vw;
     }
+}
 
+/* (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği üzerine
+   önceden not edilip bırakılan bağımsız hata şimdi düzeltildi) Bu blok
+   önceden "@media (max-width: 420px)" idi. Ama header'ın gerçek genişlik
+   ihtiyacı (logo-area + header-actions, ikisi de flex-shrink:0) yalnızca
+   ~502px altında aşmaya başlıyor — yani 421-501px arası (ör. tam 480px)
+   HİÇBİR daraltma kuralı uygulanmadan kalıyordu ve header ~22-77px taşıyordu.
+   Ölçüm: 425px'te 77px, 480px'te 22px, 500px'te 2px, 505px'te 0px taşma
+   (bkz. /tmp/test_480_range.js). Eşik 520px'e çekilerek bu boşluk tamamen
+   kapatıldı — sidebar/competition-panel'in 92vw genişlik kuralı ayrı,
+   dokunulmamış bir bloğa taşındı (yukarıda, hâlâ sadece ≤420px'te), çünkü o
+   kuralın bu genişlik değişikliğiyle ilgisi yok ve mevcut davranışını
+   koruması gerekiyordu. */
+@media (max-width: 520px) {
     .header-balance-label {
         display: none;
     }
 
     /* (19 Temmuz 2026, on birinci oturum) .header-status (Engine/Latency)
        zaten "Market Time"/"Market" öğelerini .text-hide-mobile ile 640px'te
-       gizliyordu ama Engine + Latency kaldığı için ~390px genişlikte
-       .logo-area (188px) + .header-actions (277px) tek başına viewport'u
-       aşıyor, .header-status'a hiç yer kalmayınca da flex-shrink onu
-       neredeyse 0 genişliğe sıkıştırıp bozuk görünmesine yol açıyordu.
-       Bu iki öğe de sadece tanı amaçlı (demo motorunun canlı olduğunu
-       gösteren dekoratif bilgi) — dar ekranda tamamen gizlemek, gerçek
-       işlevsellikten (alım/satım, bakiye, tema, menü) hiçbir şey
-       kaybettirmeden header'ı sığdırıyor. */
+       gizliyordu ama Engine + Latency kaldığı için dar genişlikte
+       .logo-area + .header-actions tek başına viewport'u aşıyor,
+       .header-status'a hiç yer kalmayınca da flex-shrink onu neredeyse 0
+       genişliğe sıkıştırıp bozuk görünmesine yol açıyordu. Bu iki öğe de
+       sadece tanı amaçlı (demo motorunun canlı olduğunu gösteren dekoratif
+       bilgi) — dar ekranda tamamen gizlemek, gerçek işlevsellikten (alım/
+       satım, bakiye, tema, menü) hiçbir şey kaybettirmeden header'ı
+       sığdırıyor. */
     .header-status {
         display: none;
     }
@@ -1439,7 +1453,7 @@ body {
     /* Header'daki geri kalan öğeler (logo, drawer düğmeleri, bakiye, sessize
        al, tema, ☰ menü) hepsi gerçek işlevsel kontroller — hiçbiri
        gizlenemez. Bunun yerine her biri biraz daha kompakt hale getirilip
-       toplam genişlik 390px'lik bir telefonda taşmaya en yakın hale
+       toplam genişlik bu aralıktaki bir telefonda taşmaya en yakın hale
        getiriliyor (kalan küçük bir taşma varsa zaten .dashboard-header'ın
        mevcut overflow-x:auto'su — bkz. yukarıdaki "Responsive Adjustments"
        bölümü — yatay kaydırmayla telafi ediyor). */
@@ -1475,17 +1489,6 @@ body {
 
     .header-actions {
         gap: 3px;
-    }
-
-    /* (22 Temmuz 2026, on ikinci oturum — madde 7) Bu blok, ~390px genişlikte
-       header'ın taşmaması için her pikselin zaten hesaba katıldığı, önceki
-       oturumda dikkatle ayarlanmış bir düzen — yeni profil simgesi eklemek
-       bunu yeniden taşırdı. En dar telefonlarda (bu breakpoint) profil
-       simgesi gizleniyor; 421px ve üzerinde (tablet ve masaüstü dahil)
-       normal şekilde görünmeye devam ediyor. Fonksiyonellik kaybı yok —
-       bakiye zaten header'daki BAKİYE rozetinde görünür durumda kalıyor. */
-    .profile-panel-wrap {
-        display: none;
     }
 }
 
@@ -3410,6 +3413,34 @@ body.compact-mode .status-item {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     white-space: nowrap;
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+}
+
+.tv-dual-pane-label:hover {
+    color: var(--gold-light);
+    border-bottom-color: var(--gold-border);
+}
+
+/* (22 Temmuz 2026, on ikinci oturum, ikinci tur) Karşılaştırma sembolü
+   seçici — .tv-dual-pane-label'a tıklanınca bu inputun yerini alır (bkz.
+   tradingChart.js setupDualSymbolPicker()). */
+.tv-dual-symbol-input {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    width: 110px;
+    padding: 2px 6px;
+    background-color: var(--bg-elevated, var(--bg-panel));
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary, #eaeaea);
+    text-transform: uppercase;
+}
+
+.tv-dual-symbol-input:focus {
+    outline: none;
+    border-color: var(--gold);
 }
 
 .tv-dual-res-row {
