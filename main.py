@@ -314,10 +314,23 @@ def get_fundamentals(ticker: str):
         # but this has varied across library versions/data revisions — the
         # frontend treats any value > 1 as "already a percent" defensively
         # rather than assuming one convention blindly.
+        #
+        # (22 Temmuz 2026, on ikinci oturum, beşinci tur — hocanın isteği
+        # üzerine) F/K, piyasa değeri, temettü verimin yanına 4 alan daha
+        # eklendi: 52 haftalık aralık (yatırımcının fiyatı tarihsel bağlama
+        # oturtması için), ortalama hacim (likidite göstergesi), beta (piyasaya
+        # göre oynaklık/risk göstergesi) ve hisse başına kazanç (kârlılık
+        # göstergesi) — hepsi zaten çekilen aynı `info` sözlüğünden, EK bir
+        # yfinance isteği gerektirmiyor.
         data = {
             "trailingPE": info.get("trailingPE"),
             "marketCap": info.get("marketCap"),
             "dividendYield": info.get("dividendYield"),
+            "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+            "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh"),
+            "averageVolume": info.get("averageVolume"),
+            "beta": info.get("beta"),
+            "trailingEps": info.get("trailingEps"),
         }
         _fundamentals_cache[formatted] = (now, data)
         return {"ticker": ticker, **data, "cached": False}

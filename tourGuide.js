@@ -234,8 +234,8 @@ const TourGuide = (() => {
             {
                 setup: async () => { closeAllAppModals(); },
                 selector: '#tv-fundamentals-bar',
-                title: 'Şirket Temel Verileri (F/K, Piyasa Değeri, Temettü)',
-                desc: 'Sembol başlığının hemen altında artık F/K oranı, piyasa değeri ve temettü verimi de görünüyor — yfinance\'ten gerçek veri, ama genelde birkaç dakika gecikmeli ve yatırım tavsiyesi değildir.'
+                title: 'Şirket Temel Verileri',
+                desc: 'Sembol başlığının hemen altında F/K oranı, piyasa değeri, temettü verimi, 52 haftalık en düşük/en yüksek fiyat aralığı, ortalama işlem hacmi, beta (piyasaya göre oynaklık) ve hisse başına kazanç görünüyor — hepsi yfinance\'ten gerçek veri, ama genelde birkaç dakika gecikmeli ve yatırım tavsiyesi değildir.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-alerts')?.click(); await wait(150); },

@@ -447,16 +447,50 @@ const TradingChart = (() => {
         const pct = v > 1 ? v : v * 100;
         return pct.toFixed(2) + '%';
     }
+    // (22 Temmuz 2026, on ikinci oturum, beşinci tur — hocanın isteği üzerine
+    // eklendi) 52 haftalık aralık, ortalama hacim, beta, hisse başına kazanç.
+    function formatPrice2(v) {
+        if (v === null || v === undefined || isNaN(v)) return null;
+        return '₺' + Number(v).toFixed(2);
+    }
+    function formatRange(low, high) {
+        const lo = formatPrice2(low), hi = formatPrice2(high);
+        if (!lo || !hi) return '--';
+        return lo + ' - ' + hi;
+    }
+    function formatVolume(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+        return String(Math.round(v));
+    }
+    function formatBeta(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        return Number(v).toFixed(2);
+    }
+    function formatEps(v) {
+        if (v === null || v === undefined || isNaN(v)) return '--';
+        return '₺' + Number(v).toFixed(2);
+    }
     async function fetchFundamentals(ticker) {
         const peEl = document.getElementById('tv-fund-pe');
         const mcapEl = document.getElementById('tv-fund-mcap');
         const divEl = document.getElementById('tv-fund-div');
+        const rangeEl = document.getElementById('tv-fund-range');
+        const avgVolEl = document.getElementById('tv-fund-avgvol');
+        const betaEl = document.getElementById('tv-fund-beta');
+        const epsEl = document.getElementById('tv-fund-eps');
         if (!peEl || !mcapEl || !divEl) return;
         // Sembol değişir değişmez placeholder'a dön — önceki sembolün eski
         // verisi yeni fetch tamamlanana kadar ekranda asılı kalmasın.
         peEl.textContent = 'F/K: --';
         mcapEl.textContent = 'Piyasa Değeri: --';
         divEl.textContent = 'Temettü Verimi: --';
+        if (rangeEl) rangeEl.textContent = '52 Hafta: --';
+        if (avgVolEl) avgVolEl.textContent = 'Ort. Hacim: --';
+        if (betaEl) betaEl.textContent = 'Beta: --';
+        if (epsEl) epsEl.textContent = 'Hisse Başı Kazanç: --';
         try {
             const backendHttp = window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000';
             const fetchOpts = window.optipulseFetchOpts
@@ -469,6 +503,10 @@ const TradingChart = (() => {
             peEl.textContent = 'F/K: ' + formatPE(data.trailingPE);
             mcapEl.textContent = 'Piyasa Değeri: ₺' + formatMarketCap(data.marketCap);
             divEl.textContent = 'Temettü Verimi: ' + formatDividendYield(data.dividendYield);
+            if (rangeEl) rangeEl.textContent = '52 Hafta: ' + formatRange(data.fiftyTwoWeekLow, data.fiftyTwoWeekHigh);
+            if (avgVolEl) avgVolEl.textContent = 'Ort. Hacim: ' + formatVolume(data.averageVolume);
+            if (betaEl) betaEl.textContent = 'Beta: ' + formatBeta(data.beta);
+            if (epsEl) epsEl.textContent = 'Hisse Başı Kazanç: ' + formatEps(data.trailingEps);
         } catch (e) {
             // Sessizce yoksay — backend kapalıysa/erişilemezse satır "--"
             // göstermeye devam eder, bu bir hata değil beklenen bir durumdur.
