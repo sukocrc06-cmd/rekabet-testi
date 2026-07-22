@@ -250,6 +250,23 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-enter"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-exit" style="display:none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>
                         </button>
+                        <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı:
+                             motorların (Optipulse: SMA5/SMA20 kesişimi, Backtrader: RSI+MACD)
+                             AL/SAT kararlarını istemci tarafında türetip grafiğin üzerine
+                             ok işareti olarak koyar; bir işarete tıklayınca "neden" açıklaması
+                             (bkz. #tv-signal-tooltip) açılır. Gerçek bir emir/backtest DEĞİL —
+                             sadece motor mantığının görsel anlatımı. -->
+                        <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-signal-explainer" title="Sinyal Anlatıcısı (AL/SAT sinyallerinin nedenini grafikte göster)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                        </button>
+                        <!-- Strateji Tekrarı ("zaman makinesi"): mevcut grafiği baştan,
+                             bar bar, oynatma kontrolleriyle (bkz. #tv-replay-bar) yeniden
+                             canlandırır — yeni veri istemez, zaten yüklü candles/indicators'ın
+                             kısaltılmış anlık görüntülerini kullanır (bkz. tradingChart.js
+                             updateReplayFrame). -->
+                        <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-replay" title="Strateji Tekrarı (Zaman Makinesi) — geçmişi bar bar izle">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        </button>
                     </div>
 
                     <div class="tv-toolbar">
@@ -327,11 +344,44 @@
                         <button type="button" class="tv-res-btn" data-res="1w">1W</button>
                     </div>
 
+                    <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Strateji Tekrarı
+                         kontrol şeridi — sadece #btn-toggle-replay ile açıldığında
+                         görünür olur, normal görünümde yer kaplamaz. -->
+                    <div class="tv-replay-bar" id="tv-replay-bar" style="display:none;" role="group" aria-label="Strateji Tekrarı Kontrolleri">
+                        <button type="button" class="tv-replay-btn" id="btn-replay-playpause" title="Oynat/Durdur">
+                            <svg id="replay-icon-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+                            <svg id="replay-icon-pause" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg>
+                        </button>
+                        <input type="range" id="tv-replay-slider" class="tv-replay-slider" min="0" max="100" value="0" aria-label="Tekrar konumu">
+                        <span id="tv-replay-date-label" class="tv-replay-date-label">--</span>
+                        <div class="tv-replay-speed-group" role="group" aria-label="Oynatma Hızı">
+                            <button type="button" class="tv-replay-speed-btn active" data-speed="1">1x</button>
+                            <button type="button" class="tv-replay-speed-btn" data-speed="2">2x</button>
+                            <button type="button" class="tv-replay-speed-btn" data-speed="5">5x</button>
+                        </div>
+                        <span class="tv-replay-label">Strateji Tekrarı</span>
+                        <button type="button" class="tv-replay-btn tv-replay-exit-btn" id="btn-replay-exit" title="Tekrar Modundan Çık">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+
                     <div class="tv-chart-area" id="tv-chart-area-single">
                         <div class="tv-chart-pane tv-chart-pane-1" id="tv-chart-pane-1">
                             <div id="tv-main-chart" class="tv-main-chart"></div>
                             <canvas id="tv-draw-overlay" class="tv-draw-overlay"></canvas>
                             <div id="tv-ohlc-legend" class="tv-ohlc-legend" style="display:none;"></div>
+                            <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal
+                                 Anlatıcısı açıklama balonu — bir AL/SAT ok işaretine
+                                 tıklandığında (bkz. tradingChart.js handleChartSignalClick)
+                                 tıklanan noktanın yakınına konumlanır. -->
+                            <div class="tv-signal-tooltip" id="tv-signal-tooltip" style="display:none;">
+                                <div class="tv-signal-tooltip-header">
+                                    <span class="tv-signal-tooltip-badge" id="tv-signal-tooltip-badge">AL</span>
+                                    <span class="tv-signal-tooltip-date" id="tv-signal-tooltip-date">--</span>
+                                    <button type="button" class="tv-signal-tooltip-close" id="tv-signal-tooltip-close" aria-label="Kapat">×</button>
+                                </div>
+                                <div class="tv-signal-tooltip-text" id="tv-signal-tooltip-text"></div>
+                            </div>
                         </div>
                         <!-- Dual-Chart ikinci panel (18 Temmuz 2026, onuncu oturum): SADE ve
                              SALT-OKUNUR — ana panelin çizim araçları / gösterge motorunu

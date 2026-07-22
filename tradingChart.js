@@ -216,7 +216,20 @@ const TradingChart = (() => {
         pendingShape: null,    // in-progress shape while dragging
         pendingPoints: null,   // accumulated points for multi-click tools (channel/triangle/position)
         selectedDrawingIndex: -1,
-        dayOpenPrice: null
+        dayOpenPrice: null,
+
+        // (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı +
+        // Strateji Tekrarı ("zaman makinesi") — bkz. bu dosyanın altındaki
+        // ilgili bölümler. signalMarkers, state.candles her değiştiğinde
+        // (applyResolution) TAM geçmişten yeniden hesaplanır; açık/kapalı
+        // gösterimi setMarkers ile ayrıca uygulanır.
+        signalExplainerOn: false,
+        signalMarkers: [],
+        replayActive: false,
+        replayIndex: 0,
+        replayPlaying: false,
+        replaySpeed: 1,
+        replayPrevExplainerOn: false
     };
 
     let copiedDrawing = null;
@@ -285,6 +298,9 @@ const TradingChart = (() => {
 
         // Crosshair -> OHLC legend
         chart.subscribeCrosshairMove(handleCrosshairMove);
+        // (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı:
+        // bir AL/SAT ok işaretine tıklanınca açıklama balonunu açar.
+        chart.subscribeClick(handleChartSignalClick);
 
         setupDrawCanvas();
         setupToolbar();
@@ -301,6 +317,9 @@ const TradingChart = (() => {
         setupFullscreenControl();
         setupRailCollapse();
         setupSubpanesContainer();
+        setupSignalExplainerToggle();
+        setupSignalTooltipDismiss();
+        setupReplayControls();
 
         window.addEventListener('resize', () => {
             resizeAll();
@@ -462,6 +481,11 @@ const TradingChart = (() => {
             return;
         }
 
+        // Sembol değişirken tekrar modu anlamsız hale gelir (farklı bir
+        // sembolün geçmişini gösteriyor olurduk) — sessizce iptal edilir,
+        // birkaç satır sonra zaten bu sembol için tam yeniden çizim yapılacak.
+        cancelReplayIfActive();
+
         // Persist the outgoing symbol's drawings so multi-tab switching
         // doesn't wipe a user's trend lines / fib levels on that symbol.
         if (state.ticker && state.ticker !== ticker) {
@@ -619,6 +643,11 @@ const TradingChart = (() => {
             if (p.chart) p.chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
         });
 
+        // (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı:
+        // TAM (kısaltılmamış) geçmişten yeniden hesaplanır — applyChartType()
+        // çağrısı bunu setMarkers ile uygulayacağı için ondan ÖNCE taze olması
+        // gerekiyor.
+        state.signalMarkers = computeSignalMarkers(state.candles);
         applyChartType();
 
         state.indicators = window.DataController.calculateIndicators(state.candles);
@@ -646,6 +675,7 @@ const TradingChart = (() => {
 
     function setResolution(id) {
         if (!RESOLUTIONS.some(r => r.id === id) || id === state.resolution) return;
+        cancelReplayIfActive(); // farklı bir çözünürlüğe geçince tekrar modu iptal edilir
         state.resolution = id;
         applyResolution();
     }
@@ -660,6 +690,389 @@ const TradingChart = (() => {
                 setResolution(btn.dataset.res);
             });
         });
+    }
+
+    /* ═══════════ Sinyal Anlatıcısı (22 Temmuz 2026, on ikinci oturum, üçüncü tur) ═══════════
+       Kullanıcı hocasına bu paneli gösterdiğinde "TradingView'da bile yok"
+       dediği dual-chart'tan sonra istenen iki yeni özellikten ilki. Motorların
+       (Optipulse: SMA5/SMA20 kesişimi, Backtrader: RSI+MACD birleşimi) AL/SAT
+       kararlarını backend'e HİÇ dokunmadan, doğrudan ekrandaki mumlardan
+       istemci tarafında türetir — amaç gerçek bir emir/backtest değil, "motor
+       burada NEDEN böyle karar verirdi" sorusunu grafik üzerinde ok işaretleri
+       + tıklanabilir açıklama balonuyla cevaplamak. state.signalMarkers her
+       çözünürlük/sembol değişiminde TAM geçmişten yeniden hesaplanır (bkz.
+       applyResolution); ekranda gösterilip gösterilmeyeceği ayrıca
+       state.signalExplainerOn ile kontrol edilir. */
+
+    function computeSignalMarkers(candles) {
+        if (!candles || candles.length < 25 || !window.DataController) return [];
+        const closes = candles.map(c => c.close);
+        const sma5 = window.DataController.computeSMA(closes, 5);
+        const sma20 = window.DataController.computeSMA(closes, 20);
+        const rsi14 = window.DataController.computeRSI(closes, 14);
+        const macd = window.DataController.computeMACD(closes, 12, 26, 9);
+
+        const markers = [];
+        const addMarker = (i, side, reason) => {
+            markers.push({
+                time: candles[i].date,
+                position: side === 'buy' ? 'belowBar' : 'aboveBar',
+                color: side === 'buy' ? '#4CAF50' : '#F44336',
+                shape: side === 'buy' ? 'arrowUp' : 'arrowDown',
+                text: side === 'buy' ? 'AL' : 'SAT',
+                _side: side,
+                _reason: reason
+            });
+        };
+
+        for (let i = 1; i < candles.length; i++) {
+            // --- Optipulse motoru mantığı: SMA5 / SMA20 kesişimi ---
+            if (sma5[i] != null && sma20[i] != null && sma5[i - 1] != null && sma20[i - 1] != null) {
+                if (sma5[i - 1] <= sma20[i - 1] && sma5[i] > sma20[i]) {
+                    addMarker(i, 'buy', `5 günlük ortalama (₺${sma5[i].toFixed(2)}) 20 günlük ortalamayı (₺${sma20[i].toFixed(2)}) yukarı kesti → AL sinyali (Optipulse motoru mantığı: SMA5/SMA20 kesişimi).`);
+                } else if (sma5[i - 1] >= sma20[i - 1] && sma5[i] < sma20[i]) {
+                    addMarker(i, 'sell', `5 günlük ortalama (₺${sma5[i].toFixed(2)}) 20 günlük ortalamayı (₺${sma20[i].toFixed(2)}) aşağı kesti → SAT sinyali (Optipulse motoru mantığı: SMA5/SMA20 kesişimi).`);
+                }
+            }
+
+            // --- Backtrader motoru mantığı: RSI(14) + MACD(12,26,9) birleşimi ---
+            const rsiNow = rsi14[i], rsiPrev = rsi14[i - 1];
+            const histNow = macd.histogram[i], histPrev = macd.histogram[i - 1];
+            if (rsiNow != null && rsiPrev != null && histNow != null && histPrev != null) {
+                if (rsiPrev <= 30 && rsiNow > 30 && histPrev <= 0 && histNow > 0) {
+                    addMarker(i, 'buy', `RSI, 30 seviyesinin altından yukarı çıktı (${rsiNow.toFixed(1)}) ve MACD histogramı pozitife döndü → AL sinyali (Backtrader motoru mantığı: RSI+MACD).`);
+                } else if (rsiPrev >= 70 && rsiNow < 70 && histPrev >= 0 && histNow < 0) {
+                    addMarker(i, 'sell', `RSI, 70 seviyesinin üstünden aşağı indi (${rsiNow.toFixed(1)}) ve MACD histogramı negatife döndü → SAT sinyali (Backtrader motoru mantığı: RSI+MACD).`);
+                }
+            }
+        }
+
+        // Aynı barda iki motor da aynı yönde sinyal verirse (nadir ama
+        // mümkün), iki ayrı ok yerine tek, birleşik açıklamalı bir işaretçi
+        // gösterilir — setMarkers aynı `time` için birden fazla kaydı
+        // öngörülemeyen şekilde üst üste bindirebiliyor.
+        const merged = new Map();
+        markers.forEach(m => {
+            const key = m.time + '_' + m._side;
+            if (merged.has(key)) {
+                merged.get(key)._reason += ' Ayrıca: ' + m._reason;
+            } else {
+                merged.set(key, m);
+            }
+        });
+        return Array.from(merged.values()).sort((a, b) => a.time - b.time);
+    }
+
+    // candleSeries HER ZAMAN mevcut (fiyat-ölçeği çapası, bkz. applyChartType
+    // yorumu) ama mum-dışı bir grafik tipinde (line/area/bars/baseline) gizli
+    // olur ve görünen seri typeSeries olur — işaretlerin görünür seride de
+    // aynı anda uygulanması gerekiyor, aksi halde o tiplerde hiç görünmezler.
+    function applySignalMarkersForCurrentState() {
+        if (!candleSeries) return;
+        let markers = [];
+        if (state.signalExplainerOn && state.candles.length && state.signalMarkers && state.signalMarkers.length) {
+            const lastTime = state.candles[state.candles.length - 1].date;
+            markers = state.signalMarkers.filter(m => m.time <= lastTime);
+        }
+        try { candleSeries.setMarkers(markers); } catch (e) { /* eski/stub kütüphane sürümü */ }
+        if (typeSeries) { try { typeSeries.setMarkers(markers); } catch (e) {} }
+    }
+
+    function setupSignalExplainerToggle() {
+        const btn = byId('btn-toggle-signal-explainer');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            if (state.replayActive) {
+                if (window.TradingEngine && window.TradingEngine.showToast) {
+                    window.TradingEngine.showToast('Tekrar modundayken sinyal anlatıcısı zaten açık.');
+                }
+                return;
+            }
+            state.signalExplainerOn = !state.signalExplainerOn;
+            btn.classList.toggle('active', state.signalExplainerOn);
+            if (!state.signalExplainerOn) hideSignalTooltip();
+            applySignalMarkersForCurrentState();
+        });
+    }
+
+    function handleChartSignalClick(param) {
+        if (!state.signalExplainerOn || state.activeTool !== 'cursor') { hideSignalTooltip(); return; }
+        if (!param || param.time === undefined || param.time === null) { hideSignalTooltip(); return; }
+        const marker = (state.signalMarkers || []).find(m => m.time === param.time);
+        if (!marker) { hideSignalTooltip(); return; }
+        showSignalTooltip(marker, param.point);
+    }
+
+    function showSignalTooltip(marker, point) {
+        const tip = byId('tv-signal-tooltip');
+        const pane = byId('tv-chart-pane-1');
+        if (!tip || !pane || !point) return;
+        const badge = byId('tv-signal-tooltip-badge');
+        const dateEl = byId('tv-signal-tooltip-date');
+        const textEl = byId('tv-signal-tooltip-text');
+        if (badge) {
+            badge.textContent = marker._side === 'buy' ? 'AL' : 'SAT';
+            badge.className = 'tv-signal-tooltip-badge ' + (marker._side === 'buy' ? 'tv-signal-badge-buy' : 'tv-signal-badge-sell');
+        }
+        if (dateEl) dateEl.textContent = formatCandleDate(marker.time);
+        if (textEl) textEl.textContent = marker._reason;
+
+        const paneW = pane.clientWidth, paneH = pane.clientHeight;
+        const tipW = 260, tipH = 110; // CSS max-width/tipik yükseklikle yaklaşık uyumlu
+        let left = point.x + 14;
+        let top = point.y + 14;
+        if (left + tipW > paneW) left = Math.max(6, point.x - tipW - 14);
+        if (top + tipH > paneH) top = Math.max(6, paneH - tipH - 6);
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+        tip.style.display = 'block';
+    }
+
+    function hideSignalTooltip() {
+        const tip = byId('tv-signal-tooltip');
+        if (tip) tip.style.display = 'none';
+    }
+
+    function setupSignalTooltipDismiss() {
+        const closeBtn = byId('tv-signal-tooltip-close');
+        if (closeBtn) closeBtn.addEventListener('click', hideSignalTooltip);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideSignalTooltip(); });
+    }
+
+    /* ═══════════ Strateji Tekrarı / "Zaman Makinesi" (22 Temmuz 2026, on ikinci oturum, üçüncü tur) ═══════════
+       Kullanıcının istediği ikinci özellik. Mevcut grafiği (state.candles),
+       baştan bir noktadan itibaren bar bar, kronolojik olarak "yeniden
+       oynatır" — sanki piyasa o an canlıymış gibi. Yeni bir backtest/veri
+       isteği YAPMAZ; zaten yüklü olan state.candles/state.indicators'ın
+       kısaltılmış anlık görüntülerini var olan render fonksiyonlarına
+       (applyChartType/renderOverlays/renderAllOscillatorPanes) besleyerek
+       çalışır: state.candles/state.indicators her karede GEÇİCİ olarak
+       kısaltılır, o fonksiyonlar hep aynı state okuduğu için hiçbir yeni
+       "sliced render" kodu yazmaya gerek kalmaz; kare çizildikten hemen
+       sonra tam haline geri döndürülür (dış dünya bunu hiç fark etmez). */
+
+    let replayTimer = null;
+    const REPLAY_START_BARS = 30; // SMA20/RSI14 gibi göstergelerin anlamlı olması için minimum başlangıç
+    const REPLAY_SPEED_MS = { 1: 480, 2: 220, 5: 90 };
+
+    function buildSlicedIndicators(ind, n) {
+        if (!ind) return ind;
+        const out = {};
+        Object.keys(ind).forEach((k) => {
+            const v = ind[k];
+            if (Array.isArray(v)) {
+                out[k] = v.slice(0, n);
+            } else if (v && typeof v === 'object') {
+                const nested = {};
+                Object.keys(v).forEach((k2) => {
+                    const v2 = v[k2];
+                    nested[k2] = Array.isArray(v2) ? v2.slice(0, n) : v2;
+                });
+                out[k] = nested;
+            } else {
+                out[k] = v;
+            }
+        });
+        return out;
+    }
+
+    function updateReplayPlayPauseIcon() {
+        const playIcon = byId('replay-icon-play');
+        const pauseIcon = byId('replay-icon-pause');
+        if (playIcon) playIcon.style.display = state.replayPlaying ? 'none' : '';
+        if (pauseIcon) pauseIcon.style.display = state.replayPlaying ? '' : 'none';
+    }
+
+    function updateReplayUi() {
+        const slider = byId('tv-replay-slider');
+        const dateLabel = byId('tv-replay-date-label');
+        if (!state.candles.length) return;
+        if (slider) {
+            slider.max = String(state.candles.length - 1);
+            slider.value = String(state.replayIndex);
+        }
+        if (dateLabel) dateLabel.textContent = formatCandleDate(state.candles[state.replayIndex].date);
+    }
+
+    function updateReplayFrame() {
+        if (!state.candles.length || !candleSeries) return;
+        const n = state.replayIndex + 1;
+        const fullCandles = state.candles;
+        const fullIndicators = state.indicators;
+        const slicedCandles = fullCandles.slice(0, n);
+        const slicedIndicators = buildSlicedIndicators(fullIndicators, n);
+
+        state.candles = slicedCandles;
+        state.indicators = slicedIndicators;
+        try {
+            applyChartType();
+            renderOverlays();
+            renderAllOscillatorPanes();
+            redrawDrawings();
+        } finally {
+            state.candles = fullCandles;
+            state.indicators = fullIndicators;
+        }
+
+        if (chart) chart.timeScale().fitContent();
+        updateReplayUi();
+
+        const lastTime = slicedCandles[slicedCandles.length - 1].date;
+        const justAppeared = (state.signalMarkers || []).filter(m => m.time === lastTime);
+        justAppeared.forEach(m => {
+            if (window.TradingEngine && window.TradingEngine.showToast) {
+                window.TradingEngine.showToast(`${formatCandleDate(m.time)} — ${m._side === 'buy' ? 'AL' : 'SAT'} sinyali: ${m._reason}`);
+            }
+        });
+    }
+
+    function stepReplay() {
+        if (state.replayIndex >= state.candles.length - 1) {
+            pauseReplay();
+            if (window.TradingEngine && window.TradingEngine.showToast) {
+                window.TradingEngine.showToast('Tekrar tamamlandı — güncel tarihe ulaşıldı.');
+            }
+            return;
+        }
+        state.replayIndex++;
+        updateReplayFrame();
+    }
+
+    function stopReplayTimer() {
+        if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+    }
+
+    function playReplay() {
+        if (!state.replayActive || state.replayPlaying) return;
+        if (state.replayIndex >= state.candles.length - 1) {
+            state.replayIndex = Math.min(REPLAY_START_BARS, state.candles.length - 1);
+        }
+        state.replayPlaying = true;
+        updateReplayPlayPauseIcon();
+        stopReplayTimer();
+        replayTimer = setInterval(stepReplay, REPLAY_SPEED_MS[state.replaySpeed] || 480);
+    }
+
+    function pauseReplay() {
+        state.replayPlaying = false;
+        updateReplayPlayPauseIcon();
+        stopReplayTimer();
+    }
+
+    function setReplaySpeed(speed) {
+        state.replaySpeed = speed;
+        const bar = byId('tv-replay-bar');
+        if (bar) {
+            bar.querySelectorAll('.tv-replay-speed-btn').forEach(b => {
+                b.classList.toggle('active', Number(b.dataset.speed) === speed);
+            });
+        }
+        if (state.replayPlaying) {
+            stopReplayTimer();
+            replayTimer = setInterval(stepReplay, REPLAY_SPEED_MS[speed] || 480);
+        }
+    }
+
+    // Sembol/çözünürlük değişimi gibi durumlarda tekrar modunun SESSİZCE (tam
+    // yeniden çizim yapmadan) iptal edilmesi için — birkaç satır sonra zaten
+    // yeni sembol/çözünürlük için tam bir applyResolution() çalışacağı için
+    // burada tekrar render etmek gereksiz iş olurdu.
+    function cancelReplayIfActive() {
+        if (!state.replayActive) return;
+        pauseReplay();
+        state.replayActive = false;
+        state.signalExplainerOn = state.replayPrevExplainerOn;
+        const explainerBtn = byId('btn-toggle-signal-explainer');
+        if (explainerBtn) explainerBtn.classList.toggle('active', state.signalExplainerOn);
+        const replayBtn = byId('btn-toggle-replay');
+        if (replayBtn) replayBtn.classList.remove('active');
+        const bar = byId('tv-replay-bar');
+        if (bar) bar.style.display = 'none';
+        hideSignalTooltip();
+    }
+
+    function enterReplayMode() {
+        if (!state.candles.length || state.candles.length < REPLAY_START_BARS + 5) {
+            if (window.TradingEngine && window.TradingEngine.showToast) {
+                window.TradingEngine.showToast('Tekrar modu için yeterli geçmiş veri yok.');
+            }
+            return;
+        }
+        if (state.replayActive) return;
+        hideSignalTooltip();
+        state.replayActive = true;
+        state.replayIndex = REPLAY_START_BARS;
+        state.replayPlaying = false;
+        state.replaySpeed = 1;
+        state.replayPrevExplainerOn = state.signalExplainerOn;
+        state.signalExplainerOn = true;
+
+        const explainerBtn = byId('btn-toggle-signal-explainer');
+        if (explainerBtn) explainerBtn.classList.add('active');
+        const replayBtn = byId('btn-toggle-replay');
+        if (replayBtn) replayBtn.classList.add('active');
+        const bar = byId('tv-replay-bar');
+        if (bar) {
+            bar.style.display = 'flex';
+            bar.querySelectorAll('.tv-replay-speed-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.speed) === 1));
+        }
+        updateReplayPlayPauseIcon();
+        updateReplayFrame();
+    }
+
+    function exitReplayMode() {
+        if (!state.replayActive) return;
+        cancelReplayIfActive();
+
+        // Tam veriyi geri yükle (mevcut çözünürlük için) — cancelReplayIfActive
+        // sadece bayrakları/UI'ı sıfırlar, gerçek yeniden çizimi burada yapıyoruz
+        // (sembol/çözünürlük değişiminde bu adım gereksizdir, bkz. yukarısı).
+        applyChartType();
+        renderOverlays();
+        renderAllOscillatorPanes();
+        redrawDrawings();
+        applySignalMarkersForCurrentState();
+        if (chart) {
+            const intraday = isIntradayResolution();
+            if (intraday && state.candles.length > DEFAULT_INTRADAY_VISIBLE_BARS) {
+                const total = state.candles.length;
+                chart.timeScale().setVisibleLogicalRange({ from: total - DEFAULT_INTRADAY_VISIBLE_BARS, to: total - 1 });
+            } else {
+                chart.timeScale().fitContent();
+            }
+        }
+    }
+
+    function setupReplayControls() {
+        const openBtn = byId('btn-toggle-replay');
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                if (state.replayActive) exitReplayMode(); else enterReplayMode();
+            });
+        }
+        const playPauseBtn = byId('btn-replay-playpause');
+        if (playPauseBtn) {
+            playPauseBtn.addEventListener('click', () => {
+                if (state.replayPlaying) pauseReplay(); else playReplay();
+            });
+        }
+        const exitBtn = byId('btn-replay-exit');
+        if (exitBtn) exitBtn.addEventListener('click', exitReplayMode);
+
+        const bar = byId('tv-replay-bar');
+        if (bar) {
+            bar.querySelectorAll('.tv-replay-speed-btn').forEach(b => {
+                b.addEventListener('click', () => setReplaySpeed(Number(b.dataset.speed)));
+            });
+        }
+        const slider = byId('tv-replay-slider');
+        if (slider) {
+            slider.addEventListener('input', () => {
+                if (state.replayPlaying) pauseReplay();
+                state.replayIndex = Math.max(REPLAY_START_BARS, Math.min(Number(slider.value), state.candles.length - 1));
+                updateReplayFrame();
+            });
+        }
     }
 
     /* ────────── Dual-Chart companion pane (onuncu oturum) ────────── */
@@ -1238,6 +1651,7 @@ const TradingChart = (() => {
 
         applyVolumeVisibility();
         redrawDrawings();
+        applySignalMarkersForCurrentState();
     }
 
     function applyVolumeVisibility() {

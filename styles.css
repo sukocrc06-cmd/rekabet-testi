@@ -3362,6 +3362,98 @@ body.compact-mode .status-item {
     border-color: var(--gold-border);
 }
 
+/* (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Strateji Tekrarı ("zaman
+   makinesi") kontrol şeridi — #tv-resolution-bar'ın hemen altında, sadece
+   #btn-toggle-replay ile açıldığında görünür (display:none varsayılan). */
+.tv-replay-bar {
+    align-items: center;
+    gap: 10px;
+    padding: 5px 14px;
+    border-bottom: 1px solid var(--gold-border);
+    background-color: var(--gold-dim);
+    flex-shrink: 0;
+}
+
+.tv-replay-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--gold-border);
+    color: var(--gold);
+    width: 26px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.tv-replay-btn:hover {
+    background-color: var(--gold-border);
+}
+
+.tv-replay-exit-btn {
+    color: var(--text-secondary);
+    border-color: var(--tint-10, rgba(255,255,255,0.1));
+    margin-left: auto;
+}
+
+.tv-replay-slider {
+    flex: 1 1 auto;
+    min-width: 60px;
+    max-width: 320px;
+    accent-color: var(--gold);
+    cursor: pointer;
+}
+
+.tv-replay-date-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    min-width: 90px;
+}
+
+.tv-replay-speed-group {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.tv-replay-speed-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.tv-replay-speed-btn:hover {
+    color: var(--text-primary);
+}
+
+.tv-replay-speed-btn.active {
+    color: var(--gold);
+    background-color: var(--bg-panel);
+    border-color: var(--gold-border);
+}
+
+.tv-replay-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--gold);
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .tv-chart-area {
     flex: 1 1 auto;
     min-height: 0;
@@ -3517,6 +3609,80 @@ body.compact-mode .status-item {
     font-family: var(--font-mono);
     color: var(--text-secondary);
     pointer-events: none;
+}
+
+/* (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı açıklama
+   balonu — bir AL/SAT ok işaretine tıklanınca tıklanan noktanın yakınına
+   mutlak konumlanır (bkz. tradingChart.js showSignalTooltip). Ana grafik
+   çizim katmanının (z-index:5) ÜSTÜNDE durması gerekiyor; kendi kapatma
+   düğmesi dışında tıklamaları geçirmesi gerekmediği için pointer-events
+   varsayılan (auto) bırakıldı. */
+.tv-signal-tooltip {
+    position: absolute;
+    z-index: 15;
+    max-width: 260px;
+    background-color: var(--glass-bg-3);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
+
+.tv-signal-tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.tv-signal-tooltip-badge {
+    font-size: 10px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    padding: 1px 7px;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.03em;
+}
+
+.tv-signal-badge-buy {
+    color: #4CAF50;
+    background-color: rgba(76,175,80,0.14);
+    border: 1px solid rgba(76,175,80,0.4);
+}
+
+.tv-signal-badge-sell {
+    color: #F44336;
+    background-color: rgba(244,67,54,0.14);
+    border: 1px solid rgba(244,67,54,0.4);
+}
+
+.tv-signal-tooltip-date {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    flex: 1 1 auto;
+}
+
+.tv-signal-tooltip-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
+.tv-signal-tooltip-close:hover {
+    color: var(--text-primary);
+}
+
+.tv-signal-tooltip-text {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-primary);
 }
 
 /* --- Çoklu Grafik / 2x2 Izgara Düzeni (17 Temmuz 2026, yedinci oturum) --- */
