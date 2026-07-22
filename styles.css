@@ -1827,11 +1827,52 @@ body {
     box-shadow: inset 2px 0 0 var(--gold);
 }
 
+/* (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları"
+   özelliği) Logo + sembol/isim yığınını yan yana tutan sarmalayıcı;
+   .watchlist-row'un ilk (sol) çocuğu artık bu, .wl-main değil. */
+.wl-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
 .wl-main {
     display: flex;
     flex-direction: column;
     gap: 1px;
     min-width: 0;
+}
+
+/* Şirket logosu (Clearbit) + bulunamazsa/yüklenemezse renkli baş harf
+   rozeti — watchlist satırında, grafik sembol başlığında ve ısı
+   haritasında ortak kullanılıyor (bkz. dataController.js buildLogoHtml). */
+.stock-logo-wrap {
+    display: inline-flex;
+    flex-shrink: 0;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.stock-logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #ffffff;
+    border-radius: 5px;
+}
+
+.stock-logo-fallback {
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 9px;
+    border-radius: 5px;
+    font-family: var(--font-mono);
+    letter-spacing: -0.02em;
 }
 
 .wl-symbol {
@@ -1911,6 +1952,15 @@ body.compact-mode .wl-name {
 body.compact-mode .wl-spark {
     width: 34px;
     height: 14px;
+}
+
+body.compact-mode .stock-logo-wrap {
+    width: 16px !important;
+    height: 16px !important;
+}
+
+body.compact-mode .stock-logo-fallback {
+    font-size: 7px;
 }
 
 body.compact-mode .header-status {
@@ -2045,6 +2095,16 @@ body.compact-mode .status-item {
     align-items: baseline;
     gap: 10px;
     flex-shrink: 0;
+}
+
+/* (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
+   .tv-symbol-block'un diğer çocukları `align-items:baseline` ile
+   hizalanıyor (metin tabanlı) — kare bir logo görseli bu hizalamada
+   metnin altına kayar gibi görünürdü, bu yüzden kendi hizalamasını
+   merkeze (dikey) sabitliyor. */
+#tv-symbol-logo {
+    align-self: center;
+    display: inline-flex;
 }
 
 .tv-symbol-name {

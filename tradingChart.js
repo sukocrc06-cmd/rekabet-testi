@@ -1727,9 +1727,15 @@ const TradingChart = (() => {
     }
 
     function setSymbolHeader(ticker, price, prevClose) {
+        const logoEl = byId('tv-symbol-logo');
         const nameEl = byId('tv-symbol-name');
         const priceEl = byId('tv-last-price');
         const chgEl = byId('tv-price-change');
+        if (logoEl) {
+            logoEl.innerHTML = (ticker && window.DataController)
+                ? window.DataController.buildLogoHtml(ticker, 22)
+                : '';
+        }
         if (nameEl) nameEl.textContent = ticker ? `${ticker}.IS` : '---';
         if (priceEl) priceEl.textContent = price !== null ? '₺' + fmtPrice(price) : '---';
         if (chgEl) {

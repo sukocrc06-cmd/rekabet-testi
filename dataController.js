@@ -55,103 +55,103 @@ const DataController = (() => {
      * ama iki bağımsız kaynakça (Midas + Google Finance) doğrulandığı için
      * uygulandı. */
     const STOCK_PROFILES = {
-        AEFES: { name: 'Anadolu Efes', sector: 'Gıda, İçecek',  basePrice: 20.80, volatility: 0.026, drift: 0.0005, avgVolume: 42120000 },
-        AGESA: { name: 'Agesa Hayat ve Emeklilik', sector: 'Sigorta', basePrice: 240.2, volatility: 0.018, drift: 0.0008, avgVolume: 1159499 },
-        AKBNK: { name: 'Akbank', sector: 'Bankacılık',  basePrice: 66.50, volatility: 0.021, drift: 0.0008, avgVolume: 16362000 },
-        AKCNS: { name: 'Akçansa Çimento', sector: 'Çimento', basePrice: 238.05, volatility: 0.015, drift: 0.0005, avgVolume: 1616999 },
-        AKFGY: { name: 'Akfen GYO', sector: 'Gayrimenkul Yatırım Ortaklığı', basePrice: 2.78, volatility: 0.036, drift: 0.0007, avgVolume: 121500000 },
-        AKSEN: { name: 'Aksa Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 106.00, volatility: 0.018, drift: 0.0007, avgVolume: 5820000 },
-        ALARK: { name: 'Alarko Holding', sector: 'Holding ve Yatırım',  basePrice: 104.60, volatility: 0.023, drift: 0.0006, avgVolume: 6378000 },
-        ALBRK: { name: 'Albaraka Türk', sector: 'Bankacılık', basePrice: 8.13, volatility: 0.03, drift: 0.0007, avgVolume: 110160000 },
-        ALFAS: { name: 'Alfa Solar Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 44.96, volatility: 0.029, drift: 0.0008, avgVolume: 24282000 },
-        ARCLK: { name: 'Arçelik', sector: 'Dayanıklı Tüketim',  basePrice: 97.60, volatility: 0.017, drift: 0.0008, avgVolume: 4470000 },
-        ASELS: { name: 'Aselsan', sector: 'Savunma Sanayii',  basePrice: 351.50, volatility: 0.017, drift: 0.0007, avgVolume: 1899000 },
-        ASTOR: { name: 'Astor Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 286.50, volatility: 0.016, drift: 0.0006, avgVolume: 2059500 },
-        BERA: { name: 'Bera Holding', sector: 'Holding ve Yatırım',  basePrice: 14.87, volatility: 0.022, drift: 0.0003, avgVolume: 59490000 },
-        BIMAS: { name: 'BİM Mağazalar', sector: 'Perakende Ticaret',  basePrice: 386.00, volatility: 0.017, drift: 0.0007, avgVolume: 936000 },
-        BRSAN: { name: 'Borusan Mannesmann', sector: 'Metal Ana Sanayii',  basePrice: 549.50, volatility: 0.015, drift: 0.0005, avgVolume: 1355999 },
-        BRYAT: { name: 'Borusan Yatırım Pazarlama', sector: 'Holding ve Yatırım',  basePrice: 1810.00, volatility: 0.015, drift: 0.0005, avgVolume: 269000 },
-        BUCIM: { name: 'Bursa Çimento', sector: 'Çimento', basePrice: 5.87, volatility: 0.034, drift: 0.0005, avgVolume: 67320000 },
-        CANTE: { name: 'Çan2 Termik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 1.28, volatility: 0.035, drift: 0.0006, avgVolume: 85770000 },
-        CCOLA: { name: 'Coca-Cola İçecek', sector: 'Gıda, İçecek',  basePrice: 87.55, volatility: 0.02, drift: 0.0003, avgVolume: 7464000 },
-        CEMTS: { name: 'Çemtaş Çelik Makina', sector: 'Metal Ana Sanayii', basePrice: 9.38, volatility: 0.028, drift: 0.0005, avgVolume: 69300000 },
-        CIMSA: { name: 'Çimsa Çimento', sector: 'Çimento',  basePrice: 48.86, volatility: 0.025, drift: 0.0008, avgVolume: 12329999 },
-        CWENE: { name: 'Cw Enerji Mühendislik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 39.92, volatility: 0.02, drift: 0.0007, avgVolume: 20160000 },
-        DOAS: { name: 'Doğuş Otomotiv Servis', sector: 'Otomotiv',  basePrice: 185.00, volatility: 0.021, drift: 0.0004, avgVolume: 7230000 },
-        DOHOL: { name: 'Doğan Şirketler Grubu', sector: 'Holding ve Yatırım',  basePrice: 21.30, volatility: 0.024, drift: 0.0005, avgVolume: 55530000 },
-        ECILC: { name: 'Eczacıbaşı İlaç', sector: 'İlaç ve Sağlık',  basePrice: 73.50, volatility: 0.018, drift: 0.0007, avgVolume: 16595999 },
-        ECZYT: { name: 'Eczacıbaşı Yatırım', sector: 'Holding ve Yatırım', basePrice: 349.75, volatility: 0.016, drift: 0.0006, avgVolume: 1318500 },
-        EGEEN: { name: 'Ege Endüstri', sector: 'Otomotiv',  basePrice: 5545.00, volatility: 0.015, drift: 0.0005, avgVolume: 209000 },
-        EKGYO: { name: 'Emlak Konut GYO', sector: 'Gayrimenkul Yatırım Ortaklığı',  basePrice: 20.38, volatility: 0.023, drift: 0.0008, avgVolume: 42435000 },
-        ENJSA: { name: 'Enerjisa Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 102.50, volatility: 0.023, drift: 0.0006, avgVolume: 5994000 },
-        ENKAI: { name: 'Enka İnşaat', sector: 'İnşaat',  basePrice: 90.70, volatility: 0.018, drift: 0.0003, avgVolume: 3660000 },
-        EREGL: { name: 'Ereğli Demir Çelik', sector: 'Metal Ana Sanayii',  basePrice: 42.34, volatility: 0.027, drift: 0.0004, avgVolume: 25146000 },
-        EUPWR: { name: 'Europower Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 87.30, volatility: 0.019, drift: 0.0004, avgVolume: 6258000 },
-        FROTO: { name: 'Ford Otomotiv Sanayi', sector: 'Otomotiv',  basePrice: 83.60, volatility: 0.022, drift: 0.0007, avgVolume: 8004000 },
-        GARAN: { name: 'Garanti Bankası', sector: 'Bankacılık',  basePrice: 126.80, volatility: 0.021, drift: 0.0004, avgVolume: 4206000 },
-        GENIL: { name: 'Gen İlaç ve Sağlık', sector: 'İlaç ve Sağlık',  basePrice: 9.24, volatility: 0.033, drift: 0.0004, avgVolume: 96030000 },
-        GESAN: { name: 'Girişim Elektrik Sanayi', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 80.30, volatility: 0.018, drift: 0.0003, avgVolume: 4956000 },
-        GLYHO: { name: 'Global Yatırım Holding', sector: 'Holding ve Yatırım', basePrice: 18.73, volatility: 0.027, drift: 0.0006, avgVolume: 42615000 },
-        GSDHO: { name: 'GSD Holding', sector: 'Holding ve Yatırım', basePrice: 6.04, volatility: 0.033, drift: 0.0004, avgVolume: 117270000 },
-        GUBRF: { name: 'Gübre Fabrikaları', sector: 'Kimya, Petrokimya',  basePrice: 413.00, volatility: 0.015, drift: 0.0005, avgVolume: 1296000 },
-        GWIND: { name: 'Galata Wind Enerji', sector: 'Enerji (Üretim/Dağıtım)', basePrice: 26.1, volatility: 0.027, drift: 0.0008, avgVolume: 29115000 },
-        HALKB: { name: 'Halk Bankası', sector: 'Bankacılık',  basePrice: 38.22, volatility: 0.024, drift: 0.0003, avgVolume: 20772000 },
-        HEKTS: { name: 'Hektaş', sector: 'Kimya, Petrokimya',  basePrice: 3.03, volatility: 0.031, drift: 0.0008, avgVolume: 112770000 },
-        IPEKE: { name: 'İpek Doğal Enerji', sector: 'Madencilik', basePrice: 91.9, volatility: 0.016, drift: 0.0003, avgVolume: 4896000 },
-        ISCTR: { name: 'İş Bankası (C)', sector: 'Bankacılık',  basePrice: 13.68, volatility: 0.029, drift: 0.0008, avgVolume: 61155000 },
-        ISDMR: { name: 'İskenderun Demir Çelik', sector: 'Metal Ana Sanayii', basePrice: 56.7, volatility: 0.023, drift: 0.0008, avgVolume: 23454000 },
-        ISGYO: { name: 'İş GYO', sector: 'Gayrimenkul Yatırım Ortaklığı', basePrice: 20.26, volatility: 0.025, drift: 0.0008, avgVolume: 60975000 },
-        ISMEN: { name: 'İş Yatırım Menkul Değerler', sector: 'Finansal Hizmetler',  basePrice: 36.60, volatility: 0.02, drift: 0.0005, avgVolume: 16199999 },
-        IZMDC: { name: 'İzmir Demir Çelik', sector: 'Metal Ana Sanayii', basePrice: 11.13, volatility: 0.025, drift: 0.0006, avgVolume: 62775000 },
-        KARDMD: { name: 'Kardemir (D)', sector: 'Metal Ana Sanayii', basePrice: 40.86, volatility: 0.025, drift: 0.0006, avgVolume: 15390000 },
-        KCAER: { name: 'Kocaer Çelik', sector: 'Metal Ana Sanayii',  basePrice: 13.60, volatility: 0.028, drift: 0.0007, avgVolume: 61110000 },
-        KCHOL: { name: 'Koç Holding', sector: 'Holding ve Yatırım',  basePrice: 197.00, volatility: 0.021, drift: 0.0006, avgVolume: 7134000 },
-        KMPUR: { name: 'Kimteks Poliüretan', sector: 'Kimya, Petrokimya', basePrice: 21.2, volatility: 0.029, drift: 0.0006, avgVolume: 62055000 },
-        KONTR: { name: 'Kontrolmatik Teknoloji', sector: 'Teknoloji',  basePrice: 5.31, volatility: 0.034, drift: 0.0005, avgVolume: 54720000 },
-        KONYA: { name: 'Konya Çimento', sector: 'Çimento',  basePrice: 3800.00, volatility: 0.015, drift: 0.0005, avgVolume: 186500 },
-        KORDS: { name: 'Kordsa Teknik Tekstil', sector: 'Tekstil', basePrice: 79.9, volatility: 0.021, drift: 0.0006, avgVolume: 13626000 },
-        KOZAA: { name: 'Koza Anadolu Metal', sector: 'Madencilik', basePrice: 119.7, volatility: 0.022, drift: 0.0005, avgVolume: 6803999 },
-        KOZAL: { name: 'Koza Altın İşletmeleri', sector: 'Madencilik', basePrice: 50.25, volatility: 0.017, drift: 0.0004, avgVolume: 20610000 },
-        KRDMD: { name: 'Kardemir Karabük', sector: 'Metal Ana Sanayii',  basePrice: 42.76, volatility: 0.02, drift: 0.0007, avgVolume: 16920000 },
-        MAVI: { name: 'Mavi Giyim', sector: 'Tekstil',  basePrice: 41.02, volatility: 0.021, drift: 0.0004, avgVolume: 23598000 },
-        MGROS: { name: 'Migros Ticaret', sector: 'Perakende Ticaret',  basePrice: 635.50, volatility: 0.015, drift: 0.0005, avgVolume: 253000 },
-        MIATK: { name: 'Mia Teknoloji', sector: 'Teknoloji',  basePrice: 33.18, volatility: 0.024, drift: 0.0005, avgVolume: 21672000 },
-        ODAS: { name: 'Odaş Elektrik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 8.47, volatility: 0.033, drift: 0.0004, avgVolume: 66150000 },
-        OTKAR: { name: 'Otokar Otomotiv', sector: 'Otomotiv',  basePrice: 328.25, volatility: 0.014, drift: 0.0004, avgVolume: 1462500 },
-        OYAKC: { name: 'Oyak Çimento', sector: 'Çimento',  basePrice: 20.20, volatility: 0.025, drift: 0.0006, avgVolume: 27675000 },
-        PENTA: { name: 'Penta Teknoloji', sector: 'Teknoloji', basePrice: 13.47, volatility: 0.026, drift: 0.0007, avgVolume: 48869999 },
-        PETKM: { name: 'Petkim Petrokimya', sector: 'Kimya, Petrokimya',  basePrice: 20.94, volatility: 0.025, drift: 0.0004, avgVolume: 44325000 },
-        PGSUS: { name: 'Pegasus Hava Taşımacılığı', sector: 'Ulaştırma',  basePrice: 166.50, volatility: 0.018, drift: 0.0003, avgVolume: 4332000 },
-        PSGYO: { name: 'Pasifik GYO', sector: 'Gayrimenkul Yatırım Ortaklığı',  basePrice: 3.29, volatility: 0.032, drift: 0.0003, avgVolume: 108180000 },
-        QUAGR: { name: 'Qua Granite Hayal Yapı', sector: 'İnşaat',  basePrice: 3.41, volatility: 0.026, drift: 0.0003, avgVolume: 106560000 },
-        SAHOL: { name: 'Sabancı Holding', sector: 'Holding ve Yatırım',  basePrice: 88.40, volatility: 0.023, drift: 0.0006, avgVolume: 5850000 },
-        SASA: { name: 'Sasa Polyester', sector: 'Kimya, Petrokimya',  basePrice: 2.43, volatility: 0.034, drift: 0.0005, avgVolume: 68040000 },
-        SAYAS: { name: 'Say Yenilenebilir Enerji', sector: 'Enerji (Üretim/Dağıtım)', basePrice: 45.32, volatility: 0.025, drift: 0.0004, avgVolume: 15930000 },
-        SDTTR: { name: 'SDT Uzay ve Savunma', sector: 'Savunma Sanayii', basePrice: 264.5, volatility: 0.018, drift: 0.0008, avgVolume: 1861500 },
-        SISE: { name: 'Şişecam', sector: 'Cam',  basePrice: 44.20, volatility: 0.028, drift: 0.0005, avgVolume: 22464000 },
-        SKBNK: { name: 'Şekerbank', sector: 'Bankacılık',  basePrice: 19.63, volatility: 0.027, drift: 0.0008, avgVolume: 48915000 },
-        SMRTG: { name: 'Smart Güneş Enerjisi', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 11.67, volatility: 0.027, drift: 0.0004, avgVolume: 46214999 },
-        SOKM: { name: 'Şok Marketler', sector: 'Perakende Ticaret',  basePrice: 51.60, volatility: 0.024, drift: 0.0005, avgVolume: 21132000 },
-        TABGD: { name: 'Tab Gıda Sanayi', sector: 'Gıda, İçecek',  basePrice: 231.30, volatility: 0.013, drift: 0.0003, avgVolume: 1311000 },
-        TAVHL: { name: 'TAV Havalimanları', sector: 'Ulaştırma',  basePrice: 265.50, volatility: 0.018, drift: 0.0008, avgVolume: 1399500 },
-        TCELL: { name: 'Turkcell', sector: 'Telekomünikasyon',  basePrice: 108.50, volatility: 0.022, drift: 0.0003, avgVolume: 6611999 },
-        TEZOL: { name: 'Europap Tezol Kağıt', sector: 'Kağıt', basePrice: 15.85, volatility: 0.028, drift: 0.0005, avgVolume: 43110000 },
-        THYAO: { name: 'Türk Hava Yolları', sector: 'Ulaştırma',  basePrice: 329.50, volatility: 0.018, drift: 0.0008, avgVolume: 1408500 },
-        TKFEN: { name: 'Tekfen Holding', sector: 'Holding ve Yatırım',  basePrice: 145.00, volatility: 0.016, drift: 0.0007, avgVolume: 5856000 },
-        TOASO: { name: 'Tofaş Türk Otomobil Fabrikası', sector: 'Otomotiv',  basePrice: 307.75, volatility: 0.013, drift: 0.0003, avgVolume: 2055000 },
-        TSKB: { name: 'TSKB', sector: 'Bankacılık',  basePrice: 11.88, volatility: 0.028, drift: 0.0005, avgVolume: 53910000 },
-        TTKOM: { name: 'Türk Telekom', sector: 'Telekomünikasyon',  basePrice: 58.15, volatility: 0.017, drift: 0.0006, avgVolume: 10962000 },
-        TTRAK: { name: 'Türk Traktör', sector: 'Otomotiv',  basePrice: 437.50, volatility: 0.013, drift: 0.0003, avgVolume: 1949999 },
-        TUPRS: { name: 'Tüpraş', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 289.25, volatility: 0.013, drift: 0.0003, avgVolume: 1355999 },
-        TURSG: { name: 'Türkiye Sigorta', sector: 'Sigorta',  basePrice: 6.56, volatility: 0.035, drift: 0.0006, avgVolume: 112050000 },
-        ULKER: { name: 'Ülker Bisküvi', sector: 'Gıda, İçecek',  basePrice: 97.95, volatility: 0.017, drift: 0.0006, avgVolume: 4181999 },
-        VAKBN: { name: 'Vakıflar Bankası', sector: 'Bankacılık',  basePrice: 31.00, volatility: 0.02, drift: 0.0007, avgVolume: 21960000 },
-        VESBE: { name: 'Vestel Beyaz Eşya', sector: 'Dayanıklı Tüketim', basePrice: 6.33, volatility: 0.033, drift: 0.0004, avgVolume: 77670000 },
-        VESTL: { name: 'Vestel Elektronik', sector: 'Dayanıklı Tüketim',  basePrice: 24.80, volatility: 0.028, drift: 0.0005, avgVolume: 28260000 },
-        YEOTK: { name: 'Yeo Teknoloji', sector: 'Teknoloji',  basePrice: 91.80, volatility: 0.018, drift: 0.0003, avgVolume: 5676000 },
-        YKBNK: { name: 'Yapı ve Kredi Bankası', sector: 'Bankacılık',  basePrice: 33.22, volatility: 0.023, drift: 0.0008, avgVolume: 11034000 },
-        YYLGD: { name: 'Yayla Agro Gıda', sector: 'Gıda, İçecek', basePrice: 11.4, volatility: 0.023, drift: 0.0006, avgVolume: 30284999 },
-        ZOREN: { name: 'Zorlu Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 2.66, volatility: 0.028, drift: 0.0005, avgVolume: 71820000 }
+        AEFES: { name: 'Anadolu Efes', sector: 'Gıda, İçecek',  basePrice: 20.80, volatility: 0.026, drift: 0.0005, avgVolume: 42120000, logoDomain: 'anadoluefes.com.tr' },
+        AGESA: { name: 'Agesa Hayat ve Emeklilik', sector: 'Sigorta', basePrice: 240.2, volatility: 0.018, drift: 0.0008, avgVolume: 1159499, logoDomain: 'agesa.com.tr' },
+        AKBNK: { name: 'Akbank', sector: 'Bankacılık',  basePrice: 66.50, volatility: 0.021, drift: 0.0008, avgVolume: 16362000, logoDomain: 'akbank.com' },
+        AKCNS: { name: 'Akçansa Çimento', sector: 'Çimento', basePrice: 238.05, volatility: 0.015, drift: 0.0005, avgVolume: 1616999, logoDomain: 'akcansa.com.tr' },
+        AKFGY: { name: 'Akfen GYO', sector: 'Gayrimenkul Yatırım Ortaklığı', basePrice: 2.78, volatility: 0.036, drift: 0.0007, avgVolume: 121500000, logoDomain: 'akfengyo.com.tr' },
+        AKSEN: { name: 'Aksa Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 106.00, volatility: 0.018, drift: 0.0007, avgVolume: 5820000, logoDomain: 'aksaenerji.com.tr' },
+        ALARK: { name: 'Alarko Holding', sector: 'Holding ve Yatırım',  basePrice: 104.60, volatility: 0.023, drift: 0.0006, avgVolume: 6378000, logoDomain: 'alarko.com.tr' },
+        ALBRK: { name: 'Albaraka Türk', sector: 'Bankacılık', basePrice: 8.13, volatility: 0.03, drift: 0.0007, avgVolume: 110160000, logoDomain: 'albaraka.com.tr' },
+        ALFAS: { name: 'Alfa Solar Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 44.96, volatility: 0.029, drift: 0.0008, avgVolume: 24282000, logoDomain: 'alfasolarenerji.com' },
+        ARCLK: { name: 'Arçelik', sector: 'Dayanıklı Tüketim',  basePrice: 97.60, volatility: 0.017, drift: 0.0008, avgVolume: 4470000, logoDomain: 'arcelik.com.tr' },
+        ASELS: { name: 'Aselsan', sector: 'Savunma Sanayii',  basePrice: 351.50, volatility: 0.017, drift: 0.0007, avgVolume: 1899000, logoDomain: 'aselsan.com' },
+        ASTOR: { name: 'Astor Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 286.50, volatility: 0.016, drift: 0.0006, avgVolume: 2059500, logoDomain: 'astoras.com.tr' },
+        BERA: { name: 'Bera Holding', sector: 'Holding ve Yatırım',  basePrice: 14.87, volatility: 0.022, drift: 0.0003, avgVolume: 59490000, logoDomain: 'beraholding.com.tr' },
+        BIMAS: { name: 'BİM Mağazalar', sector: 'Perakende Ticaret',  basePrice: 386.00, volatility: 0.017, drift: 0.0007, avgVolume: 936000, logoDomain: 'bim.com.tr' },
+        BRSAN: { name: 'Borusan Mannesmann', sector: 'Metal Ana Sanayii',  basePrice: 549.50, volatility: 0.015, drift: 0.0005, avgVolume: 1355999, logoDomain: 'borusanmannesmann.com' },
+        BRYAT: { name: 'Borusan Yatırım Pazarlama', sector: 'Holding ve Yatırım',  basePrice: 1810.00, volatility: 0.015, drift: 0.0005, avgVolume: 269000, logoDomain: 'borusanyatirim.com' },
+        BUCIM: { name: 'Bursa Çimento', sector: 'Çimento', basePrice: 5.87, volatility: 0.034, drift: 0.0005, avgVolume: 67320000, logoDomain: 'bursacimento.com.tr' },
+        CANTE: { name: 'Çan2 Termik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 1.28, volatility: 0.035, drift: 0.0006, avgVolume: 85770000, logoDomain: 'can2termik.com.tr' },
+        CCOLA: { name: 'Coca-Cola İçecek', sector: 'Gıda, İçecek',  basePrice: 87.55, volatility: 0.02, drift: 0.0003, avgVolume: 7464000, logoDomain: 'cci.com.tr' },
+        CEMTS: { name: 'Çemtaş Çelik Makina', sector: 'Metal Ana Sanayii', basePrice: 9.38, volatility: 0.028, drift: 0.0005, avgVolume: 69300000, logoDomain: 'cemtas.com.tr' },
+        CIMSA: { name: 'Çimsa Çimento', sector: 'Çimento',  basePrice: 48.86, volatility: 0.025, drift: 0.0008, avgVolume: 12329999, logoDomain: 'cimsa.com.tr' },
+        CWENE: { name: 'Cw Enerji Mühendislik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 39.92, volatility: 0.02, drift: 0.0007, avgVolume: 20160000, logoDomain: 'cw-enerji.com' },
+        DOAS: { name: 'Doğuş Otomotiv Servis', sector: 'Otomotiv',  basePrice: 185.00, volatility: 0.021, drift: 0.0004, avgVolume: 7230000, logoDomain: 'dogusotomotiv.com.tr' },
+        DOHOL: { name: 'Doğan Şirketler Grubu', sector: 'Holding ve Yatırım',  basePrice: 21.30, volatility: 0.024, drift: 0.0005, avgVolume: 55530000, logoDomain: 'doganholding.com.tr' },
+        ECILC: { name: 'Eczacıbaşı İlaç', sector: 'İlaç ve Sağlık',  basePrice: 73.50, volatility: 0.018, drift: 0.0007, avgVolume: 16595999, logoDomain: 'eis.com.tr' },
+        ECZYT: { name: 'Eczacıbaşı Yatırım', sector: 'Holding ve Yatırım', basePrice: 349.75, volatility: 0.016, drift: 0.0006, avgVolume: 1318500, logoDomain: 'eczacibasi.com.tr' },
+        EGEEN: { name: 'Ege Endüstri', sector: 'Otomotiv',  basePrice: 5545.00, volatility: 0.015, drift: 0.0005, avgVolume: 209000, logoDomain: 'egeendustri.com.tr' },
+        EKGYO: { name: 'Emlak Konut GYO', sector: 'Gayrimenkul Yatırım Ortaklığı',  basePrice: 20.38, volatility: 0.023, drift: 0.0008, avgVolume: 42435000, logoDomain: 'emlakkonut.com.tr' },
+        ENJSA: { name: 'Enerjisa Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 102.50, volatility: 0.023, drift: 0.0006, avgVolume: 5994000, logoDomain: 'enerjisa.com.tr' },
+        ENKAI: { name: 'Enka İnşaat', sector: 'İnşaat',  basePrice: 90.70, volatility: 0.018, drift: 0.0003, avgVolume: 3660000, logoDomain: 'enka.com' },
+        EREGL: { name: 'Ereğli Demir Çelik', sector: 'Metal Ana Sanayii',  basePrice: 42.34, volatility: 0.027, drift: 0.0004, avgVolume: 25146000, logoDomain: 'erdemir.com.tr' },
+        EUPWR: { name: 'Europower Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 87.30, volatility: 0.019, drift: 0.0004, avgVolume: 6258000, logoDomain: 'europowerenerji.com.tr' },
+        FROTO: { name: 'Ford Otomotiv Sanayi', sector: 'Otomotiv',  basePrice: 83.60, volatility: 0.022, drift: 0.0007, avgVolume: 8004000, logoDomain: 'fordotosan.com.tr' },
+        GARAN: { name: 'Garanti Bankası', sector: 'Bankacılık',  basePrice: 126.80, volatility: 0.021, drift: 0.0004, avgVolume: 4206000, logoDomain: 'garantibbva.com.tr' },
+        GENIL: { name: 'Gen İlaç ve Sağlık', sector: 'İlaç ve Sağlık',  basePrice: 9.24, volatility: 0.033, drift: 0.0004, avgVolume: 96030000, logoDomain: 'genilac.com.tr' },
+        GESAN: { name: 'Girişim Elektrik Sanayi', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 80.30, volatility: 0.018, drift: 0.0003, avgVolume: 4956000, logoDomain: 'girisimelk.com.tr' },
+        GLYHO: { name: 'Global Yatırım Holding', sector: 'Holding ve Yatırım', basePrice: 18.73, volatility: 0.027, drift: 0.0006, avgVolume: 42615000, logoDomain: 'globalyatirim.com.tr' },
+        GSDHO: { name: 'GSD Holding', sector: 'Holding ve Yatırım', basePrice: 6.04, volatility: 0.033, drift: 0.0004, avgVolume: 117270000, logoDomain: 'gsdholding.com.tr' },
+        GUBRF: { name: 'Gübre Fabrikaları', sector: 'Kimya, Petrokimya',  basePrice: 413.00, volatility: 0.015, drift: 0.0005, avgVolume: 1296000, logoDomain: 'gubretas.com.tr' },
+        GWIND: { name: 'Galata Wind Enerji', sector: 'Enerji (Üretim/Dağıtım)', basePrice: 26.1, volatility: 0.027, drift: 0.0008, avgVolume: 29115000, logoDomain: 'galatawindenerji.com' },
+        HALKB: { name: 'Halk Bankası', sector: 'Bankacılık',  basePrice: 38.22, volatility: 0.024, drift: 0.0003, avgVolume: 20772000, logoDomain: 'halkbank.com.tr' },
+        HEKTS: { name: 'Hektaş', sector: 'Kimya, Petrokimya',  basePrice: 3.03, volatility: 0.031, drift: 0.0008, avgVolume: 112770000, logoDomain: 'hektas.com.tr' },
+        IPEKE: { name: 'İpek Doğal Enerji', sector: 'Madencilik', basePrice: 91.9, volatility: 0.016, drift: 0.0003, avgVolume: 4896000, logoDomain: 'ipekenerji.com.tr' },
+        ISCTR: { name: 'İş Bankası (C)', sector: 'Bankacılık',  basePrice: 13.68, volatility: 0.029, drift: 0.0008, avgVolume: 61155000, logoDomain: 'isbank.com.tr' },
+        ISDMR: { name: 'İskenderun Demir Çelik', sector: 'Metal Ana Sanayii', basePrice: 56.7, volatility: 0.023, drift: 0.0008, avgVolume: 23454000, logoDomain: 'isdemir.com.tr' },
+        ISGYO: { name: 'İş GYO', sector: 'Gayrimenkul Yatırım Ortaklığı', basePrice: 20.26, volatility: 0.025, drift: 0.0008, avgVolume: 60975000, logoDomain: 'isgyo.com.tr' },
+        ISMEN: { name: 'İş Yatırım Menkul Değerler', sector: 'Finansal Hizmetler',  basePrice: 36.60, volatility: 0.02, drift: 0.0005, avgVolume: 16199999, logoDomain: 'isyatirim.com.tr' },
+        IZMDC: { name: 'İzmir Demir Çelik', sector: 'Metal Ana Sanayii', basePrice: 11.13, volatility: 0.025, drift: 0.0006, avgVolume: 62775000, logoDomain: 'izdemir.com.tr' },
+        KARDMD: { name: 'Kardemir (D)', sector: 'Metal Ana Sanayii', basePrice: 40.86, volatility: 0.025, drift: 0.0006, avgVolume: 15390000, logoDomain: 'kardemir.com' },
+        KCAER: { name: 'Kocaer Çelik', sector: 'Metal Ana Sanayii',  basePrice: 13.60, volatility: 0.028, drift: 0.0007, avgVolume: 61110000, logoDomain: 'kocaersteel.com' },
+        KCHOL: { name: 'Koç Holding', sector: 'Holding ve Yatırım',  basePrice: 197.00, volatility: 0.021, drift: 0.0006, avgVolume: 7134000, logoDomain: 'koc.com.tr' },
+        KMPUR: { name: 'Kimteks Poliüretan', sector: 'Kimya, Petrokimya', basePrice: 21.2, volatility: 0.029, drift: 0.0006, avgVolume: 62055000, logoDomain: 'kimteks.com.tr' },
+        KONTR: { name: 'Kontrolmatik Teknoloji', sector: 'Teknoloji',  basePrice: 5.31, volatility: 0.034, drift: 0.0005, avgVolume: 54720000, logoDomain: 'kontrolmatik.com' },
+        KONYA: { name: 'Konya Çimento', sector: 'Çimento',  basePrice: 3800.00, volatility: 0.015, drift: 0.0005, avgVolume: 186500, logoDomain: 'konyacimento.com.tr' },
+        KORDS: { name: 'Kordsa Teknik Tekstil', sector: 'Tekstil', basePrice: 79.9, volatility: 0.021, drift: 0.0006, avgVolume: 13626000, logoDomain: 'kordsa.com' },
+        KOZAA: { name: 'Koza Anadolu Metal', sector: 'Madencilik', basePrice: 119.7, volatility: 0.022, drift: 0.0005, avgVolume: 6803999, logoDomain: 'kozaanadolumetal.com.tr' },
+        KOZAL: { name: 'Koza Altın İşletmeleri', sector: 'Madencilik', basePrice: 50.25, volatility: 0.017, drift: 0.0004, avgVolume: 20610000, logoDomain: 'kozaaltin.com.tr' },
+        KRDMD: { name: 'Kardemir Karabük', sector: 'Metal Ana Sanayii',  basePrice: 42.76, volatility: 0.02, drift: 0.0007, avgVolume: 16920000, logoDomain: 'kardemir.com' },
+        MAVI: { name: 'Mavi Giyim', sector: 'Tekstil',  basePrice: 41.02, volatility: 0.021, drift: 0.0004, avgVolume: 23598000, logoDomain: 'mavi.com' },
+        MGROS: { name: 'Migros Ticaret', sector: 'Perakende Ticaret',  basePrice: 635.50, volatility: 0.015, drift: 0.0005, avgVolume: 253000, logoDomain: 'migroskurumsal.com' },
+        MIATK: { name: 'Mia Teknoloji', sector: 'Teknoloji',  basePrice: 33.18, volatility: 0.024, drift: 0.0005, avgVolume: 21672000, logoDomain: 'miateknoloji.com' },
+        ODAS: { name: 'Odaş Elektrik', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 8.47, volatility: 0.033, drift: 0.0004, avgVolume: 66150000, logoDomain: 'odas.com.tr' },
+        OTKAR: { name: 'Otokar Otomotiv', sector: 'Otomotiv',  basePrice: 328.25, volatility: 0.014, drift: 0.0004, avgVolume: 1462500, logoDomain: 'otokar.com.tr' },
+        OYAKC: { name: 'Oyak Çimento', sector: 'Çimento',  basePrice: 20.20, volatility: 0.025, drift: 0.0006, avgVolume: 27675000, logoDomain: 'oyakcimento.com' },
+        PENTA: { name: 'Penta Teknoloji', sector: 'Teknoloji', basePrice: 13.47, volatility: 0.026, drift: 0.0007, avgVolume: 48869999, logoDomain: 'penta.com.tr' },
+        PETKM: { name: 'Petkim Petrokimya', sector: 'Kimya, Petrokimya',  basePrice: 20.94, volatility: 0.025, drift: 0.0004, avgVolume: 44325000, logoDomain: 'petkim.com.tr' },
+        PGSUS: { name: 'Pegasus Hava Taşımacılığı', sector: 'Ulaştırma',  basePrice: 166.50, volatility: 0.018, drift: 0.0003, avgVolume: 4332000, logoDomain: 'flypgs.com' },
+        PSGYO: { name: 'Pasifik GYO', sector: 'Gayrimenkul Yatırım Ortaklığı',  basePrice: 3.29, volatility: 0.032, drift: 0.0003, avgVolume: 108180000, logoDomain: 'pasifikgyo.com.tr' },
+        QUAGR: { name: 'Qua Granite Hayal Yapı', sector: 'İnşaat',  basePrice: 3.41, volatility: 0.026, drift: 0.0003, avgVolume: 106560000, logoDomain: 'qua.com.tr' },
+        SAHOL: { name: 'Sabancı Holding', sector: 'Holding ve Yatırım',  basePrice: 88.40, volatility: 0.023, drift: 0.0006, avgVolume: 5850000, logoDomain: 'sabanci.com' },
+        SASA: { name: 'Sasa Polyester', sector: 'Kimya, Petrokimya',  basePrice: 2.43, volatility: 0.034, drift: 0.0005, avgVolume: 68040000, logoDomain: 'sasa.com.tr' },
+        SAYAS: { name: 'Say Yenilenebilir Enerji', sector: 'Enerji (Üretim/Dağıtım)', basePrice: 45.32, volatility: 0.025, drift: 0.0004, avgVolume: 15930000, logoDomain: 'sayas-re.com' },
+        SDTTR: { name: 'SDT Uzay ve Savunma', sector: 'Savunma Sanayii', basePrice: 264.5, volatility: 0.018, drift: 0.0008, avgVolume: 1861500, logoDomain: 'sdt.com.tr' },
+        SISE: { name: 'Şişecam', sector: 'Cam',  basePrice: 44.20, volatility: 0.028, drift: 0.0005, avgVolume: 22464000, logoDomain: 'sisecam.com' },
+        SKBNK: { name: 'Şekerbank', sector: 'Bankacılık',  basePrice: 19.63, volatility: 0.027, drift: 0.0008, avgVolume: 48915000, logoDomain: 'sekerbank.com.tr' },
+        SMRTG: { name: 'Smart Güneş Enerjisi', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 11.67, volatility: 0.027, drift: 0.0004, avgVolume: 46214999, logoDomain: 'smartsolar.com.tr' },
+        SOKM: { name: 'Şok Marketler', sector: 'Perakende Ticaret',  basePrice: 51.60, volatility: 0.024, drift: 0.0005, avgVolume: 21132000, logoDomain: 'sokmarket.com.tr' },
+        TABGD: { name: 'Tab Gıda Sanayi', sector: 'Gıda, İçecek',  basePrice: 231.30, volatility: 0.013, drift: 0.0003, avgVolume: 1311000, logoDomain: 'tabgida.com.tr' },
+        TAVHL: { name: 'TAV Havalimanları', sector: 'Ulaştırma',  basePrice: 265.50, volatility: 0.018, drift: 0.0008, avgVolume: 1399500, logoDomain: 'tav.aero' },
+        TCELL: { name: 'Turkcell', sector: 'Telekomünikasyon',  basePrice: 108.50, volatility: 0.022, drift: 0.0003, avgVolume: 6611999, logoDomain: 'turkcell.com.tr' },
+        TEZOL: { name: 'Europap Tezol Kağıt', sector: 'Kağıt', basePrice: 15.85, volatility: 0.028, drift: 0.0005, avgVolume: 43110000, logoDomain: 'tezol.com.tr' },
+        THYAO: { name: 'Türk Hava Yolları', sector: 'Ulaştırma',  basePrice: 329.50, volatility: 0.018, drift: 0.0008, avgVolume: 1408500, logoDomain: 'turkishairlines.com' },
+        TKFEN: { name: 'Tekfen Holding', sector: 'Holding ve Yatırım',  basePrice: 145.00, volatility: 0.016, drift: 0.0007, avgVolume: 5856000, logoDomain: 'tekfen.com.tr' },
+        TOASO: { name: 'Tofaş Türk Otomobil Fabrikası', sector: 'Otomotiv',  basePrice: 307.75, volatility: 0.013, drift: 0.0003, avgVolume: 2055000, logoDomain: 'tofas.com.tr' },
+        TSKB: { name: 'TSKB', sector: 'Bankacılık',  basePrice: 11.88, volatility: 0.028, drift: 0.0005, avgVolume: 53910000, logoDomain: 'tskb.com.tr' },
+        TTKOM: { name: 'Türk Telekom', sector: 'Telekomünikasyon',  basePrice: 58.15, volatility: 0.017, drift: 0.0006, avgVolume: 10962000, logoDomain: 'turktelekom.com.tr' },
+        TTRAK: { name: 'Türk Traktör', sector: 'Otomotiv',  basePrice: 437.50, volatility: 0.013, drift: 0.0003, avgVolume: 1949999, logoDomain: 'turktraktor.com.tr' },
+        TUPRS: { name: 'Tüpraş', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 289.25, volatility: 0.013, drift: 0.0003, avgVolume: 1355999, logoDomain: 'tupras.com.tr' },
+        TURSG: { name: 'Türkiye Sigorta', sector: 'Sigorta',  basePrice: 6.56, volatility: 0.035, drift: 0.0006, avgVolume: 112050000, logoDomain: 'turkiyesigorta.com.tr' },
+        ULKER: { name: 'Ülker Bisküvi', sector: 'Gıda, İçecek',  basePrice: 97.95, volatility: 0.017, drift: 0.0006, avgVolume: 4181999, logoDomain: 'ulker.com.tr' },
+        VAKBN: { name: 'Vakıflar Bankası', sector: 'Bankacılık',  basePrice: 31.00, volatility: 0.02, drift: 0.0007, avgVolume: 21960000, logoDomain: 'vakifbank.com.tr' },
+        VESBE: { name: 'Vestel Beyaz Eşya', sector: 'Dayanıklı Tüketim', basePrice: 6.33, volatility: 0.033, drift: 0.0004, avgVolume: 77670000, logoDomain: 'vestel.com.tr' },
+        VESTL: { name: 'Vestel Elektronik', sector: 'Dayanıklı Tüketim',  basePrice: 24.80, volatility: 0.028, drift: 0.0005, avgVolume: 28260000, logoDomain: 'vestel.com.tr' },
+        YEOTK: { name: 'Yeo Teknoloji', sector: 'Teknoloji',  basePrice: 91.80, volatility: 0.018, drift: 0.0003, avgVolume: 5676000, logoDomain: 'yeo.com.tr' },
+        YKBNK: { name: 'Yapı ve Kredi Bankası', sector: 'Bankacılık',  basePrice: 33.22, volatility: 0.023, drift: 0.0008, avgVolume: 11034000, logoDomain: 'yapikredi.com.tr' },
+        YYLGD: { name: 'Yayla Agro Gıda', sector: 'Gıda, İçecek', basePrice: 11.4, volatility: 0.023, drift: 0.0006, avgVolume: 30284999, logoDomain: 'yaylaagro.com' },
+        ZOREN: { name: 'Zorlu Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 2.66, volatility: 0.028, drift: 0.0005, avgVolume: 71820000, logoDomain: 'zorluenerji.com.tr' }
     };
 
     /* ──────────────── BIST 100 Symbol Universe (shared watchlist / selector data) ──────────────── */
@@ -312,6 +312,63 @@ const DataController = (() => {
             return ticker + '.IS';
         }
         return ticker;
+    }
+
+    // (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları"
+    // özelliği) Her STOCK_PROFILES girdisine bir `logoDomain` alanı eklendi
+    // (97 BIST100 şirketinin resmi kurumsal web sitesi kök alan adı — web
+    // araştırmasıyla tek tek doğrulanıp toplandı). Bu fonksiyon, o alan
+    // adını Clearbit'in ücretsiz/anahtarsız logo servisine (logo.clearbit.com)
+    // besleyerek gerçek şirket logosu görselinin URL'sini üretiyor. yfinance
+    // BIST hisseleri için doğrudan bir logo alanı sağlamadığından bu,
+    // projenin "gerçek veri" ilkesine en yakın, ücretsiz/pratik yol —
+    // Clearbit'in kendisi de gerçek bir üçüncü taraf servis (uydurma/sahte
+    // görsel üretmiyor, sadece şirketin gerçek web sitesinden logosunu
+    // getiriyor). Alan adı bilinmiyorsa veya Clearbit o alan adı için bir
+    // logo bulamazsa null döner — çağıran taraf (bkz. tradingEngine.js
+    // renderWatchlistRows / tradingChart.js setSymbolHeader) bunu renkli
+    // baş harf rozetine (fallback) düşürüyor, kırık bir görsel ikonu asla
+    // görünmüyor.
+    function getLogoUrl(ticker, size = 64) {
+        const cleanTicker = (ticker || '').replace('.IS', '').toUpperCase();
+        const profile = STOCK_PROFILES[cleanTicker];
+        if (!profile || !profile.logoDomain) return null;
+        return `https://logo.clearbit.com/${profile.logoDomain}?size=${size}`;
+    }
+
+    // Bir sembol için, üçüncü taraf logo servisi hiç yoksa ya da o servis
+    // bu alan adı için bir görsel döndürmezse (ör. yeni/az bilinen bir
+    // şirket, Clearbit'in kendi veritabanında olmayabilir) kullanılacak
+    // basit, deterministik renkli baş harf rozeti — aynı sembol her zaman
+    // aynı rengi/harfleri üretir, kırık bir görsel ikonu asla görünmez.
+    function getLogoFallback(ticker) {
+        const t = (ticker || '').replace('.IS', '').toUpperCase();
+        const initials = t.slice(0, 2) || '--';
+        let hash = 0;
+        for (let i = 0; i < t.length; i++) hash = (hash * 31 + t.charCodeAt(i)) >>> 0;
+        const hue = hash % 360;
+        return { initials, color: `hsl(${hue}, 48%, 36%)` };
+    }
+
+    // Watchlist satırı, grafik sembol başlığı ve ısı haritası gibi birden
+    // fazla yerde AYNI logo+rozet markup'ını tekrar tekrar elle yazmamak
+    // için tek bir HTML üretici — img yüklenemezse (onerror) otomatik olarak
+    // yanındaki gizli rozet span'ını gösterip kendini gizliyor, hiçbir ek JS
+    // olay dinleyicisi kaydına gerek yok (innerHTML ile toplu enjekte edilen
+    // watchlist satırlarında bu önemli — her satıra ayrı ayrı dinleyici
+    // bağlamak yerine, tek satırlık inline `onerror` yeterli).
+    function buildLogoHtml(ticker, sizePx = 20) {
+        const url = getLogoUrl(ticker, Math.max(32, sizePx * 2));
+        const { initials, color } = getLogoFallback(ticker);
+        let inner;
+        if (url) {
+            inner = `<img class="stock-logo-img" src="${url}" alt="" loading="lazy" ` +
+                `onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` +
+                `<span class="stock-logo-fallback" style="display:none;background:${color};">${initials}</span>`;
+        } else {
+            inner = `<span class="stock-logo-fallback" style="display:flex;background:${color};">${initials}</span>`;
+        }
+        return `<span class="stock-logo-wrap" style="width:${sizePx}px;height:${sizePx}px;">${inner}</span>`;
     }
 
     function generateOHLCV(ticker, days = TRADING_DAYS) {
@@ -1927,6 +1984,9 @@ const DataController = (() => {
         BIST100,
         TRADING_DAYS,
         isMarketOpenNow,
+        getLogoUrl,
+        getLogoFallback,
+        buildLogoHtml,
 
         // Data generation
         generateOHLCV,

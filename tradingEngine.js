@@ -1321,11 +1321,19 @@ const TradingEngine = (() => {
         if (!body) return;
         let html = '';
         DC.BIST100.forEach(({ symbol, name }) => {
+            // (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
+            // Sembol/isim yığınının soluna, DataController'ın tek ortak
+            // üretici fonksiyonuyla (bkz. buildLogoHtml) gerçek şirket logosu
+            // (bulunamazsa renkli baş harf rozeti) ekleniyor.
+            const logoHtml = DC.buildLogoHtml ? DC.buildLogoHtml(symbol, 20) : '';
             html += `
                 <div class="watchlist-row" data-symbol="${symbol}" data-name="${name.toLowerCase()}">
-                    <div class="wl-main">
-                        <span class="wl-symbol">${symbol}</span>
-                        <span class="wl-name">${name}</span>
+                    <div class="wl-left">
+                        ${logoHtml}
+                        <div class="wl-main">
+                            <span class="wl-symbol">${symbol}</span>
+                            <span class="wl-name">${name}</span>
+                        </div>
                     </div>
                     <span class="wl-spark-wrap"><canvas class="wl-spark" id="wl-spark-${symbol}" width="46" height="18"></canvas></span>
                     <div class="wl-price-col">
