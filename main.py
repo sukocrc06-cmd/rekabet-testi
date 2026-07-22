@@ -8,6 +8,7 @@ import yfinance as yf
 import io
 import gc
 import os
+import re
 import requests
 import pandas as pd
 import numpy as np
@@ -70,21 +71,58 @@ _HISTORY_CACHE_TTL_SEC = 60
 _history_cache = {}  # key: (formatted_ticker, period, interval) -> (timestamp, DataFrame)
 
 
-def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: str, timeout: int = 10):
-    key = (formatted, period, interval)
-    now = time.time()
-    cached = _history_cache.get(key)
-    if cached and (now - cached[0]) < _HISTORY_CACHE_TTL_SEC:
-        return cached[1]
-    df = stock.history(period=period, interval=interval, timeout=timeout)
-    if df is not None and not df.empty:
-        _history_cache[key] = (now, df)
-    return df
-
-
 def _is_rate_limit_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(marker in text for marker in ("429", "too many requests", "rate limit", "rate-limited"))
+
+
+# (22 Temmuz 2026, on ikinci oturum — "Yahoo Finance dayanıklılığı")
+# `_is_rate_limit_error` daha önce sadece HATA MESAJINI sınıflandırmak için
+# kullanılıyordu (kullanıcıya gösterilecek dostane metni seçmek için) — ama
+# gerçek bir yeniden-deneme (retry) hiç yapılmıyordu: geçici bir 429 anında
+# tüm istek başarısız oluyor ve kullanıcı "veri alınamadı" görüyordu, oysa
+# birkaç saniye sonra genelde aynı istek başarılı olurdu. Bu sarmalayıcı,
+# SADECE rate-limit olarak tanınan hatalarda, artan bir gecikmeyle (1.5s,
+# 3.0s, ...) sınırlı sayıda tekrar deniyor. Gerçek hatalar (kötü sembol,
+# "no data found", genel ağ kopması vb.) hiç yeniden denenmiyor — bunları
+# tekrar denemek sadece aynı sonucu geç vermek olurdu; zaten çağıran taraf
+# bu durumlarda kendi (fallback simülasyon / dostane hata mesajı) mantığını
+# hemen devreye sokuyor.
+def _yf_call_with_backoff(fn, retries: int = 1, base_delay: float = 1.5, label: str = ""):
+    attempt = 0
+    while True:
+        try:
+            return fn()
+        except Exception as e:
+            if attempt >= retries or not _is_rate_limit_error(e):
+                raise
+            delay = base_delay * (attempt + 1)
+            print(f"[yf-backoff] {label or 'call'} rate-limited, {delay:.1f}s sonra tekrar denenecek (deneme {attempt + 1}/{retries})")
+            time.sleep(delay)
+            attempt += 1
+
+
+# (22 Temmuz 2026, on ikinci oturum — "Yahoo Finance dayanıklılığı") Sadece
+# FORMAT/şekil kontrolü — BIST100 üyelik listesi burada KASITLI olarak
+# tekrarlanmıyor. O tam liste (97 sembol) yalnızca frontend'in
+# dataController.js dosyasında tek doğruluk kaynağı (single source of
+# truth) olarak yaşıyor; onu Python tarafında da ayrı bir listeye
+# kopyalamak, iki listenin zamanla birbirinden sapması riskini
+# doğururdu (biri güncellenir, diğeri unutulur). Bu fonksiyon yalnızca
+# apaçık bozuk girdiyi (boş, noktalama/boşluk içeren, aşırı uzun) hızlı
+# bir 400 ile eleyip yfinance'e hiç gitmeden reddediyor — asıl "bu sembol
+# BIST100'de var mı" doğrulaması zaten yfinance'in kendi "no data found"
+# yanıtından geliyor.
+_TICKER_FORMAT_RE = re.compile(r"^[A-Z0-9]{2,10}$")
+
+
+def _is_valid_ticker_format(ticker: str) -> bool:
+    if not ticker:
+        return False
+    bare = ticker.upper().strip()
+    if bare.endswith(".IS"):
+        bare = bare[:-3]
+    return bool(_TICKER_FORMAT_RE.match(bare))
 
 
 def _friendly_fetch_error(exc: Exception) -> str:
@@ -95,6 +133,21 @@ def _friendly_fetch_error(exc: Exception) -> str:
             "otomatik olarak gerçekçi simülasyon fiyatlarını gösterecek."
         )
     return f"Data fetch timed out or failed: {str(exc)}"
+
+
+def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: str, timeout: int = 10):
+    key = (formatted, period, interval)
+    now = time.time()
+    cached = _history_cache.get(key)
+    if cached and (now - cached[0]) < _HISTORY_CACHE_TTL_SEC:
+        return cached[1]
+    df = _yf_call_with_backoff(
+        lambda: stock.history(period=period, interval=interval, timeout=timeout),
+        label=f"history({formatted})"
+    )
+    if df is not None and not df.empty:
+        _history_cache[key] = (now, df)
+    return df
 
 
 class BacktestRequest(BaseModel):
@@ -416,6 +469,11 @@ async def list_stocks():
 
 @app.get("/api/v1/ohlcv/{ticker}")
 def get_data(ticker: str):
+    if not _is_valid_ticker_format(ticker):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Geçersiz sembol formatı: '{ticker}'"}
+        )
     try:
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
@@ -459,6 +517,11 @@ _fundamentals_cache = {}  # formatted_ticker -> (timestamp, dict)
 
 @app.get("/api/v1/fundamentals/{ticker}")
 def get_fundamentals(ticker: str):
+    if not _is_valid_ticker_format(ticker):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Geçersiz sembol formatı: '{ticker}'"}
+        )
     try:
         formatted = format_ticker(ticker)
         now = time.time()
@@ -531,8 +594,12 @@ _quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}}
 
 @app.post("/api/v1/quotes")
 def get_quotes(request: QuotesRequest):
-    tickers = [t.upper().strip() for t in request.tickers if t and t.strip()]
-    tickers = tickers[:150]  # makul bir üst sınır (watchlist zaten ~97 sembol)
+    raw_tickers = [t.upper().strip() for t in request.tickers if t and t.strip()]
+    raw_tickers = raw_tickers[:150]  # makul bir üst sınır (watchlist zaten ~97 sembol)
+    tickers = [t for t in raw_tickers if _is_valid_ticker_format(t)]
+    skipped = [t for t in raw_tickers if t not in tickers]
+    if skipped:
+        print(f"[quotes] Bozuk formatlı {len(skipped)} sembol toplu istekten atlandı: {skipped}")
     if not tickers:
         return {"quotes": {}, "asOf": None}
 
@@ -547,14 +614,17 @@ def get_quotes(request: QuotesRequest):
 
     quotes = {}
     try:
-        raw = yf.download(
-            tickers=list(formatted_map.keys()),
-            period="1d",
-            interval="1d",
-            group_by="ticker",
-            threads=True,
-            progress=False,
-            session=session,
+        raw = _yf_call_with_backoff(
+            lambda: yf.download(
+                tickers=list(formatted_map.keys()),
+                period="1d",
+                interval="1d",
+                group_by="ticker",
+                threads=True,
+                progress=False,
+                session=session,
+            ),
+            label="quotes toplu indirme"
         )
         single = len(formatted_map) == 1
         for formatted, original in formatted_map.items():
@@ -595,7 +665,7 @@ def run_backtest(request: BacktestRequest):
                 record["Date"] = str(record["Date"])
                 
         print("4: Calculation started")
-        metrics = StrategyEngine.calculate_metrics(data)
+        metrics = StrategyEngine.calculate_metrics(data, request.engine_id)
         
         # Format candles for frontend candlestick chart mapping
         formatted_candles = []
@@ -662,7 +732,7 @@ def _extract_fast_price(stock: "yf.Ticker"):
     "bu turda gerçek fiyat yok" olarak yorumlayıp bir sonraki turu bekliyor).
     """
     try:
-        fast = stock.fast_info
+        fast = _yf_call_with_backoff(lambda: stock.fast_info, label="fast_info")
     except Exception:
         return None
     for accessor in (
@@ -733,7 +803,10 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
             if real_price is None:
                 # Yedek yol: son 1 günlük/1 dakikalık barın kapanışı.
                 try:
-                    recent = stock.history(period="1d", interval="1m", timeout=8)
+                    recent = _yf_call_with_backoff(
+                        lambda: stock.history(period="1d", interval="1m", timeout=8),
+                        label=f"live fallback history({ticker})"
+                    )
                     if not recent.empty:
                         real_price = float(recent["Close"].iloc[-1])
                 except Exception as e:
@@ -779,8 +852,8 @@ def export_report(request: PDFRequest):
             for record in data:
                 if "Date" in record:
                     record["Date"] = str(record["Date"])
-            metrics = StrategyEngine.calculate_metrics(data)
-            
+            metrics = StrategyEngine.calculate_metrics(data, request.engine_id)
+
         total_profit = metrics.get("total_profit", request.total_profit)
         win_rate = metrics.get("win_rate", request.win_rate)
         trade_count = metrics.get("trade_count", request.trade_count)
