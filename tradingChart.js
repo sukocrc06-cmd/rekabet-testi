@@ -3223,19 +3223,21 @@ const TradingChart = (() => {
         if (isSelected) drawCtx.setLineDash([5, 3]);
 
         if (shape.type === 'trend') {
-            // (23 Temmuz 2026 düzeltmesi) Kullanıcı isteği: bir trend çizgisi
-            // çizildikten sonra p1→p2 yönünde grafiğin sağ kenarına (mevcut
-            // boş sağ marj alanına) kadar uzamalı, sadece iki tıklanan nokta
-            // arasında kalıp kesilmemeli. "Işın" (ray) aracıyla aynı
-            // `extendLineToEdge()` mantığı kullanılıyor; SEÇİM/uç-nokta
-            // tutamaçları yine gerçek p1/p2 konumunda kalıyor (bkz.
-            // hitTestHandle/hitTestDrawings) — yalnızca GÖRSEL çizim daha
-            // ileri gidiyor, altta yatan veri (ve dolayısıyla taşıma/eğim
-            // düzenleme) değişmedi.
-            const extFwd = extendLineToEdge(a, b, rect);
+            // (23 Temmuz 2026, İKİNCİ düzeltme) Bir önceki turda buraya
+            // 'ray' ile AYNI extendLineToEdge() mantığı eklenmişti ("sağa da
+            // gitmeli" isteğine karşılık). Kullanıcı geri bildirimi bunun
+            // pratikte "ışın gibi" göründüğünü ve istenmediğini gösterdi —
+            // çünkü kısa/dik bir trend çizgisinin eğimi, kalan tüm barlara
+            // yayılınca fiyat ekseninde çok abartılı bir sıçrama gibi
+            // görünüyor (tam olarak 'ray' aracının YAPMASI GEREKEN şey, ama
+            // 'trend' için istenmeyen bir yan etki). Bu yüzden 'trend'
+            // GERİ ALINDI: yalnızca çizilen p1→p2 arasında düz bir segment,
+            // uzatma YOK. Sağa doğru uzatma isteyen bir kullanıcı zaten
+            // ayrı, bunun için var olan 'ray' (Işın) veya 'extended'
+            // (Genişletilmiş Çizgi) araçlarını seçebilir.
             drawCtx.beginPath();
             drawCtx.moveTo(a.x, a.y);
-            drawCtx.lineTo(extFwd.x, extFwd.y);
+            drawCtx.lineTo(b.x, b.y);
             drawCtx.stroke();
         } else if (shape.type === 'trend_projection') {
             // (18 Temmuz 2026, onuncu oturum, ikinci tur) Doğrusal trend
