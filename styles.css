@@ -1945,11 +1945,65 @@ body {
     height: 18px;
 }
 
+/* (23 Temmuz 2026 düzeltmesi — izleme listesi ekle/çıkar özelliği)
+   .wl-price-col'u ve varsa yanındaki ekle/çıkar aksiyonunu (× kaldır
+   düğmesi ya da "zaten listede" rozeti) yan yana tutan sarmalayıcı; bu
+   sayede satırın üst düzey flex çocuğu sayısı (space-between ile
+   dağıtılan) 3'te sabit kalıyor — wl-left / wl-spark-wrap / wl-right. */
+.wl-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
 .wl-price-col {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 1px;
+}
+
+.wl-remove-btn {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    line-height: 16px;
+    text-align: center;
+    border: 1px solid var(--tint-025);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.55;
+    transition: var(--transition-fast);
+}
+
+.watchlist-row:hover .wl-remove-btn {
+    opacity: 1;
+}
+
+.wl-remove-btn:hover {
+    background-color: rgba(198, 40, 40, 0.16);
+    border-color: rgba(198, 40, 40, 0.45);
+    color: #E57373;
+}
+
+.wl-inlist-badge {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--gold);
+    opacity: 0.8;
+}
+
+.watchlist-empty {
+    padding: 18px 14px;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-muted);
 }
 
 .wl-price {
@@ -4335,6 +4389,46 @@ body.compact-mode .status-item {
     padding: 5px 8px;
     background-color: var(--tint-02);
     border-radius: 4px;
+}
+
+/* (23 Temmuz 2026 düzeltmesi — Normal Seans / VİOP ayrımı) Trade tab'ların
+   hemen üstünde duran, hangi piyasada işlem yapıldığını seçen bar. Solda
+   Normal Seans (varsayılan, kaldıraçsız/açığa satışsız), sağda VİOP
+   (kaldıraç + açığa satış). VİOP aktifken ayırt edici bir turuncu/amber
+   renk kullanılıyor ki kullanıcı riskli moddayken bunu net görsün. */
+.market-mode-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 3px;
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-input);
+}
+
+.market-mode-btn {
+    flex: 1;
+    padding: 7px 0;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background-color: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.market-mode-btn[data-market="NORMAL"].active {
+    background-color: var(--gold-dim);
+    color: var(--gold);
+}
+
+.market-mode-btn[data-market="VIOP"].active {
+    background-color: rgba(255, 152, 0, 0.16);
+    color: #FF9800;
 }
 
 .trade-tabs {

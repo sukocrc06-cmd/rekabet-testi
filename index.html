@@ -583,6 +583,17 @@
                 </div>
 
                 <div class="panel-subtab-content active" id="panel-tab-trade">
+                    <!-- (23 Temmuz 2026 düzeltmesi) Normal Seans / VİOP ayrımı: kullanıcı
+                         geri bildirimi "elimde hisse yok ama SAT deyince direkt short
+                         açıyor" — gerçek BIST'te açığa satış ve kaldıraç yalnızca VİOP'ta
+                         mümkündür, normal (nakit) seansta mümkün değildir. Sol: Normal
+                         Seans (yalnızca elde bulunanı satabilirsiniz, kaldıraç yok).
+                         Sağ: VİOP (kaldıraç + açığa satış serbest — önceki davranış). -->
+                    <div class="market-mode-tabs" role="tablist" aria-label="Piyasa modu">
+                        <button type="button" id="qt-market-normal" class="market-mode-btn active" data-market="NORMAL">Normal Seans</button>
+                        <button type="button" id="qt-market-viop" class="market-mode-btn" data-market="VIOP" title="Vadeli İşlem ve Opsiyon Piyasası: kaldıraç ve açığa satış">VİOP</button>
+                    </div>
+
                     <!-- Buy / Sell tabs -->
                     <div class="trade-tabs">
                         <button type="button" id="qt-tab-buy" class="trade-tab tab-buy active">AL</button>
@@ -611,7 +622,7 @@
                          açılırken seçilen kaldıraç, gereken teminatı (marj) düşürüyor —
                          gerçek P&L büyüklüğü değişmiyor, sadece ne kadar bakiye kilitlendiği
                          değişiyor. Demo/simülasyon amaçlıdır, gerçek bir marjin hesabı değildir. -->
-                    <div class="form-group">
+                    <div class="form-group" id="qt-leverage-group">
                         <label>Kaldıraç <span class="leverage-warning-hint" id="leverage-warning-hint" style="display:none;">— yüksek kaldıraç likidasyon riskini artırır</span></label>
                         <div class="leverage-selector" role="group" aria-label="Kaldıraç seçimi">
                             <button type="button" class="leverage-btn active" data-leverage="1">1x</button>

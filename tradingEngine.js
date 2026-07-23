@@ -25,12 +25,52 @@ const TradingEngine = (() => {
 
     const STORAGE_KEY = 'optipulselab_paper_portfolio_v1';
     const LAST_SYMBOL_STORAGE_KEY = 'optipulselab_last_symbol_v1';
+    // (23 Temmuz 2026 düzeltmesi) Kullanıcı geri bildirimi: "izleme listesine
+    // hisse ekleme çıkarma yerlerini değiştirme vb özellikleri ekleyelim" —
+    // önceden "İzleme Listesi" her zaman TÜM BIST100'ü (97 sembol) gösteriyor,
+    // Sembol Ara kutusu da yalnızca bu sabit listeyi filtreliyordu (satırları
+    // gizleyip/gösteriyordu, gerçek bir "ekleme/çıkarma" yoktu). Artık
+    // kullanıcının kendi seçtiği, kalıcı bir izleme listesi var.
+    const WATCHLIST_STORAGE_KEY = 'optipulselab_watchlist_symbols_v1';
     const DEFAULT_BALANCE = 100000;
     const TICK_MS = 2000;
 
     let DC = null;
     let priceProfiles = {};
     let portfolio = null;
+    // Set<string> — kullanıcının izleme listesindeki semboller. İlk çalıştırmada
+    // (localStorage'da hiç kayıt yoksa) TÜM BIST100 ile başlatılıyor, böylece
+    // mevcut kullanıcılar için görünüm ANINDA değişmiyor — yalnızca bundan sonra
+    // ekleme/çıkarma yaptıklarında liste küçülüp büyüyebiliyor.
+    let watchlistSymbols = new Set();
+
+    function loadWatchlistSymbols() {
+        try {
+            const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) return new Set(arr);
+            }
+        } catch (e) { /* bozuk/erişilemeyen depolama — varsayılana düş */ }
+        const all = new Set(DC.BIST100.map(s => s.symbol));
+        saveWatchlistSymbols(all);
+        return all;
+    }
+    function saveWatchlistSymbols(set) {
+        try { localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(Array.from(set || watchlistSymbols))); } catch (e) { /* private mode vb. */ }
+    }
+    function addToWatchlist(symbol) {
+        if (watchlistSymbols.has(symbol)) return;
+        watchlistSymbols.add(symbol);
+        saveWatchlistSymbols();
+        showToast(`${symbol} izleme listesine eklendi.`);
+    }
+    function removeFromWatchlist(symbol) {
+        if (!watchlistSymbols.has(symbol)) return;
+        watchlistSymbols.delete(symbol);
+        saveWatchlistSymbols();
+        showToast(`${symbol} izleme listesinden çıkarıldı.`);
+    }
 
     const state = {
         activeSymbol: null,
@@ -38,8 +78,12 @@ const TradingEngine = (() => {
         orderType: 'MARKET',  // MARKET | LIMIT
         watchlistFilter: '',
         heatmapGroupBy: 'sector', // 'sector' | 'flat' — Isı Haritası gruplama modu (17 Temmuz 2026, yedinci oturum)
-        leverage: 1 // Kaldıraç — trading ticket'ta seçilen değer, yeni pozisyon açılırken kullanılır
+        leverage: 1, // Kaldıraç — trading ticket'ta seçilen değer, yeni pozisyon açılırken kullanılır
+        // (23 Temmuz 2026 düzeltmesi) 'NORMAL' | 'VIOP' — bkz. checkNormalModeShortBlock.
+        // Normal seansta açığa satış/kaldıraç yok; VİOP eski (değişmeyen) davranışı kullanır.
+        market: 'NORMAL'
     };
+    const MARKET_MODE_STORAGE_KEY = 'optipulselab_market_mode_v1';
 
     // Bir pozisyon likide edilmeden önce izin verilen maksimum marj kaybı
     // oranı — gerçek borsalarda "maintenance margin" karşılığı. %80 kayıp =
@@ -98,6 +142,17 @@ const TradingEngine = (() => {
         return v.toLocaleString('tr-TR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     }
     function genId() { return 'ord_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+    // (23 Temmuz 2026 düzeltmesi) Bir pozisyona farklı kaldıraçlarla birden
+    // fazla kez eklenebildiği için (bkz. placeOrder) saklanan kaldıraç artık
+    // adet-ağırlıklı bir ortalama olabilir (ör. 3.4x) — avgPrice zaten aynı
+    // şekilde ağırlıklı ortalanıyordu, kaldıraç da tutarlılık için aynı
+    // deseni izliyor. Bu yardımcı, tam sayıysa "5x", değilse en fazla 2
+    // ondalıkla ("3.4x") gösterip gereksiz sondaki sıfırları temizliyor.
+    function fmtLeverage(v) {
+        const n = Number(v) || 1;
+        const rounded = Math.round(n * 100) / 100;
+        return (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
+    }
 
     /* ════════════════════════════════════════════════
        Portfolio persistence
@@ -1363,16 +1418,50 @@ const TradingEngine = (() => {
        Watchlist
        ════════════════════════════════════════════════ */
 
+    // (23 Temmuz 2026 düzeltmesi) İki modu var:
+    //  - Arama kutusu BOŞ: yalnızca kullanıcının kendi izleme listesindeki
+    //    semboller gösteriliyor (watchlistSymbols), her satırda bir "×"
+    //    kaldırma düğmesiyle.
+    //  - Arama kutusuna bir şey yazılınca: TÜM BIST100 arasında sembol/isim
+    //    eşleşmesi aranıp sonuçlar gösteriliyor (izleme listesinde olsun ya
+    //    da olmasın) — bir sonuca TIKLAMAK onu (henüz listede değilse)
+    //    izleme listesine EKLİYOR ve grafik sembolü olarak seçiyor, sonra
+    //    arama kutusu temizlenip normal (yalnızca-izleme-listesi) görünüme
+    //    dönülüyor. Bu, kullanıcının istediği "ara → bul → tıkla → listeye
+    //    eklensin" akışını karşılıyor.
     function renderWatchlistRows() {
         const body = byId('watchlist-body');
         if (!body) return;
+        const label = document.querySelector('.watchlist-form-group > label');
+        const term = (state.watchlistFilter || '').trim().toLowerCase();
+        const searching = term.length > 0;
+
+        const list = searching
+            ? DC.BIST100.filter(({ symbol, name }) => symbol.toLowerCase().includes(term) || name.toLowerCase().includes(term))
+            : DC.BIST100.filter(({ symbol }) => watchlistSymbols.has(symbol));
+
+        if (label) label.textContent = searching ? `Arama Sonuçları (${list.length})` : 'İzleme Listesi';
+
+        if (!list.length) {
+            body.innerHTML = searching
+                ? `<div class="watchlist-empty">Eşleşen sembol bulunamadı.</div>`
+                : `<div class="watchlist-empty">İzleme listeniz boş. Yukarıdaki "Sembol Ara" kutusuyla hisse arayıp ekleyebilirsiniz.</div>`;
+            return;
+        }
+
         let html = '';
-        DC.BIST100.forEach(({ symbol, name }) => {
+        list.forEach(({ symbol, name }) => {
             // (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
             // Sembol/isim yığınının soluna, DataController'ın tek ortak
             // üretici fonksiyonuyla (bkz. buildLogoHtml) gerçek şirket logosu
             // (bulunamazsa renkli baş harf rozeti) ekleniyor.
             const logoHtml = DC.buildLogoHtml ? DC.buildLogoHtml(symbol, 20) : '';
+            const inList = watchlistSymbols.has(symbol);
+            // Arama modunda TÜM sonuçlar tıklanınca ekler; normal modda
+            // yalnızca kaldırma ikonu anlamlı (satır zaten listede).
+            const actionBtn = searching
+                ? (inList ? `<span class="wl-inlist-badge" title="Zaten izleme listenizde">✓</span>` : '')
+                : `<button type="button" class="wl-remove-btn" data-remove-symbol="${symbol}" title="İzleme listesinden çıkar">×</button>`;
             html += `
                 <div class="watchlist-row" data-symbol="${symbol}" data-name="${name.toLowerCase()}">
                     <div class="wl-left">
@@ -1383,9 +1472,12 @@ const TradingEngine = (() => {
                         </div>
                     </div>
                     <span class="wl-spark-wrap"><canvas class="wl-spark" id="wl-spark-${symbol}" width="46" height="18"></canvas></span>
-                    <div class="wl-price-col">
-                        <span class="wl-price" id="wl-price-${symbol}">--</span>
-                        <span class="wl-change" id="wl-change-${symbol}">--</span>
+                    <div class="wl-right">
+                        <div class="wl-price-col">
+                            <span class="wl-price" id="wl-price-${symbol}">--</span>
+                            <span class="wl-change" id="wl-change-${symbol}">--</span>
+                        </div>
+                        ${actionBtn}
                     </div>
                 </div>
             `;
@@ -1394,12 +1486,29 @@ const TradingEngine = (() => {
 
         body.querySelectorAll('.watchlist-row').forEach(row => {
             row.addEventListener('click', () => {
-                selectSymbol(row.dataset.symbol);
+                const symbol = row.dataset.symbol;
+                if (searching) {
+                    addToWatchlist(symbol);
+                    const input = byId('watchlist-search');
+                    if (input) input.value = '';
+                    state.watchlistFilter = '';
+                }
+                selectSymbol(symbol);
+                renderWatchlistRows();
+                renderWatchlistPrices();
                 // Dar ekranda (980px altı) sidebar bir kayar panel — sembol
                 // seçilince otomatik kapanıp grafiği göstersin.
                 if (typeof window.__optipulseCloseMobileDrawers === 'function') {
                     window.__optipulseCloseMobileDrawers();
                 }
+            });
+        });
+
+        body.querySelectorAll('.wl-remove-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeFromWatchlist(btn.dataset.removeSymbol);
+                renderWatchlistRows();
             });
         });
 
@@ -1495,16 +1604,19 @@ const TradingEngine = (() => {
         });
     }
 
+    // (23 Temmuz 2026 düzeltmesi) Önceden bu arama yalnızca mevcut 97
+    // satırı gizleyip/gösteriyordu (gerçek bir ekleme yoktu). Artık
+    // renderWatchlistRows() arama terimine göre TÜM BIST100'de arayıp
+    // sonuçları tamamen yeniden çiziyor (satırlara tıklamak izleme
+    // listesine ekliyor, bkz. renderWatchlistRows) — bu yüzden burada
+    // sadece state.watchlistFilter'ı güncelleyip yeniden çizmek yeterli.
     function setupWatchlistSearch() {
         const input = byId('watchlist-search');
         if (!input) return;
         input.addEventListener('input', () => {
-            const term = input.value.trim().toLowerCase();
-            state.watchlistFilter = term;
-            document.querySelectorAll('.watchlist-row').forEach(row => {
-                const match = !term || row.dataset.symbol.toLowerCase().includes(term) || row.dataset.name.includes(term);
-                row.style.display = match ? 'flex' : 'none';
-            });
+            state.watchlistFilter = input.value.trim().toLowerCase();
+            renderWatchlistRows();
+            renderWatchlistPrices();
         });
     }
 
@@ -1700,6 +1812,7 @@ const TradingEngine = (() => {
         });
 
         setupLeverageSelector();
+        setupMarketModeSelector();
 
         if (submitBtn) submitBtn.addEventListener('click', submitOrder);
         if (resetBtn) resetBtn.addEventListener('click', () => {
@@ -1828,6 +1941,45 @@ const TradingEngine = (() => {
         }
     }
 
+    // (23 Temmuz 2026 düzeltmesi — Normal Seans / VİOP ayrımı) Trade
+    // ticket'ının üstündeki iki butonlu bar: Normal Seans (varsayılan;
+    // kaldıraç seçici tamamen gizleniyor ve state.leverage 1x'e zorlanıyor)
+    // ile VİOP (kaldıraç seçici tekrar görünür, açığa satış serbest — eski
+    // davranış). Seçim localStorage'a yazılıyor ki sayfa yenilense de kalsın.
+    function setupMarketModeSelector() {
+        const normalBtn = byId('qt-market-normal');
+        const viopBtn = byId('qt-market-viop');
+        const leverageGroup = byId('qt-leverage-group');
+        if (!normalBtn || !viopBtn) return;
+
+        function apply(mode) {
+            state.market = mode === 'VIOP' ? 'VIOP' : 'NORMAL';
+            normalBtn.classList.toggle('active', state.market === 'NORMAL');
+            viopBtn.classList.toggle('active', state.market === 'VIOP');
+            if (leverageGroup) leverageGroup.style.display = state.market === 'VIOP' ? '' : 'none';
+
+            if (state.market === 'NORMAL') {
+                // Normal seansta kaldıraç kavramı yok — 1x'e sabitle ve
+                // seçici görünür kalsaydı yanıltıcı olurdu diye zaten gizli.
+                applyLeverage(1);
+                document.querySelectorAll('.leverage-btn').forEach(b => b.classList.toggle('active', b.dataset.leverage === '1'));
+                document.querySelectorAll('.leverage-quick-chip').forEach(c => c.classList.remove('active'));
+                const customInput = byId('leverage-custom-input');
+                if (customInput) customInput.value = '';
+            }
+
+            try { localStorage.setItem(MARKET_MODE_STORAGE_KEY, state.market); } catch (e) { /* private mode */ }
+            updateEstimate();
+        }
+
+        normalBtn.addEventListener('click', () => apply('NORMAL'));
+        viopBtn.addEventListener('click', () => apply('VIOP'));
+
+        let saved = null;
+        try { saved = localStorage.getItem(MARKET_MODE_STORAGE_KEY); } catch (e) { /* private mode */ }
+        apply(saved === 'VIOP' ? 'VIOP' : 'NORMAL');
+    }
+
     function applyQtyPct(pct) {
         if (!state.activeSymbol) return;
         const price = effectivePrice();
@@ -1937,6 +2089,19 @@ const TradingEngine = (() => {
             return;
         }
 
+        // (23 Temmuz 2026 düzeltmesi — Normal Seans / VİOP ayrımı) Bu kontrol
+        // yalnızca ANINDA gerçekleşen Piyasa/Limit emirleri için geçerli —
+        // OCO'nun kendi "alt tetik" (SAT yönü) kontrolü ayrıca
+        // submitOcoOrder() içinde yapılıyor, çünkü OCO'da yön AL/SAT
+        // sekmesinden değil hangi tetikleyicinin (üst/alt) önce
+        // gerçekleştiğinden belirleniyor.
+        const shortBlockMsg = checkNormalModeShortBlock(state.activeSymbol, state.side, qty);
+        if (shortBlockMsg) {
+            showToast(shortBlockMsg);
+            showTicketAlert(shortBlockMsg, 'error');
+            return;
+        }
+
         // Optional Stop-Loss / Take-Profit attached to the position this order opens/adds to.
         const sltpToggle = byId('qt-sltp-toggle');
         let slPrice = null, tpPrice = null;
@@ -1967,13 +2132,18 @@ const TradingEngine = (() => {
             showToast(`Limit emir ${fmtPrice(price)} seviyesinden gerçekleşti (demo).`);
         }
 
-        // Var olan bir pozisyon farklı bir kaldıraçla açıksa, ekleme mevcut
-        // pozisyonun kaldıracıyla yapılacak (placeOrder içinde) — kullanıcıyı
-        // bilgilendir ki ticket'taki seçimin neden yansımadığını anlasın.
+        // (23 Temmuz 2026 düzeltmesi) Var olan bir pozisyon FARKLI bir
+        // kaldıraçla açıksa, artık bilette seçili kaldıraç ekleme kısmına
+        // GERÇEKTEN uygulanıyor (placeOrder'daki değişikliğe bkz.) — eskiden
+        // olduğu gibi sessizce eski kaldıraca zorlanmıyor. Pozisyonun
+        // saklanan kaldıracı, avgPrice ile aynı şekilde adet-ağırlıklı
+        // ortalamaya güncelleniyor; kullanıcı bunu ticket'ta önceden görsün
+        // diye bilgilendirici bir not gösteriliyor.
         const existingBeforeOrder = portfolio.positions[state.activeSymbol];
         const intendedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
         if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage) {
-            const leverageNote = `Not: ${state.activeSymbol} zaten ${existingBeforeOrder.leverage}x kaldıraçla açık — ekleme de ${existingBeforeOrder.leverage}x ile yapılacak.`;
+            const blendedPreview = (existingBeforeOrder.leverage * existingBeforeOrder.qty + state.leverage * qty) / (existingBeforeOrder.qty + qty);
+            const leverageNote = `Not: ${state.activeSymbol} şu an ${fmtLeverage(existingBeforeOrder.leverage)}x kaldıraçla açık — bu ekleme ${fmtLeverage(state.leverage)}x ile yapılacak, pozisyonun ortalama kaldıracı ${fmtLeverage(blendedPreview)}x olacak.`;
             showToast(leverageNote);
             // (23 Temmuz 2026 düzeltmesi) Bu bilgilendirme mesajı önceden
             // yalnızca footer'a gidiyordu ve hemen ardından placeOrder()
@@ -2059,6 +2229,17 @@ const TradingEngine = (() => {
         if (!upper && !lower) { const m = 'En az bir tetikleyici (üst veya alt) girin.'; showToast(m); showTicketAlert(m, 'error'); return; }
         if (upper !== null && upper <= currentPrice) { const m = 'Üst tetik, güncel fiyatın üzerinde olmalı.'; showToast(m); showTicketAlert(m, 'error'); return; }
         if (lower !== null && lower >= currentPrice) { const m = 'Alt tetik, güncel fiyatın altında olmalı.'; showToast(m); showTicketAlert(m, 'error'); return; }
+
+        // (23 Temmuz 2026 düzeltmesi — Normal Seans / VİOP ayrımı) OCO'da
+        // "alt tetik" gerçekleştiğinde bir SAT emri çalışır (bkz.
+        // checkPendingOcoOrders). Normal seansta bu, elde yeterli LONG
+        // pozisyon olmadan bir açığa satış tetikleyicisi KURULMASINA izin
+        // vermemeli — aksi halde günler sonra fiyat düşünce sessizce bir
+        // short açılabilirdi.
+        if (lower !== null) {
+            const lowerBlockMsg = checkNormalModeShortBlock(state.activeSymbol, 'SELL', qty);
+            if (lowerBlockMsg) { showToast(lowerBlockMsg); showTicketAlert(lowerBlockMsg, 'error'); return; }
+        }
 
         // Bakiye ön-kontrolü (23 Temmuz 2026 düzeltmesi): OCO emri anında
         // gerçekleşmediği için bakiye o an DÜŞÜLMÜYOR, ama tetiklendiğinde
@@ -2181,6 +2362,29 @@ const TradingEngine = (() => {
     // ÖNEMLİ: kaldıraç sadece GEREKEN TEMİNATI azaltıyor; gerçekleşen K/Z
     // büyüklüğü (fiyat farkı × adet) kaldıraçtan etkilenmiyor — gerçek marjin
     // ticaretinde de böyledir.
+    // (23 Temmuz 2026 düzeltmesi) Kullanıcı geri bildirimi: "elimde TUPRS
+    // yok ama sat kısmından direkt SAT deyince short işlem açıyor" — gerçek
+    // BIST'te normal (nakit/Pay Piyasası) seansta açığa satış YAPILAMAZ;
+    // açığa satış ve kaldıraç yalnızca ayrı bir piyasa olan VİOP'ta (Vadeli
+    // İşlem ve Opsiyon Piyasası) mümkündür. Bu yüzden ticket'a bir "Normal
+    // Seans / VİOP" anahtarı eklendi (state.market, bkz. üstteki tanım +
+    // setupMarketModeSelector). NORMAL modda bir SAT emri yalnızca elde
+    // tutulan bir LONG pozisyonu kapatabilir/azaltabilir — yeni bir SHORT
+    // hiçbir şekilde açamaz. VİOP modunda ise DEĞİŞMEYEN eski davranış
+    // geçerli: pozisyon yokken SAT direkt bir SHORT açar, kaldıraç seçilebilir.
+    // null döner (izinli) ya da kullanıcıya gösterilecek hata mesajını döner.
+    function checkNormalModeShortBlock(symbol, side, qty) {
+        if (state.market !== 'NORMAL' || side !== 'SELL') return null;
+        const pos = portfolio.positions[symbol];
+        if (!pos || pos.side !== 'LONG') {
+            return `Normal seansta açığa satış yapılamaz — ${symbol} için pozisyonunuz yok. Açığa satış/kaldıraç için yukarıdan VİOP'a geçin.`;
+        }
+        if (qty > pos.qty) {
+            return `Normal seansta yalnızca elinizdeki kadar satabilirsiniz (mevcut: ${pos.qty} adet). Daha fazlası açığa satış sayılır — VİOP'a geçin.`;
+        }
+        return null;
+    }
+
     // placeOrder()'daki marj hesaplama mantığının salt-okunur (hiçbir şeyi
     // değiştirmeyen) bir kopyası — OCO emri oluştururken erken bir bakiye
     // uyarısı verebilmek için kullanılıyor (bkz. submitOcoOrder). Ters yönde
@@ -2203,11 +2407,12 @@ const TradingEngine = (() => {
         }
         if (remainingQty <= 0) return -releasedMargin;
 
-        const newSide = side === 'BUY' ? 'LONG' : 'SHORT';
-        const existingPos = portfolio.positions[symbol];
-        const effectiveLeverage = (existingPos && existingPos.side === newSide && existingPos.leverage)
-            ? existingPos.leverage
-            : Math.max(1, Number(leverage) || 1);
+        // (23 Temmuz 2026 düzeltmesi) Bu tahmin de artık placeOrder() ile
+        // birebir aynı mantığı izliyor: eklenen kısmın marjı, mevcut
+        // pozisyonun ESKİ kaldıracıyla değil, bilet üzerinde SEÇİLİ olan
+        // (bu fonksiyona parametre olarak gelen) kaldıraçla hesaplanıyor —
+        // bkz. placeOrder()'daki ayrıntılı açıklama.
+        const effectiveLeverage = Math.max(1, Number(leverage) || 1);
         const margin = (price * remainingQty) / effectiveLeverage;
         return margin - releasedMargin;
     }
@@ -2251,17 +2456,32 @@ const TradingEngine = (() => {
             const newSide = side === 'BUY' ? 'LONG' : 'SHORT';
             const openCommission = commissionTotal * (remainingQty / qty);
 
-            // Var olan bir pozisyona ekleniyorsa, pozisyon zaten hangi
-            // kaldıraçla açıldıysa onunla devam ediyor — aynı pozisyon
-            // içinde farklı kaldıraç seviyelerini karıştırmak marj
-            // hesaplamasını belirsizleştirir. Ticket'taki seçim yalnızca
-            // YENİ bir pozisyon açılışında geçerli olur.
+            // (23 Temmuz 2026 düzeltmesi) ÖNCEKİ tasarım: var olan bir
+            // pozisyona ekleniyorsa, bilette SEÇİLİ kaldıraç tamamen yok
+            // sayılıp pozisyonun İLK açıldığı kaldıraç zorla yeniden
+            // kullanılıyordu ("aynı pozisyon içinde farklı kaldıraç
+            // seviyelerini karıştırmak marj hesaplamasını belirsizleştirir"
+            // gerekçesiyle). Kullanıcı geri bildirimi ("bir hisseyi normal
+            // aldıktan sonra kaldıraçlı almak istersem almıyor") bunun
+            // pratikte gerçek bir engel yarattığını gösterdi: ör. normal
+            // (1x) bir THYAO pozisyonu varken 5x ile ekleme yapmaya
+            // çalışıldığında, gereken teminat SESSİZCE 5 kat daha FAZLA
+            // (1x üzerinden) hesaplanıyor, bu da beklenmedik şekilde
+            // "yetersiz bakiye" ile reddediliyordu — kaldıraç seçimi hiç
+            // işe yaramıyordu.
+            //
+            // Yeni tasarım: eklenen kısmın marjı bilette SEÇİLİ kaldıraçla
+            // hesaplanıyor (avgPrice'ın zaten yaptığı gibi), pozisyonun
+            // saklanan kaldıracı da avgPrice ile AYNI adet-ağırlıklı
+            // ortalama yöntemiyle güncelleniyor — böylece marj/likidasyon
+            // formülleri (avgPrice*qty/leverage, bkz. checkMarginCalls ve
+            // computeAccountSnapshot) hiç değişmeden doğru sonucu vermeye
+            // devam ediyor, sadece "leverage" artık tek bir sabit değer
+            // değil, gerçek ağırlıklı ortalama bir değer.
             const existingPos = portfolio.positions[symbol];
-            const effectiveLeverage = (existingPos && existingPos.side === newSide && existingPos.leverage)
-                ? existingPos.leverage
-                : Math.max(1, Number(leverage) || 1);
+            const requestedLeverage = Math.max(1, Number(leverage) || 1);
 
-            const margin = (price * remainingQty) / effectiveLeverage;
+            const margin = (price * remainingQty) / requestedLeverage;
             const requiredBalance = margin + openCommission;
             if (portfolio.balance < requiredBalance) {
                 savePortfolio();
@@ -2269,12 +2489,16 @@ const TradingEngine = (() => {
             }
             portfolio.balance -= requiredBalance;
 
+            let effectiveLeverage;
             if (!existingPos) {
+                effectiveLeverage = requestedLeverage;
                 portfolio.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
             } else {
                 const p = existingPos;
                 const totalQty = p.qty + remainingQty;
+                const oldLeverage = p.leverage || 1;
                 p.avgPrice = (p.avgPrice * p.qty + price * remainingQty) / totalQty;
+                effectiveLeverage = (oldLeverage * p.qty + requestedLeverage * remainingQty) / totalQty;
                 p.qty = totalQty;
                 p.leverage = effectiveLeverage;
             }
@@ -2494,7 +2718,7 @@ const TradingEngine = (() => {
             if (pos.tp) sltpParts.push('TP ₺' + fmtPrice(pos.tp));
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             const leverage = pos.leverage || 1;
-            const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${leverage}x</span>` : '';
+            const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${fmtLeverage(leverage)}x</span>` : '';
             html += `
                 <tr>
                     <td class="font-bold">${symbol}${sltpSub}</td>
@@ -2967,6 +3191,7 @@ const TradingEngine = (() => {
         priceProfiles = buildPriceProfiles();
         portfolio = loadPortfolio();
         priceAlerts = loadAlerts();
+        watchlistSymbols = loadWatchlistSymbols();
 
         renderWatchlistRows();
         renderWatchlistPrices();
