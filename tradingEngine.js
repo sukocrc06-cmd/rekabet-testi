@@ -2037,6 +2037,23 @@ const TradingEngine = (() => {
         if (upper !== null && upper <= currentPrice) { showToast('Üst tetik, güncel fiyatın üzerinde olmalı.'); return; }
         if (lower !== null && lower >= currentPrice) { showToast('Alt tetik, güncel fiyatın altında olmalı.'); return; }
 
+        // Bakiye ön-kontrolü (23 Temmuz 2026 düzeltmesi): OCO emri anında
+        // gerçekleşmediği için bakiye o an DÜŞÜLMÜYOR, ama tetiklendiğinde
+        // gereken teminatı karşılayamayacak bir emrin sessizce oluşturulup
+        // kullanıcıyı yanıltması (emir "kuruldu" sanılıp günler sonra
+        // tetiklendiğinde aslında hiç gerçekleşmemesi) engellenmeli. Gerçek
+        // tetik fiyatı ileride değişebileceği için burada YAKLAŞIK bir tahmin
+        // (güncel fiyat üzerinden) kullanılıyor; asıl kesin kontrol yine
+        // tetiklenme anında placeOrder() içinde yapılıyor — bu sadece erken
+        // bir uyarı katmanı.
+        const estimatedMargin = estimateOrderMarginRequirement(state.activeSymbol, state.side, qty, currentPrice, state.leverage);
+        const estimatedCommission = currentPrice * qty * (commissionPct / 100);
+        const estimatedRequired = estimatedMargin + estimatedCommission;
+        if (estimatedRequired > portfolio.balance) {
+            showToast('Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').');
+            return;
+        }
+
         if (!portfolio.pendingOrders) portfolio.pendingOrders = [];
         portfolio.pendingOrders.push({
             id: genId(),
@@ -2139,6 +2156,37 @@ const TradingEngine = (() => {
     // ÖNEMLİ: kaldıraç sadece GEREKEN TEMİNATI azaltıyor; gerçekleşen K/Z
     // büyüklüğü (fiyat farkı × adet) kaldıraçtan etkilenmiyor — gerçek marjin
     // ticaretinde de böyledir.
+    // placeOrder()'daki marj hesaplama mantığının salt-okunur (hiçbir şeyi
+    // değiştirmeyen) bir kopyası — OCO emri oluştururken erken bir bakiye
+    // uyarısı verebilmek için kullanılıyor (bkz. submitOcoOrder). Ters yönde
+    // açık bir pozisyon varsa önce onun kapanmasıyla serbest kalacak marjı da
+    // hesaba katıyor, böylece "zaten açık bir SHORT'u kapatıp yeni bir LONG
+    // açan" bir OCO emri de doğru şekilde değerlendiriliyor.
+    function estimateOrderMarginRequirement(symbol, side, qty, price, leverage) {
+        qty = Math.floor(Number(qty));
+        price = Number(price);
+        if (!symbol || !qty || qty <= 0 || !price || price <= 0) return 0;
+
+        let remainingQty = qty;
+        let releasedMargin = 0;
+        const pos = portfolio.positions[symbol];
+        if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
+            const closeQty = Math.min(remainingQty, pos.qty);
+            const posLeverage = pos.leverage || 1;
+            releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
+            remainingQty -= closeQty;
+        }
+        if (remainingQty <= 0) return -releasedMargin;
+
+        const newSide = side === 'BUY' ? 'LONG' : 'SHORT';
+        const existingPos = portfolio.positions[symbol];
+        const effectiveLeverage = (existingPos && existingPos.side === newSide && existingPos.leverage)
+            ? existingPos.leverage
+            : Math.max(1, Number(leverage) || 1);
+        const margin = (price * remainingQty) / effectiveLeverage;
+        return margin - releasedMargin;
+    }
+
     function placeOrder(symbol, side, qty, price, commissionPct, leverage) {
         qty = Math.floor(Number(qty));
         price = Number(price);

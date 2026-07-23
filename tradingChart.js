@@ -245,6 +245,18 @@ const TradingChart = (() => {
     // önlenir.
     let moveDrag = null;
 
+    // (23 Temmuz 2026, on üçüncü oturum devamı — eğim/uç nokta düzenleme)
+    // Seçili bir çizimin köşe tutamaçlarından (zaten drawShape() içinde
+    // isSelected iken çizilen 7x7'lik kareler) birine basıp sürüklemek,
+    // moveDrag'in aksine TÜM şekli değil SADECE o tek uç noktayı taşır —
+    // diğer uç nokta olduğu yerde sabit kalır. Bu, bir trend çizgisinin (ya
+    // da herhangi iki-noktalı bir çizimin) EĞİMİNİ değiştirmeyi sağlar.
+    // `original`, sürükleme başladığı andaki şeklin JSON klonudur; her
+    // mousemove'da güncel imleç konumu SADECE `which` alanına yazılıp diğer
+    // uç nokta `original`dan hiç değişmeden korunur (drift birikmesin diye
+    // moveDrag'deki gibi hep orijinalden yeniden hesaplanır).
+    let endpointDrag = null;
+
     // Per-symbol drawing persistence so switching between multi-chart tabs
     // doesn't discard a symbol's trend lines / fib levels / rectangles.
     const drawingsBySymbol = {};
@@ -3497,6 +3509,25 @@ const TradingChart = (() => {
         return -1;
     }
 
+    // (23 Temmuz 2026, on üçüncü oturum devamı) Bir şeklin p1/p2 uç nokta
+    // tutamaçlarından birine yeterince yakın tıklanıp tıklanmadığını
+    // döndürür ('p1' / 'p2' / null). Yalnızca gerçek iki-nokta çizimlerinde
+    // (brush/elliott/abcd gibi points-dizisi tabanlı olanlar HARİÇ) anlamlı
+    // olduğu için o tipler baştan eleniyor. p1===p2 olan tek-nokta
+    // araçlarında (yatay/dikey/çapraz çizgi, metin) her iki tutamaç da aynı
+    // pikselde çakışır — bilerek ÖNCE p1 kontrol ediliyor ki grab her zaman
+    // render'ı etkileyen noktaya (p1) denk gelsin.
+    function hitTestHandle(shape, x, y) {
+        if (!shape || !shape.p1 || !shape.p2) return null;
+        if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') return null;
+        const HANDLE_TOLERANCE = 8;
+        const a = dataPointToPixel(shape.p1);
+        if (a.x !== null && a.y !== null && Math.hypot(x - a.x, y - a.y) <= HANDLE_TOLERANCE) return 'p1';
+        const b = dataPointToPixel(shape.p2);
+        if (b.x !== null && b.y !== null && Math.hypot(x - b.x, y - b.y) <= HANDLE_TOLERANCE) return 'p2';
+        return null;
+    }
+
     function selectDrawing(index) {
         state.selectedDrawingIndex = index;
         redrawDrawings();
@@ -3584,6 +3615,27 @@ const TradingChart = (() => {
             if (state.activeTool !== 'cursor') return;
             const rect = chartContainer.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
+
+            // (23 Temmuz 2026 — eğim/uç nokta düzenleme) Zaten seçili bir
+            // çizimin uç nokta tutamaçlarından birine basılırsa, aşağıdaki
+            // genel gövde-sürükleme (moveDrag) mantığına hiç girmeden SADECE
+            // o uç noktayı taşıyacak şekilde endpointDrag başlatılır —
+            // böylece tüm şekil kaymaz, yalnızca eğimi değişir.
+            if (state.selectedDrawingIndex >= 0 && !state.drawingsLocked) {
+                const selShape = state.drawings[state.selectedDrawingIndex];
+                const handle = hitTestHandle(selShape, x, y);
+                if (handle) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    endpointDrag = {
+                        index: state.selectedDrawingIndex,
+                        which: handle,
+                        original: JSON.parse(JSON.stringify(selShape))
+                    };
+                    return;
+                }
+            }
+
             const hitIndex = hitTestDrawings(x, y);
             if (hitIndex >= 0) {
                 e.preventDefault();
@@ -3615,9 +3667,23 @@ const TradingChart = (() => {
         // sürükleme kopmasın (onDrawMove/onDrawEnd'in zaten kullandığı
         // desenin aynısı).
         window.addEventListener('mousemove', (e) => {
-            if (!moveDrag) return;
             const rect = chartContainer.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
+
+            // (23 Temmuz 2026 — eğim/uç nokta düzenleme) Uç nokta sürükleme
+            // aktifse, güncel imleç konumu SADECE endpointDrag.which alanına
+            // yazılır — original'daki diğer uç nokta hiç dokunulmadan kalır.
+            if (endpointDrag) {
+                const dp = pixelToDataPoint(x, y);
+                if (dp.idx < 0 || dp.time === null) return;
+                const updated = Object.assign({}, endpointDrag.original);
+                updated[endpointDrag.which] = { time: dp.time, price: dp.price };
+                state.drawings[endpointDrag.index] = updated;
+                redrawDrawings();
+                return;
+            }
+
+            if (!moveDrag) return;
             const dp = pixelToDataPoint(x, y);
             if (dp.idx < 0) return;
             const indexDelta = dp.idx - moveDrag.startIdx;
@@ -3628,15 +3694,30 @@ const TradingChart = (() => {
 
         window.addEventListener('mouseup', () => {
             moveDrag = null;
+            endpointDrag = null;
         });
 
         // Seçili çizimin üstündeyken (henüz sürüklemeden) fare imlecini
         // "move" yaparak taşınabilir olduğunu gösterir — yeni özelliğin
-        // keşfedilebilirliği için ucuz ama gerçek bir ipucu.
+        // keşfedilebilirliği için ucuz ama gerçek bir ipucu. Seçili şeklin
+        // bir uç nokta tutamacının üzerindeyken ise farklı bir imleç
+        // ("crosshair") gösterilir — kullanıcı gövdeyi mi taşıyacağını yoksa
+        // tek bir ucu mu (eğimi değiştirerek) sürükleyeceğini önceden ayırt
+        // edebilsin diye.
         chartContainer.addEventListener('mousemove', (e) => {
-            if (state.activeTool !== 'cursor' || moveDrag || state.drawingsLocked) return;
+            if (state.activeTool !== 'cursor' || moveDrag || endpointDrag || state.drawingsLocked) return;
             const rect = chartContainer.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
+
+            if (state.selectedDrawingIndex >= 0) {
+                const selShape = state.drawings[state.selectedDrawingIndex];
+                const handle = hitTestHandle(selShape, x, y);
+                if (handle) {
+                    chartContainer.style.cursor = 'crosshair';
+                    return;
+                }
+            }
+
             const hitIndex = hitTestDrawings(x, y);
             chartContainer.style.cursor = hitIndex >= 0 ? 'move' : '';
         });
