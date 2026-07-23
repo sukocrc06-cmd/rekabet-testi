@@ -1096,6 +1096,40 @@ body {
     font-weight: 600;
 }
 
+/* (23 Temmuz 2026 düzeltmesi) Emir bileti içi belirgin uyarı kutusu — bkz.
+   index.html'deki #qt-ticket-alert ve tradingEngine.js'teki
+   showTicketAlert(). Alt bilgi çubuğundaki küçük durum yazısının aksine,
+   bu kutu tam olarak kullanıcının o an baktığı yerde (AL/SAT butonunun
+   hemen üstünde) beliriyor — yetersiz bakiye/kaldıraç gibi emrin neden
+   gerçekleşmediğini anında gösterebilmek için. */
+.qt-ticket-alert {
+    margin: 0 0 10px 0;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    border: 1px solid transparent;
+    animation: ticketAlertIn 0.18s ease-out;
+}
+
+.qt-ticket-alert.qt-alert-error {
+    background-color: rgba(198, 40, 40, 0.14);
+    border-color: rgba(198, 40, 40, 0.45);
+    color: #E57373;
+}
+
+.qt-ticket-alert.qt-alert-info {
+    background-color: var(--gold-dim);
+    border-color: var(--gold-border);
+    color: var(--gold);
+}
+
+@keyframes ticketAlertIn {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* Strategy configuration details view */
 .strategy-details-grid {
     display: grid;

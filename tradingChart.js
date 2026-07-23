@@ -306,6 +306,15 @@ const TradingChart = (() => {
                 });
             }
             redrawDrawings();
+            // (23 Temmuz 2026 düzeltmesi) Yakınlaştırma/kaydırma sırasında
+            // görünür bar seti değişince fiyat ekseni de otomatik yeniden
+            // ölçekleniyor (autoscale) — bu ölçeklemenin dahili olarak bu
+            // callback'ten hemen sonraki karede tamamlanma ihtimaline karşı
+            // (kütüphanenin kendi render/scale döngüsü senkron olmayabilir),
+            // bir sonraki animasyon karesinde İKİNCİ bir redrawDrawings()
+            // daha planlanıyor — çizim katmanının GÜNCEL fiyat eksenine göre
+            // konumlanmasını garantiliyor, ucuz ve zararsız bir önlem.
+            requestAnimationFrame(() => redrawDrawings());
         });
 
         // Crosshair -> OHLC legend
@@ -336,6 +345,7 @@ const TradingChart = (() => {
         window.addEventListener('resize', () => {
             resizeAll();
             redrawDrawings();
+            requestAnimationFrame(() => redrawDrawings());
         });
     }
 
@@ -1439,6 +1449,7 @@ const TradingChart = (() => {
         setTimeout(() => {
             resizeAll();
             redrawDrawings();
+            requestAnimationFrame(() => redrawDrawings());
         }, 30);
     }
 
@@ -1455,7 +1466,21 @@ const TradingChart = (() => {
         const btn = byId('btn-toggle-rail');
         if (btn) btn.title = collapsed ? 'Araç rayını genişlet' : 'Araç rayını daralt';
         try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
-        setTimeout(resizeAll, 200);
+        // (23 Temmuz 2026 düzeltmesi) Araç rayı daraltılıp/genişletilince
+        // grafiğin GENİŞLİĞİ değişiyor — bu da görünür bar sayısını ve
+        // dolayısıyla otomatik fiyat eksenini (autoscale) etkileyebiliyor.
+        // resizeAll() burada çağrılıyordu ama ardından redrawDrawings()
+        // HİÇ çağrılmıyordu — yani çizim katmanı (trend çizgileri, fib vb.)
+        // yeni ölçeğe göre yeniden hesaplanmıyor, eski (artık YANLIŞ) piksel
+        // konumunda kalıyordu; bu da kullanıcıya çizginin "fiyatının
+        // değiştiği" gibi görünüyordu (aslında sabit fiyatta kalıyor, sadece
+        // ekranda YANLIŞ yerde çiziliyordu). fullscreen/pencere-yeniden-boyut
+        // yollarındaki mevcut desenle (resizeAll() + redrawDrawings() ikilisi)
+        // tutarlı hale getirildi.
+        setTimeout(() => {
+            resizeAll();
+            redrawDrawings();
+        }, 200);
     }
 
     function setupRailCollapse() {
@@ -3076,12 +3101,12 @@ const TradingChart = (() => {
             const price = p1 + (p2 - p1) * lvl;
             const y = candleSeries.priceToCoordinate(price);
             if (y === null) return;
-            drawCtx.strokeStyle = COLORS.fibLine;
+            drawCtx.strokeStyle = fibLineColor();
             drawCtx.beginPath();
             drawCtx.moveTo(xStart, y);
             drawCtx.lineTo(xEnd, y);
             drawCtx.stroke();
-            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.fillStyle = drawColor();
             drawCtx.font = '9px "Fira Code", monospace';
             drawCtx.fillText(`${(lvl * 100).toFixed(1)}%  ₺${fmtPrice(price)}`, xEnd + 4, y + 3);
         });
@@ -3133,13 +3158,26 @@ const TradingChart = (() => {
         drawCtx.restore();
     }
 
+    // (23 Temmuz 2026 düzeltmesi) Kullanıcı geri bildirimi: açık (light) temada
+    // varsayılan altın/sarı çizim rengi (#D4AF37) beyaza yakın arka plan
+    // üzerinde neredeyse görünmüyordu. Sabit bir renk yerine artık TEMAYA
+    // GÖRE seçiliyor: açık temada koyu/siyaha yakın bir ton (kontrast için),
+    // koyu temada mevcut altın rengi aynen korunuyor (orada zaten okunaklıydı,
+    // kullanıcı sadece açık temadaki görünürlükten şikayet etti).
+    function drawColor() {
+        return currentTheme === 'light' ? '#14161A' : COLORS.draw;
+    }
+    function fibLineColor() {
+        return currentTheme === 'light' ? 'rgba(20,22,26,0.55)' : COLORS.fibLine;
+    }
+
     function drawShape(shape, isSelected) {
         if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
             if (!shape.points || shape.points.length < 2) return;
             const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
             if (pts.length < 2) return;
             drawCtx.save();
-            drawCtx.strokeStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+            drawCtx.strokeStyle = isSelected ? '#4FC3F7' : drawColor();
             drawCtx.lineWidth = isSelected ? 3 : 2;
             drawCtx.lineJoin = 'round';
             drawCtx.lineCap = 'round';
@@ -3152,7 +3190,7 @@ const TradingChart = (() => {
                 // by click order (0 = başlangıç, 1-5 = itki dalgaları); this
                 // tool does not attempt automatic Elliott Wave detection.
                 const WAVE_LABELS = ['0', '1', '2', '3', '4', '5'];
-                drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+                drawCtx.fillStyle = isSelected ? '#4FC3F7' : drawColor();
                 drawCtx.font = 'bold 11px "Fira Code", monospace';
                 pts.forEach((p, i) => {
                     drawCtx.fillText(WAVE_LABELS[i] !== undefined ? WAVE_LABELS[i] : String(i), p.x + 5, p.y - 5);
@@ -3163,7 +3201,7 @@ const TradingChart = (() => {
                 // Elliott aracıyla aynı dürüstlük ilkesi (otomatik desen
                 // TANIMA yapılmıyor).
                 const ABCD_LABELS = ['A', 'B', 'C', 'D'];
-                drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+                drawCtx.fillStyle = isSelected ? '#4FC3F7' : drawColor();
                 drawCtx.font = 'bold 11px "Fira Code", monospace';
                 pts.forEach((p, i) => {
                     drawCtx.fillText(ABCD_LABELS[i] !== undefined ? ABCD_LABELS[i] : String(i), p.x + 5, p.y - 5);
@@ -3179,15 +3217,25 @@ const TradingChart = (() => {
         const rect = drawCanvas.getBoundingClientRect();
 
         drawCtx.save();
-        drawCtx.strokeStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+        drawCtx.strokeStyle = isSelected ? '#4FC3F7' : drawColor();
         drawCtx.fillStyle = isSelected ? 'rgba(79,195,247,0.12)' : 'rgba(212,175,55,0.10)';
         drawCtx.lineWidth = isSelected ? 2.25 : 1.5;
         if (isSelected) drawCtx.setLineDash([5, 3]);
 
         if (shape.type === 'trend') {
+            // (23 Temmuz 2026 düzeltmesi) Kullanıcı isteği: bir trend çizgisi
+            // çizildikten sonra p1→p2 yönünde grafiğin sağ kenarına (mevcut
+            // boş sağ marj alanına) kadar uzamalı, sadece iki tıklanan nokta
+            // arasında kalıp kesilmemeli. "Işın" (ray) aracıyla aynı
+            // `extendLineToEdge()` mantığı kullanılıyor; SEÇİM/uç-nokta
+            // tutamaçları yine gerçek p1/p2 konumunda kalıyor (bkz.
+            // hitTestHandle/hitTestDrawings) — yalnızca GÖRSEL çizim daha
+            // ileri gidiyor, altta yatan veri (ve dolayısıyla taşıma/eğim
+            // düzenleme) değişmedi.
+            const extFwd = extendLineToEdge(a, b, rect);
             drawCtx.beginPath();
             drawCtx.moveTo(a.x, a.y);
-            drawCtx.lineTo(b.x, b.y);
+            drawCtx.lineTo(extFwd.x, extFwd.y);
             drawCtx.stroke();
         } else if (shape.type === 'trend_projection') {
             // (18 Temmuz 2026, onuncu oturum, ikinci tur) Doğrusal trend
@@ -3211,7 +3259,7 @@ const TradingChart = (() => {
             drawCtx.stroke();
             drawCtx.restore();
             drawCtx.save();
-            drawCtx.fillStyle = isSelected ? '#4FC3F7' : COLORS.draw;
+            drawCtx.fillStyle = isSelected ? '#4FC3F7' : drawColor();
             drawCtx.font = '9px "Fira Code", monospace';
             drawCtx.fillText('Projeksiyon (doğrusal)', projX + 4, projY - 4);
             drawCtx.restore();
@@ -3233,7 +3281,7 @@ const TradingChart = (() => {
             drawCtx.moveTo(0, a.y);
             drawCtx.lineTo(rect.width, a.y);
             drawCtx.stroke();
-            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.fillStyle = drawColor();
             drawCtx.font = '10px "Fira Code", monospace';
             drawCtx.fillText('₺' + fmtPrice(shape.p1.price), 4, a.y - 4);
         } else if (shape.type === 'hray') {
@@ -3241,7 +3289,7 @@ const TradingChart = (() => {
             drawCtx.moveTo(a.x, a.y);
             drawCtx.lineTo(rect.width, a.y);
             drawCtx.stroke();
-            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.fillStyle = drawColor();
             drawCtx.font = '10px "Fira Code", monospace';
             drawCtx.fillText('₺' + fmtPrice(shape.p1.price), a.x + 4, a.y - 4);
         } else if (shape.type === 'vline') {
@@ -3292,7 +3340,7 @@ const TradingChart = (() => {
             drawCtx.lineTo(b.x - headLen * Math.cos(angle + Math.PI / 6), b.y - headLen * Math.sin(angle + Math.PI / 6));
             drawCtx.stroke();
         } else if (shape.type === 'text') {
-            drawCtx.fillStyle = COLORS.draw;
+            drawCtx.fillStyle = drawColor();
             drawCtx.font = '12px Outfit, sans-serif';
             drawCtx.fillText(shape.label || '', a.x + 4, a.y - 6);
         } else if (shape.type === 'measure') {
@@ -3339,7 +3387,7 @@ const TradingChart = (() => {
             }
             drawCtx.fillStyle = 'rgba(239,83,80,0.18)';
             drawCtx.fillRect(xStart, Math.min(entryY, stopY), xEnd - xStart, Math.abs(entryY - stopY));
-            drawCtx.strokeStyle = COLORS.draw;
+            drawCtx.strokeStyle = drawColor();
             drawCtx.beginPath();
             drawCtx.moveTo(xStart, entryY);
             drawCtx.lineTo(xEnd, entryY);
@@ -3360,7 +3408,7 @@ const TradingChart = (() => {
                 const py = candleSeries.priceToCoordinate(price);
                 if (py === null) return;
                 const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
-                drawCtx.strokeStyle = COLORS.fibLine;
+                drawCtx.strokeStyle = fibLineColor();
                 drawCtx.beginPath();
                 drawCtx.moveTo(a.x, a.y);
                 drawCtx.lineTo(ext.x, ext.y);
@@ -3375,12 +3423,12 @@ const TradingChart = (() => {
                 if (idx < 0 || idx >= state.candles.length) return;
                 const lx = chart.timeScale().logicalToCoordinate(idx);
                 if (lx === null) return;
-                drawCtx.strokeStyle = COLORS.fibLine;
+                drawCtx.strokeStyle = fibLineColor();
                 drawCtx.beginPath();
                 drawCtx.moveTo(lx, 0);
                 drawCtx.lineTo(lx, rect.height);
                 drawCtx.stroke();
-                drawCtx.fillStyle = COLORS.draw;
+                drawCtx.fillStyle = drawColor();
                 drawCtx.font = '9px "Fira Code", monospace';
                 drawCtx.fillText(String(n), lx + 2, 12);
             });
@@ -3405,13 +3453,13 @@ const TradingChart = (() => {
                 const py = candleSeries.priceToCoordinate(price);
                 if (py === null) return;
                 const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
-                drawCtx.strokeStyle = g.r === 1 ? (isSelected ? '#4FC3F7' : COLORS.draw) : COLORS.fibLine;
+                drawCtx.strokeStyle = g.r === 1 ? (isSelected ? '#4FC3F7' : drawColor()) : fibLineColor();
                 drawCtx.lineWidth = g.r === 1 ? 2 : 1;
                 drawCtx.beginPath();
                 drawCtx.moveTo(a.x, a.y);
                 drawCtx.lineTo(ext.x, ext.y);
                 drawCtx.stroke();
-                drawCtx.fillStyle = COLORS.draw;
+                drawCtx.fillStyle = drawColor();
                 drawCtx.font = '9px "Fira Code", monospace';
                 drawCtx.fillText(g.label, ext.x - 24, ext.y - 3);
             });
@@ -3809,6 +3857,7 @@ const TradingChart = (() => {
         const ro = new ResizeObserver(() => {
             resizeAll();
             redrawDrawings();
+            requestAnimationFrame(() => redrawDrawings());
         });
         if (chartContainer) ro.observe(chartContainer);
     }

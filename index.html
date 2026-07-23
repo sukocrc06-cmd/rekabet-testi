@@ -717,6 +717,16 @@
                         <span id="qt-est-cost">--</span>
                     </div>
 
+                    <!-- (23 Temmuz 2026 düzeltmesi) Kullanıcı geri bildirimi: yetersiz
+                         bakiye / kaldıraç uyuşmazlığı gibi emir-reddi mesajları önceden
+                         SADECE alt bilgi çubuğundaki ("footer-status-text") küçük gri
+                         yazıyla gösteriliyordu — kullanıcının dikkati o an tam olarak
+                         AL/SAT butonundayken bu küçük, uzak yazı fark edilmiyordu. Bu
+                         kutu, emir biletinin TAM İÇİNDE, gönder butonunun hemen üstünde,
+                         göze çarpan bir renkle aynı mesajı ayrıca gösteriyor (bkz.
+                         tradingEngine.js showTicketAlert()). -->
+                    <div class="qt-ticket-alert" id="qt-ticket-alert" style="display:none;" role="alert"></div>
+
                     <button type="button" id="qt-submit" class="btn-trade-submit btn-buy">AL (BUY)</button>
                 </div>
 

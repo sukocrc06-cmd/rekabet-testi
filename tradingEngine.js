@@ -1923,14 +1923,14 @@ const TradingEngine = (() => {
        ════════════════════════════════════════════════ */
 
     function submitOrder() {
-        if (!state.activeSymbol) { showToast('Önce bir sembol seçin.'); return; }
+        if (!state.activeSymbol) { showToast('Önce bir sembol seçin.'); showTicketAlert('Önce bir sembol seçin.', 'error'); return; }
         const qtyInput = byId('qt-qty');
         const qty = qtyInput ? Math.floor(Number(qtyInput.value)) : 0;
         const price = effectivePrice();
         const commissionPct = getCommissionPct();
 
-        if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); return; }
-        if (!price || price <= 0) { showToast('Fiyat bilgisi alınamadı.'); return; }
+        if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); showTicketAlert('Geçerli bir miktar girin.', 'error'); return; }
+        if (!price || price <= 0) { showToast('Fiyat bilgisi alınamadı.'); showTicketAlert('Fiyat bilgisi alınamadı.', 'error'); return; }
 
         if (state.orderType === 'OCO') {
             submitOcoOrder(qty, price, commissionPct);
@@ -1950,11 +1950,13 @@ const TradingEngine = (() => {
             // otherwise it would trigger immediately (or never make sense).
             const willBeLong = state.side === 'BUY';
             if (slPrice !== null && ((willBeLong && slPrice >= price) || (!willBeLong && slPrice <= price))) {
-                showToast(`Stop-Loss fiyatı ${willBeLong ? 'giriş fiyatının altında' : 'giriş fiyatının üzerinde'} olmalı.`);
+                const m = `Stop-Loss fiyatı ${willBeLong ? 'giriş fiyatının altında' : 'giriş fiyatının üzerinde'} olmalı.`;
+                showToast(m); showTicketAlert(m, 'error');
                 return;
             }
             if (tpPrice !== null && ((willBeLong && tpPrice <= price) || (!willBeLong && tpPrice >= price))) {
-                showToast(`Take-Profit fiyatı ${willBeLong ? 'giriş fiyatının üzerinde' : 'giriş fiyatının altında'} olmalı.`);
+                const m = `Take-Profit fiyatı ${willBeLong ? 'giriş fiyatının üzerinde' : 'giriş fiyatının altında'} olmalı.`;
+                showToast(m); showTicketAlert(m, 'error');
                 return;
             }
         }
@@ -1971,12 +1973,22 @@ const TradingEngine = (() => {
         const existingBeforeOrder = portfolio.positions[state.activeSymbol];
         const intendedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
         if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage) {
-            showToast(`Not: ${state.activeSymbol} zaten ${existingBeforeOrder.leverage}x kaldıraçla açık — ekleme de ${existingBeforeOrder.leverage}x ile yapılacak.`);
+            const leverageNote = `Not: ${state.activeSymbol} zaten ${existingBeforeOrder.leverage}x kaldıraçla açık — ekleme de ${existingBeforeOrder.leverage}x ile yapılacak.`;
+            showToast(leverageNote);
+            // (23 Temmuz 2026 düzeltmesi) Bu bilgilendirme mesajı önceden
+            // yalnızca footer'a gidiyordu ve hemen ardından placeOrder()
+            // sonucu (başarı ya da "yetersiz bakiye") onu ezip geçiyordu —
+            // kullanıcı NEDEN kaldıraç seçiminin uygulanmadığını hiç
+            // göremiyordu. Artık ticket içinde ayrıca gösteriliyor; emir
+            // başarısız olursa hemen aşağıdaki showTicketAlert('error')
+            // çağrısı bunun yerini alacak (aynı kutu, tek mesaj kalır).
+            showTicketAlert(leverageNote, 'info');
         }
 
         const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct, state.leverage);
         if (!result.ok) {
             showToast(result.msg);
+            showTicketAlert(result.msg, 'error');
             return;
         }
 
@@ -2008,6 +2020,17 @@ const TradingEngine = (() => {
         renderOrders();
         renderAccountSummary();
         showToast(`${state.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${qty} adet ${state.activeSymbol} @ ₺${fmtPrice(price)}`);
+        // Emir başarıyla gerçekleşti. Bu turda bir kaldıraç notu gösterildiyse
+        // (leverageNote) onu ekranda bırakıyoruz — kullanıcının hâlâ görmesi
+        // faydalı bir bilgi. Gösterilmediyse, ÖNCEKİ bir başarısız denemeden
+        // kalmış olabilecek bir hata kutusu varsa temizleniyor.
+        if (!(existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage)) {
+            const alertEl = byId('qt-ticket-alert');
+            if (alertEl && alertEl.classList.contains('qt-alert-error')) {
+                alertEl.style.display = 'none';
+                clearTimeout(ticketAlertTimer);
+            }
+        }
         if (qtyInput) qtyInput.value = '';
         if (sltpToggle) { sltpToggle.checked = false; }
         const sltpRow = byId('qt-sltp-row');
@@ -2033,9 +2056,9 @@ const TradingEngine = (() => {
         const upper = upperInput && upperInput.value ? Number(upperInput.value) : null;
         const lower = lowerInput && lowerInput.value ? Number(lowerInput.value) : null;
 
-        if (!upper && !lower) { showToast('En az bir tetikleyici (üst veya alt) girin.'); return; }
-        if (upper !== null && upper <= currentPrice) { showToast('Üst tetik, güncel fiyatın üzerinde olmalı.'); return; }
-        if (lower !== null && lower >= currentPrice) { showToast('Alt tetik, güncel fiyatın altında olmalı.'); return; }
+        if (!upper && !lower) { const m = 'En az bir tetikleyici (üst veya alt) girin.'; showToast(m); showTicketAlert(m, 'error'); return; }
+        if (upper !== null && upper <= currentPrice) { const m = 'Üst tetik, güncel fiyatın üzerinde olmalı.'; showToast(m); showTicketAlert(m, 'error'); return; }
+        if (lower !== null && lower >= currentPrice) { const m = 'Alt tetik, güncel fiyatın altında olmalı.'; showToast(m); showTicketAlert(m, 'error'); return; }
 
         // Bakiye ön-kontrolü (23 Temmuz 2026 düzeltmesi): OCO emri anında
         // gerçekleşmediği için bakiye o an DÜŞÜLMÜYOR, ama tetiklendiğinde
@@ -2050,7 +2073,9 @@ const TradingEngine = (() => {
         const estimatedCommission = currentPrice * qty * (commissionPct / 100);
         const estimatedRequired = estimatedMargin + estimatedCommission;
         if (estimatedRequired > portfolio.balance) {
-            showToast('Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').');
+            const m = 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').';
+            showToast(m);
+            showTicketAlert(m, 'error');
             return;
         }
 
@@ -2893,6 +2918,26 @@ const TradingEngine = (() => {
         el.innerText = `System status: ${msg}`;
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => { el.innerText = 'System status: Ready'; }, 3500);
+    }
+
+    // (23 Temmuz 2026 düzeltmesi) Kullanıcı geri bildirimi: "bakiyemle
+    // alamıyorum ama uyarı görmüyorum" / "kaldıraçla eklemek istediğimde
+    // olmuyor, neden anlamıyorum" — her iki şikayetin de kök nedeni AYNI:
+    // bu tür kritik emir-reddi mesajları SADECE showToast()'un yazdığı,
+    // sayfanın en altındaki küçük gri durum satırına gidiyordu — kullanıcının
+    // dikkati o an tam olarak AL/SAT biletindeyken bu uzak/küçük yazı hiç
+    // fark edilmiyordu. showTicketAlert(), AYNI mesajı biletin İÇİNDE,
+    // gönder butonunun hemen üstünde, renkli/belirgin bir kutuda ayrıca
+    // gösteriyor — showToast()'un yerini almıyor, ona ek bir ikinci kanal.
+    let ticketAlertTimer = null;
+    function showTicketAlert(msg, kind) {
+        const el = byId('qt-ticket-alert');
+        if (!el) return;
+        el.textContent = msg;
+        el.className = 'qt-ticket-alert ' + (kind === 'error' ? 'qt-alert-error' : 'qt-alert-info');
+        el.style.display = '';
+        clearTimeout(ticketAlertTimer);
+        ticketAlertTimer = setTimeout(() => { el.style.display = 'none'; }, kind === 'error' ? 5500 : 4000);
     }
 
     /* ────────── Exchange selector (BIST active, others "coming soon") ────────── */
