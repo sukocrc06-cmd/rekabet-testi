@@ -178,7 +178,7 @@ const TourGuide = (() => {
                 },
                 selector: '#btn-toggle-signal-explainer',
                 title: 'Sinyal Anlatıcısı',
-                desc: 'Şimdi açılan bu düğmeyle grafik üzerinde AL/SAT ok işaretleri beliriyor. Bir işarete tıklarsanız, motorun (SMA5/SMA20 kesişimi ya da RSI+MACD kombinasyonu) o sinyali NEDEN verdiğini açıklayan bir balon açılır. Gerçek bir emir veya backtest değildir — sadece motor mantığının görsel anlatımıdır.'
+                desc: 'Şimdi açılan bu düğmeyle grafik üzerinde AL/SAT ok işaretleri beliriyor. Bir işarete tıklarsanız, motorun (SMA5/SMA20 kesişimi, RSI+MACD kombinasyonu ya da Bollinger Bantları ortalamaya-dönüş mantığı) o sinyali NEDEN verdiğini açıklayan bir balon açılır. Gerçek bir emir veya backtest değildir — sadece motor mantığının görsel anlatımıdır.'
             },
             // (22 Temmuz 2026, on ikinci oturum, üçüncü tur özelliği — bu turda
             // tanıtım turuna eklendi) Strateji Tekrarı / Zaman Makinesi: mevcut
@@ -324,7 +324,7 @@ const TourGuide = (() => {
                 mobilePanel: 'trade',
                 selector: '#panel-tab-performance',
                 title: 'Portföy Performans Analitiği',
-                desc: '"Performans" sekmesinde toplam K/Z, kazanma oranı, profit factor ve canlı özkaynak eğrisiyle performansınızı tek ekrandan takip edebilirsiniz.'
+                desc: '"Performans" sekmesinde toplam K/Z, kazanma oranı, profit factor, Sharpe Oranı, Maks. Drawdown ve canlı özkaynak eğrisiyle performansınızı tek ekrandan takip edebilirsiniz — Sharpe ve Maks. Drawdown da gerçek kapanmış işlem geçmişinizden hesaplanır, sabit bir değer değildir.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-heatmap')?.click(); await wait(150); },

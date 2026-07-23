@@ -250,12 +250,14 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-enter"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="fullscreen-icon-exit" style="display:none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>
                         </button>
-                        <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı:
-                             motorların (Optipulse: SMA5/SMA20 kesişimi, Backtrader: RSI+MACD)
-                             AL/SAT kararlarını istemci tarafında türetip grafiğin üzerine
-                             ok işareti olarak koyar; bir işarete tıklayınca "neden" açıklaması
-                             (bkz. #tv-signal-tooltip) açılır. Gerçek bir emir/backtest DEĞİL —
-                             sadece motor mantığının görsel anlatımı. -->
+                        <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur; 23 Temmuz 2026,
+                             on üçüncü oturum'da Bollinger Bantları eklendi) Sinyal Anlatıcısı:
+                             üç motor mantığının (Optipulse: SMA5/SMA20 kesişimi; Backtrader:
+                             RSI+MACD; Bollinger Bantları: ortalamaya-dönüş) AL/SAT kararlarını
+                             istemci tarafında türetip grafiğin üzerine ok işareti olarak koyar;
+                             bir işarete tıklayınca "neden" açıklaması (bkz. #tv-signal-tooltip)
+                             açılır. Gerçek bir emir/backtest DEĞİL — sadece motor mantığının
+                             görsel anlatımı. -->
                         <button type="button" class="tv-scale-toggle-btn tv-tabsbar-append-btn" id="btn-toggle-signal-explainer" title="Sinyal Anlatıcısı (AL/SAT sinyallerinin nedenini grafikte göster)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
                         </button>
@@ -760,6 +762,18 @@
                         <div class="perf-stat">
                             <span class="perf-stat-label">Profit Factor</span>
                             <span class="perf-stat-val" id="perf-profit-factor">--</span>
+                        </div>
+                        <!-- (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme")
+                             Sharpe Oranı ve Maks. Drawdown: gerçek kapanmış işlem
+                             geçmişinden hesaplanır (tradingEngine.js →
+                             computePerformanceStats), sabit/uydurma değer değil. -->
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">Sharpe Oranı</span>
+                            <span class="perf-stat-val" id="perf-sharpe-ratio">--</span>
+                        </div>
+                        <div class="perf-stat">
+                            <span class="perf-stat-label">Maks. Drawdown</span>
+                            <span class="perf-stat-val" id="perf-max-drawdown">--</span>
                         </div>
                         <div class="perf-stat">
                             <span class="perf-stat-label">En İyi İşlem</span>
@@ -1278,8 +1292,12 @@
     <!-- Data Controller -->
     <script src="config.js"></script>
     <script src="dataController.js"></script>
-    <!-- Canvas Chart Renderer (legacy backtest charts) -->
-    <script src="chartRenderer.js"></script>
+    <!-- (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
+         chartRenderer.js (Canvas tabanlı eski backtest grafik motoru) burada
+         yükleniyordu, ama onu kullanan TEK yer app.js'in artık ulaşılamayan
+         (tetikleyici düğmesi kaldırılmış) eski Canvas pipeline'ıydı — o kod
+         app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
+         çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
     <script src="tradingChart.js"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->

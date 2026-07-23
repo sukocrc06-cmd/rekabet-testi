@@ -602,7 +602,47 @@ const TradingEngine = (() => {
         const bySymbol = {};
         closed.forEach(h => { bySymbol[h.symbol] = (bySymbol[h.symbol] || 0) + h.pnl; });
 
-        return { closed, wins, losses, grossProfit, grossLoss, totalPnl, winRate, profitFactor, best, worst, bySymbol };
+        // (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme": gerçek
+        // Sharpe Oranı + Maks. Drawdown) Önceden bu panelde bu iki metrik
+        // hiç yoktu; başka bir yerde (artık kaldırılmış eski Canvas
+        // pipeline'ında) UYDURMA/sabit değerler olarak vardı. Burada GERÇEK
+        // kapanmış işlem geçmişinden (portfolio.history, localStorage'da
+        // kalıcı) hesaplanıyor — hiçbir sabit/varsayılan sayı yok.
+        //
+        // portfolio.history en yeni işlem başta olacak şekilde tutuluyor
+        // (unshift ile ekleniyor) — burada ts'e göre kronolojik (eskiden
+        // yeniye) sıraya çevirip, DEFAULT_BALANCE'tan başlayarak işlem
+        // işlem gerçek bir özkaynak eğrisi kuruyoruz. Not: portfolio.history
+        // en fazla son 50 kaydı (açılış+kapanış toplam) tuttuğu için bu,
+        // "son işlemlere dayalı" bir pencere — tüm hesap ömrü değil.
+        const chronological = closed.slice().sort((a, b) => a.ts - b.ts);
+        let runningEquity = DEFAULT_BALANCE;
+        let peakEquity = DEFAULT_BALANCE;
+        let maxDrawdownPct = 0;
+        const tradeReturns = [];
+        chronological.forEach(h => {
+            const before = runningEquity;
+            runningEquity += h.pnl;
+            if (before > 0) tradeReturns.push(h.pnl / before);
+            if (runningEquity > peakEquity) peakEquity = runningEquity;
+            const dd = peakEquity > 0 ? ((peakEquity - runningEquity) / peakEquity) * 100 : 0;
+            if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+        });
+
+        // İşlem-bazlı (calendar-time değil) basitleştirilmiş Sharpe Oranı:
+        // ortalama işlem getirisi / işlem getirilerinin standart sapması,
+        // örneklem büyüklüğüyle ölçeklenir (√N). Risksiz getiri oranı bu
+        // basit haliyle 0 kabul edilir (demo/kağıt-üzerinde portföy için
+        // ayrı bir risksiz oran varsayımı yapmak yanıltıcı olurdu).
+        let sharpeRatio = 0;
+        if (tradeReturns.length >= 2) {
+            const meanRet = tradeReturns.reduce((s, r) => s + r, 0) / tradeReturns.length;
+            const variance = tradeReturns.reduce((s, r) => s + Math.pow(r - meanRet, 2), 0) / tradeReturns.length;
+            const stdRet = Math.sqrt(variance);
+            sharpeRatio = stdRet > 0 ? (meanRet / stdRet) * Math.sqrt(tradeReturns.length) : 0;
+        }
+
+        return { closed, wins, losses, grossProfit, grossLoss, totalPnl, winRate, profitFactor, best, worst, bySymbol, sharpeRatio, maxDrawdownPct };
     }
 
     function renderPerformanceTab() {
@@ -613,6 +653,8 @@ const TradingEngine = (() => {
         const winRateEl = byId('perf-win-rate');
         const tradeCountEl = byId('perf-trade-count');
         const pfEl = byId('perf-profit-factor');
+        const sharpeEl = byId('perf-sharpe-ratio');
+        const maxDdEl = byId('perf-max-drawdown');
         const bestEl = byId('perf-best-trade');
         const worstEl = byId('perf-worst-trade');
         const listEl = byId('perf-symbol-list');
@@ -623,6 +665,11 @@ const TradingEngine = (() => {
         if (winRateEl) winRateEl.textContent = stats.closed.length ? stats.winRate.toFixed(1) + '%' : '--';
         if (tradeCountEl) tradeCountEl.textContent = String(stats.closed.length);
         if (pfEl) pfEl.textContent = stats.closed.length ? (stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)) : '--';
+        if (sharpeEl) sharpeEl.textContent = stats.closed.length >= 2 ? stats.sharpeRatio.toFixed(2) : '--';
+        if (maxDdEl) {
+            maxDdEl.textContent = stats.closed.length ? '-' + stats.maxDrawdownPct.toFixed(2) + '%' : '--';
+            maxDdEl.className = 'perf-stat-val ' + (stats.maxDrawdownPct > 0 ? 'loss-text' : '');
+        }
         if (bestEl) {
             bestEl.textContent = stats.best ? (stats.best.pnl >= 0 ? '+' : '') + fmtTRY(stats.best.pnl) + ' (' + stats.best.symbol + ')' : '--';
             bestEl.className = 'perf-stat-val ' + (stats.best && stats.best.pnl < 0 ? 'loss-text' : 'profit-text');

@@ -732,15 +732,17 @@ const TradingChart = (() => {
 
     /* ═══════════ Sinyal Anlatıcısı (22 Temmuz 2026, on ikinci oturum, üçüncü tur) ═══════════
        Kullanıcı hocasına bu paneli gösterdiğinde "TradingView'da bile yok"
-       dediği dual-chart'tan sonra istenen iki yeni özellikten ilki. Motorların
-       (Optipulse: SMA5/SMA20 kesişimi, Backtrader: RSI+MACD birleşimi) AL/SAT
-       kararlarını backend'e HİÇ dokunmadan, doğrudan ekrandaki mumlardan
-       istemci tarafında türetir — amaç gerçek bir emir/backtest değil, "motor
-       burada NEDEN böyle karar verirdi" sorusunu grafik üzerinde ok işaretleri
-       + tıklanabilir açıklama balonuyla cevaplamak. state.signalMarkers her
-       çözünürlük/sembol değişiminde TAM geçmişten yeniden hesaplanır (bkz.
-       applyResolution); ekranda gösterilip gösterilmeyeceği ayrıca
-       state.signalExplainerOn ile kontrol edilir. */
+       dediği dual-chart'tan sonra istenen iki yeni özellikten ilki. Üç ayrı
+       strateji mantığının (Optipulse: SMA5/SMA20 kesişimi; Backtrader:
+       RSI+MACD birleşimi; Bollinger Bantları: ortalamaya-dönüş — 23 Temmuz
+       2026, on üçüncü oturum'da eklendi) AL/SAT kararlarını backend'e HİÇ
+       dokunmadan, doğrudan ekrandaki mumlardan istemci tarafında türetir —
+       amaç gerçek bir emir/backtest değil, "motor burada NEDEN böyle karar
+       verirdi" sorusunu grafik üzerinde ok işaretleri + tıklanabilir açıklama
+       balonuyla cevaplamak. state.signalMarkers her çözünürlük/sembol
+       değişiminde TAM geçmişten yeniden hesaplanır (bkz. applyResolution);
+       ekranda gösterilip gösterilmeyeceği ayrıca state.signalExplainerOn ile
+       kontrol edilir. */
 
     function computeSignalMarkers(candles) {
         if (!candles || candles.length < 25 || !window.DataController) return [];
@@ -749,6 +751,13 @@ const TradingChart = (() => {
         const sma20 = window.DataController.computeSMA(closes, 20);
         const rsi14 = window.DataController.computeRSI(closes, 14);
         const macd = window.DataController.computeMACD(closes, 12, 26, 9);
+        // (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme": 3. gerçek
+        // strateji) Bollinger Bantları — ortalamaya-dönüş (mean-reversion)
+        // mantığı, trend-takip (Optipulse) ve momentum/dönüş (Backtrader)
+        // motorlarından KASITLI OLARAK farklı bir üçüncü bakış açısı sunar.
+        const bb = window.DataController.computeBollingerBands
+            ? window.DataController.computeBollingerBands(closes, 20, 2)
+            : null;
 
         const markers = [];
         const addMarker = (i, side, reason) => {
@@ -781,6 +790,21 @@ const TradingChart = (() => {
                     addMarker(i, 'buy', `RSI, 30 seviyesinin altından yukarı çıktı (${rsiNow.toFixed(1)}) ve MACD histogramı pozitife döndü → AL sinyali (Backtrader motoru mantığı: RSI+MACD).`);
                 } else if (rsiPrev >= 70 && rsiNow < 70 && histPrev >= 0 && histNow < 0) {
                     addMarker(i, 'sell', `RSI, 70 seviyesinin üstünden aşağı indi (${rsiNow.toFixed(1)}) ve MACD histogramı negatife döndü → SAT sinyali (Backtrader motoru mantığı: RSI+MACD).`);
+                }
+            }
+
+            // --- Bollinger Bantları mantığı: ortalamaya-dönüş (mean-reversion) ---
+            // Fiyat bandın DIŞINA çıkıp bir sonraki barda TEKRAR İÇERİ
+            // döndüğünde sinyal üretilir (bandın dışındayken değil) — bu,
+            // "aşırı hareketin tükendiği" anı yakalamayı amaçlayan klasik
+            // Bollinger geri-dönüş yaklaşımıdır.
+            if (bb) {
+                const bbLowerNow = bb.lower[i], bbLowerPrev = bb.lower[i - 1];
+                const bbUpperNow = bb.upper[i], bbUpperPrev = bb.upper[i - 1];
+                if (bbLowerNow != null && bbLowerPrev != null && closes[i - 1] < bbLowerPrev && closes[i] >= bbLowerNow) {
+                    addMarker(i, 'buy', `Fiyat alt Bollinger bandının (₺${bbLowerNow.toFixed(2)}) altına sarkıp tekrar üzerine çıktı → AL sinyali (Bollinger Bantları mantığı: ortalamaya-dönüş).`);
+                } else if (bbUpperNow != null && bbUpperPrev != null && closes[i - 1] > bbUpperPrev && closes[i] <= bbUpperNow) {
+                    addMarker(i, 'sell', `Fiyat üst Bollinger bandının (₺${bbUpperNow.toFixed(2)}) üzerine taşıp tekrar altına indi → SAT sinyali (Bollinger Bantları mantığı: ortalamaya-dönüş).`);
                 }
             }
         }
