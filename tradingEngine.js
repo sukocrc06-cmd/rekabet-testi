@@ -1616,6 +1616,22 @@ const TradingEngine = (() => {
         renderOrderBook(symbol);
         renderRecentTrades(symbol);
 
+        // (23 Temmuz 2026, on üçüncü oturum — "canlı veri akışı hızlandırma")
+        // Önceden WebSocket bağlantısı, aşağıdaki tam OHLCV geçmişi
+        // (loadSymbol, period=max) TAMAMEN bitene KADAR hiç açılmıyordu —
+        // ikisi kasıtlı olarak SIRALI çalışıyordu (bkz. eski yorum: erken bir
+        // tick'in aşağıdaki re-anchor tarafından ezilmesini önlemek için).
+        // Bu, özellikle backend soğuk uyanıyorsa (Render'ın ücretsiz katmanı)
+        // canlı veri noktasının yeşile dönmesini gereksiz yere geciktiriyordu.
+        // Artık ikisi PARALEL başlıyor — WebSocket beklenmeden hemen açılıyor,
+        // tam geçmiş fetch'i ayrıca sürüyor. Yarış durumu TERS yönde ele
+        // alınıyor: re-anchor artık yalnızca bu sembol için HENÜZ gerçek bir
+        // canlı tick gelmediyse uygulanıyor — tick zaten gelmişse (OHLCV'den
+        // en az o kadar güncel, çoğu zaman daha güncel gerçek bir fiyat
+        // olduğu için) OHLCV'nin (göreceli olarak durağan) son kapanışıyla
+        // EZİLMİYOR.
+        connectLiveFeed(symbol);
+
         if (window.TradingChart) {
             const chartInfo = await window.TradingChart.loadSymbol(symbol);
             // Re-anchor the simulated demo tick price to the real last close
@@ -1625,7 +1641,8 @@ const TradingEngine = (() => {
             // chart — which uses the real fetched data — keeps showing the
             // actual last close, so the two charts silently disagree on
             // "the current price" for the same symbol.
-            if (chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
+            const alreadyHasLiveTick = liveFeedActive && liveFeedSymbol === symbol;
+            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
                 priceProfiles[symbol].price = chartInfo.lastClose;
                 priceProfiles[symbol].dayOpen = chartInfo.lastClose;
                 renderWatchlistPrices();
@@ -1633,14 +1650,6 @@ const TradingEngine = (() => {
                 renderOrderBook(symbol);
             }
         }
-
-        // WebSocket canlı veri bağlantısı, bu ilk (gerçek OHLCV fetch'inden
-        // ya da onun simüle yedeğinden gelen) "temel çıpa" kurulduktan SONRA
-        // açılıyor — aksi halde erken gelebilecek bir canlı tick, hemen
-        // ardından çalışan yukarıdaki re-anchor mantığı tarafından sessizce
-        // ezilebilirdi. Bağlantı sembol değişince zaten yeniden kuruluyor,
-        // bu yüzden burada, fonksiyonun en sonunda açmak güvenli.
-        connectLiveFeed(symbol);
     }
 
     /* ════════════════════════════════════════════════
