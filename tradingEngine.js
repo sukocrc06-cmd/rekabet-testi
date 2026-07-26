@@ -2336,17 +2336,21 @@ const TradingEngine = (() => {
         if (!body) return;
         const orders = portfolio.pendingOrders || [];
         if (!orders.length) {
-            body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:16px; font-size:11px;">Bekleyen OCO emri yok</td></tr>`;
+            body.innerHTML = `<div class="qt-empty-state">Bekleyen OCO emri yok</div>`;
             return;
         }
         body.innerHTML = orders.map(o => `
-            <tr>
-                <td class="font-bold">${o.symbol}</td>
-                <td class="font-mono">${o.upper !== null ? '₺' + fmtPrice(o.upper) : '--'}</td>
-                <td class="font-mono">${o.lower !== null ? '₺' + fmtPrice(o.lower) : '--'}</td>
-                <td class="font-mono">${o.qty}</td>
-                <td><button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button></td>
-            </tr>
+            <div class="oco-card">
+                <div class="oco-card-top">
+                    <span class="font-bold">${o.symbol}</span>
+                    <button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button>
+                </div>
+                <div class="oco-card-bottom font-mono">
+                    <span>Üst ${o.upper !== null ? '₺' + fmtPrice(o.upper) : '--'}</span>
+                    <span>Alt ${o.lower !== null ? '₺' + fmtPrice(o.lower) : '--'}</span>
+                    <span>${o.qty} adet</span>
+                </div>
+            </div>
         `).join('');
     }
 
@@ -2700,7 +2704,7 @@ const TradingEngine = (() => {
         if (!body) return;
         const symbols = Object.keys(portfolio.positions);
         if (symbols.length === 0) {
-            body.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:16px; font-size:11px;">Açık pozisyon yok</td></tr>`;
+            body.innerHTML = `<div class="qt-empty-state">Açık pozisyon yok</div>`;
             return;
         }
         let html = '';
@@ -2719,20 +2723,28 @@ const TradingEngine = (() => {
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             const leverage = pos.leverage || 1;
             const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${fmtLeverage(leverage)}x</span>` : '';
+            // (23 Temmuz 2026, on üçüncü oturum devamı) Kart düzeni: üst satırda
+            // sembol+yön+kaldıraç solda, K/Z sağda (nowrap — artık "-" işareti
+            // ayrı satıra düşmüyor); alt satırda adet/ort. fiyat solda, SL/TP ve
+            // Kapat butonları sağda. Bkz. .pos-card kuralları (styles.css).
             html += `
-                <tr>
-                    <td class="font-bold">${symbol}${sltpSub}</td>
-                    <td><span class="badge ${sideClass}">${pos.side}</span>${leverageBadge}</td>
-                    <td class="font-mono">${pos.qty}</td>
-                    <td class="font-mono">₺${fmtPrice(pos.avgPrice)}</td>
-                    <td class="font-mono ${pnlClass}">${unrealized >= 0 ? '+' : ''}${fmtTRY(unrealized)}</td>
-                    <td>
+                <div class="pos-card">
+                    <div class="pos-card-top">
+                        <div class="pos-card-id">
+                            <span class="font-bold">${symbol}</span>
+                            <span class="badge ${sideClass}">${pos.side}</span>${leverageBadge}
+                        </div>
+                        <div class="pos-card-pnl font-mono ${pnlClass}">${unrealized >= 0 ? '+' : ''}${fmtTRY(unrealized)}</div>
+                    </div>
+                    <div class="pos-card-bottom">
+                        <div class="pos-card-meta font-mono">${pos.qty} adet<span class="pos-card-dot">·</span>Ort. ₺${fmtPrice(pos.avgPrice)}</div>
                         <div class="pos-actions-cell">
                             <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}')" title="Stop-Loss / Take-Profit">SL/TP</button>
                             <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}')">Kapat</button>
                         </div>
-                    </td>
-                </tr>
+                    </div>
+                    ${sltpSub}
+                </div>
             `;
         });
         body.innerHTML = html;
@@ -2744,7 +2756,7 @@ const TradingEngine = (() => {
         if (csvBtn) csvBtn.disabled = !portfolio.history.length;
         if (!body) return;
         if (!portfolio.history.length) {
-            body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:16px; font-size:11px;">Emir geçmişi yok</td></tr>`;
+            body.innerHTML = `<div class="qt-empty-state">Emir geçmişi yok</div>`;
             return;
         }
         let html = '';
@@ -2752,15 +2764,19 @@ const TradingEngine = (() => {
             const t = new Date(h.ts);
             const timeStr = t.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
             const sideClass = h.side === 'BUY' ? 'badge-long' : 'badge-short';
-            const pnlStr = h.pnl !== null ? `<span class="${h.pnl >= 0 ? 'profit-text' : 'loss-text'}">${h.pnl >= 0 ? '+' : ''}${fmtTRY(h.pnl)}</span>` : '<span class="font-mono" style="color:var(--text-muted)">--</span>';
+            const pnlStr = h.pnl !== null ? `<span class="font-mono ${h.pnl >= 0 ? 'profit-text' : 'loss-text'}">${h.pnl >= 0 ? '+' : ''}${fmtTRY(h.pnl)}</span>` : '<span class="font-mono" style="color:var(--text-muted)">--</span>';
             html += `
-                <tr>
-                    <td class="font-mono" style="font-size:10px;">${timeStr}</td>
-                    <td class="font-bold">${h.symbol}</td>
-                    <td><span class="badge ${sideClass}">${h.side}</span></td>
-                    <td class="font-mono">${h.qty}@₺${fmtPrice(h.price)}</td>
-                    <td>${pnlStr}</td>
-                </tr>
+                <div class="order-card">
+                    <div class="order-card-top">
+                        <span class="font-mono order-card-time">${timeStr}</span>
+                        <span class="font-bold">${h.symbol}</span>
+                        <span class="badge ${sideClass}">${h.side}</span>
+                    </div>
+                    <div class="order-card-bottom">
+                        <span class="font-mono">${h.qty}@₺${fmtPrice(h.price)}</span>
+                        ${pnlStr}
+                    </div>
+                </div>
             `;
         });
         body.innerHTML = html;

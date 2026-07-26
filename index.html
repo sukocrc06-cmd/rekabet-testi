@@ -841,41 +841,29 @@
                 </div>
 
                 <!-- Open positions -->
+                <!-- (23 Temmuz 2026, on üçüncü oturum devamı) Önceden 6 sütunlu bir
+                     <table> idi; ticket panelinin dar genişliğinde bu, yatay kaydırma
+                     gerektiriyor ve K/Z gibi değerlerin ("-" işareti üstte, rakam
+                     altta kalacak şekilde) satır kırılmasına yol açıyordu. Kullanıcı
+                     ekran görüntüsüyle bunu bildirdi ("yukarıda sayı aşağıda kalmış").
+                     Çözüm: tablo yerine, her pozisyonun kendi kartı olduğu, dikey
+                     istiflenen (üstte sembol+yön+K/Z, altta adet/ort.fiyat+butonlar)
+                     bir liste — bkz. renderPositions() (tradingEngine.js) ve
+                     .pos-card kuralları (styles.css). Yatay kaydırma tamamen ortadan
+                     kalkıyor, K/Z değeri artık tek satırda (white-space: nowrap). -->
                 <div class="form-group" style="margin-top: 20px;">
                     <label>Açık Pozisyonlar</label>
                     <div class="table-container qt-mini-table">
-                        <table class="data-table" style="font-size: 11px;">
-                            <thead>
-                                <tr>
-                                    <th>Sembol</th>
-                                    <th>Yön</th>
-                                    <th>Adet</th>
-                                    <th>Ort. Fiyat</th>
-                                    <th>K/Z</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="qt-positions-body"></tbody>
-                        </table>
+                        <div id="qt-positions-body" class="qt-card-list"></div>
                     </div>
                 </div>
 
-                <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum) -->
+                <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum;
+                     23 Temmuz 2026 on üçüncü oturum devamında kart listesine çevrildi) -->
                 <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
                     <label>Bekleyen OCO Emirleri</label>
                     <div class="table-container qt-mini-table">
-                        <table class="data-table" style="font-size: 11px;">
-                            <thead>
-                                <tr>
-                                    <th>Sembol</th>
-                                    <th>Üst Tetik</th>
-                                    <th>Alt Tetik</th>
-                                    <th>Adet</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="qt-pending-oco-body"></tbody>
-                        </table>
+                        <div id="qt-pending-oco-body" class="qt-card-list"></div>
                     </div>
                 </div>
 
@@ -889,18 +877,7 @@
                         </button>
                     </div>
                     <div class="table-container qt-mini-table">
-                        <table class="data-table" style="font-size: 11px;">
-                            <thead>
-                                <tr>
-                                    <th>Saat</th>
-                                    <th>Sembol</th>
-                                    <th>Yön</th>
-                                    <th>Adet@Fiyat</th>
-                                    <th>K/Z</th>
-                                </tr>
-                            </thead>
-                            <tbody id="qt-orders-body"></tbody>
-                        </table>
+                        <div id="qt-orders-body" class="qt-card-list"></div>
                     </div>
                 </div>
 

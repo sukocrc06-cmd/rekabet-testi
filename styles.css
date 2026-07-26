@@ -4614,6 +4614,143 @@ body.compact-mode .status-item {
     padding: 6px 8px;
 }
 
+/* ────────── Açık Pozisyonlar / Bekleyen OCO / Son Emirler kart listeleri ──────────
+ * (23 Temmuz 2026, on üçüncü oturum devamı) Bu üç kutu önceden 5-6 sütunlu
+ * <table> idi. Ticket panelinin sabit dar genişliğinde bu, yatay kaydırma
+ * gerektiriyordu ve K/Z gibi parasal değerler sütuna sığmayınca "-" işareti
+ * kendi satırına düşecek şekilde kırılıyordu (kullanıcı ekran görüntüsüyle
+ * bildirdi: "yukarıda sayı aşağıda kalmış"). Çözüm: her satırı, üstte ana
+ * bilgi (sembol/saat + K/Z veya yön), altta ikincil bilgi (adet/fiyat +
+ * butonlar) olacak şekilde DİKEY istifleyen kompakt bir karta çeviriyoruz —
+ * hiçbir sütun genişliğe bağımlı değil, tutar alanları white-space: nowrap
+ * ile her zaman tek satırda kalıyor. */
+.qt-card-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.qt-empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 16px;
+    font-size: 11px;
+}
+
+.pos-card,
+.oco-card,
+.order-card {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--tint-03);
+}
+
+.pos-card:last-child,
+.oco-card:last-child,
+.order-card:last-child {
+    border-bottom: none;
+}
+
+.pos-card:hover,
+.oco-card:hover,
+.order-card:hover {
+    background-color: rgba(212, 175, 55, 0.03);
+}
+
+.pos-card-top,
+.pos-card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pos-card-bottom {
+    margin-top: 5px;
+}
+
+.pos-card-id {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+}
+
+.pos-card-id .font-bold {
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pos-card-pnl {
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.pos-card-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pos-card-dot {
+    margin: 0 5px;
+    opacity: 0.5;
+}
+
+.oco-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.oco-card-bottom {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+}
+
+.order-card-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.order-card-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.order-card-top .font-bold {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.order-card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 11px;
+}
+
+.order-card-bottom .font-mono:first-child {
+    color: var(--text-muted);
+}
+
 .btn-close-pos {
     font-size: 9px;
     font-weight: 700;
