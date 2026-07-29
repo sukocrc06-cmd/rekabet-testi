@@ -3168,6 +3168,50 @@ body.compact-mode .status-item {
     margin-top: 8px;
 }
 
+/* ────────── Risk bazlı pozisyon büyüklüğü hesaplayıcı ──────────
+ * (26 Temmuz 2026, on üçüncü oturum devamı) .qt-trailing-block ile aynı
+ * görsel dil (üst-ayraçlı alt-blok) — SL/TP kutusunun içinde, Stop-Loss
+ * fiyatının hemen altında yaşıyor çünkü hesaplama ona bağımlı. */
+.qt-risk-calc {
+    padding-top: 8px;
+    border-top: 1px solid var(--tint-06);
+}
+
+.qt-risk-box {
+    margin-top: 8px;
+}
+
+.qt-risk-hint {
+    margin: 6px 0 0 0;
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.qt-risk-hint.qt-risk-hint-ok {
+    color: var(--gold);
+    font-weight: 600;
+}
+
+/* ────────── Portföy genel risk uyarısı ──────────
+ * (26 Temmuz 2026, on üçüncü oturum devamı) Tüm açık pozisyonlardaki
+ * tanımlı risk toplamı özkaynağın belirli bir yüzdesini aşınca görünür —
+ * bkz. tradingEngine.js renderPortfolioRiskWarning(). .qt-ticket-alert ile
+ * aynı kart dili ama kasıtlı olarak AYRI bir renk (amber/kehribar) —
+ * "emir reddedildi" (kırmızı) ya da "bilgi notu" (altın) ile karışmasın,
+ * kendi başına bir risk-yönetimi sinyali olarak tanınsın diye. */
+.qt-portfolio-risk-warning {
+    margin: 0 0 16px 0;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    background-color: rgba(255, 193, 7, 0.12);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    color: #FFC107;
+}
+
 .sltp-modal-info {
     font-size: 11px;
     color: var(--text-secondary);

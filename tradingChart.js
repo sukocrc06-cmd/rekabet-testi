@@ -443,6 +443,37 @@ const TradingChart = (() => {
         return null;
     }
 
+    // (26 Temmuz 2026, on üçüncü oturum devamı — "hızlandırma: sembol
+    // geçmişi önbelleği") Önceden her sembol seçiminde (aynı sembole geri
+    // dönülse bile) fetchOhlcvWithRetry() TAM geçmişi (period=max, bazı
+    // semboller için binlerce satır) sıfırdan yeniden indiriyordu — bir
+    // önceki oturumda "REST+WS paralelleştirme" seçilirken bu madde
+    // (istemci-taraf önbelleği) kasıtlı olarak ERTELENMİŞTİ, kullanıcı bu
+    // oturumda ayrıca istedi. Basit bir bellek-içi (yalnızca bu sekme
+    // ömrü boyunca — localStorage'a YAZILMIYOR) TTL'li önbellek: aynı
+    // sembole 3 dakika içinde tekrar dönülürse ağa hiç gidilmez, önceki
+    // sonuç doğrudan kullanılır. TTL süresi dolunca normal şekilde tekrar
+    // ağdan çekilir — böylece uzun süre sonra dönüldüğünde veri bayatlamaz.
+    // Yalnızca GERÇEK bir backend yanıtı önbelleğe alınır (`fresh` null ya
+    // da çok kısaysa hiç yazılmaz) — bu sayede backend geçici olarak
+    // erişilemezken üretilen sentetik yedek veri asla "önbelleklenmiş
+    // gerçek veri" gibi davranmaz, bir sonraki seçimde yine gerçek veri
+    // denenir.
+    const SYMBOL_HISTORY_CACHE_TTL_MS = 3 * 60 * 1000;
+    const symbolHistoryCache = new Map(); // ticker -> { candles, ts }
+
+    async function fetchOhlcvCached(ticker) {
+        const cached = symbolHistoryCache.get(ticker);
+        if (cached && (Date.now() - cached.ts) < SYMBOL_HISTORY_CACHE_TTL_MS) {
+            return cached.candles;
+        }
+        const fresh = await fetchOhlcvWithRetry(ticker);
+        if (fresh && fresh.length >= 5) {
+            symbolHistoryCache.set(ticker, { candles: fresh, ts: Date.now() });
+        }
+        return fresh;
+    }
+
     // (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel verileri")
     // F/K, piyasa değeri, temettü verimi — backend'in yeni /api/v1/fundamentals
     // ucundan çekiliyor. Grafiğin kendisini HİÇ geciktirmiyor: loadSymbol()
@@ -556,7 +587,7 @@ const TradingChart = (() => {
         setSymbolHeader(ticker, null, null);
         fetchFundamentals(ticker); // fire-and-forget, chart yüklemesini beklemez
 
-        let candles = await fetchOhlcvWithRetry(ticker);
+        let candles = await fetchOhlcvCached(ticker);
 
         if (!candles || candles.length < 5) {
             // (19 Temmuz 2026, on ikinci oturum) Önceden burada sabit "90"
@@ -1267,7 +1298,7 @@ const TradingChart = (() => {
     // faydadan çok karmaşa katardı) — ama aynı dedup/sıralama korumasını
     // (Lightweight Charts'ın kesin artan/tekil zaman gereksinimi) uyguluyor.
     async function fetchDailyCandlesForCompare(ticker) {
-        let candles = await fetchOhlcvWithRetry(ticker);
+        let candles = await fetchOhlcvCached(ticker);
         if (!candles || candles.length < 5) {
             candles = window.DataController.generateOHLCV(ticker);
         }

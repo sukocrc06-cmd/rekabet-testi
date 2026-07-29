@@ -447,7 +447,13 @@ const TradingEngine = (() => {
     // Backend'e ulaşılamazsa (kapalıysa, LNA izni yoksa, ağ hatası vb.)
     // sessizce hiçbir şey yapmadan bir sonraki turu bekliyor — mevcut
     // simülasyon kesintisiz devam ediyor, hiçbir hata kullanıcıya sızmıyor.
-    const WATCHLIST_SYNC_INTERVAL_MS = 90000;
+    // (26 Temmuz 2026, on üçüncü oturum devamı — "hızlandırma: izleme
+    // listesi senkron aralığı") 90sn önceden fazla "donuk" hissettiriyordu;
+    // 40sn'ye düşürüldü. Bu TEK bir toplu istek olduğu için (97 sembolü
+    // ayrı ayrı değil, tek /api/v1/quotes çağrısıyla) backend yükü ~2.25
+    // kat artıyor ama hâlâ ihmal edilebilir düzeyde — buna karşılık
+    // izleme listesindeki fiyatlar gerçek zamana çok daha yakın kalıyor.
+    const WATCHLIST_SYNC_INTERVAL_MS = 40000;
     const WATCHLIST_SYNC_URL = (window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000') + '/api/v1/quotes';
 
     async function syncWatchlistPrices() {
@@ -1784,6 +1790,10 @@ const TradingEngine = (() => {
         const sltpRow = byId('qt-sltp-row');
         const trailingToggle = byId('qt-trailing-toggle');
         const trailingRow = byId('qt-trailing-row');
+        const riskToggle = byId('qt-risk-toggle');
+        const riskRow = byId('qt-risk-row');
+        const riskPctInput = byId('qt-risk-pct');
+        const slPriceInput = byId('qt-sl-price');
 
         if (buyTab) buyTab.addEventListener('click', () => setSide('BUY'));
         if (sellTab) sellTab.addEventListener('click', () => setSide('SELL'));
@@ -1791,12 +1801,18 @@ const TradingEngine = (() => {
         if (limitTab) limitTab.addEventListener('click', () => setOrderType('LIMIT'));
         if (ocoTab) ocoTab.addEventListener('click', () => setOrderType('OCO'));
         if (qtyInput) qtyInput.addEventListener('input', updateEstimate);
-        if (limitInput) limitInput.addEventListener('input', updateEstimate);
+        if (limitInput) limitInput.addEventListener('input', () => { updateEstimate(); maybeRecomputeRiskQty(); });
         if (ocoUpperInput) ocoUpperInput.addEventListener('input', updateEstimate);
         if (ocoLowerInput) ocoLowerInput.addEventListener('input', updateEstimate);
         if (sltpToggle && sltpRow) {
             sltpToggle.addEventListener('change', () => {
                 sltpRow.style.display = sltpToggle.checked ? 'flex' : 'none';
+                // SL/TP kutusu kapanınca içindeki risk hesaplayıcı da anlamsız
+                // hale gelir (Stop-Loss fiyatı artık gönderilmeyecek) — kapatılıp
+                // adet alanı manuel girişe geri döndürülüyor.
+                if (!sltpToggle.checked) {
+                    setRiskCalcEnabled(false);
+                }
             });
         }
         if (trailingToggle && trailingRow) {
@@ -1804,8 +1820,17 @@ const TradingEngine = (() => {
                 trailingRow.style.display = trailingToggle.checked ? 'flex' : 'none';
                 const slField = byId('qt-sl-price');
                 if (slField) slField.disabled = trailingToggle.checked;
+                // Trailing stop'un sabit bir Stop-Loss fiyatı yok — risk
+                // hesaplayıcı sabit SL fiyatına dayandığı için trailing
+                // seçilince otomatik kapatılır.
+                if (trailingToggle.checked) setRiskCalcEnabled(false);
             });
         }
+        if (riskToggle && riskRow) {
+            riskToggle.addEventListener('change', () => setRiskCalcEnabled(riskToggle.checked));
+        }
+        if (riskPctInput) riskPctInput.addEventListener('input', maybeRecomputeRiskQty);
+        if (slPriceInput) slPriceInput.addEventListener('input', maybeRecomputeRiskQty);
 
         document.querySelectorAll('.qty-pct-btn').forEach(btn => {
             btn.addEventListener('click', () => applyQtyPct(parseInt(btn.dataset.pct, 10)));
@@ -1837,6 +1862,7 @@ const TradingEngine = (() => {
             submitBtn.className = 'btn-trade-submit ' + (side === 'BUY' ? 'btn-buy' : 'btn-sell');
         }
         updateEstimate();
+        maybeRecomputeRiskQty();
     }
 
     function setOrderType(type) {
@@ -1872,7 +1898,13 @@ const TradingEngine = (() => {
         if (sltpGroup) sltpGroup.style.display = type === 'OCO' ? 'none' : 'block';
         if (submitBtn) submitBtn.textContent = type === 'OCO' ? 'OCO EMRİ OLUŞTUR' : (state.side === 'BUY' ? 'AL (BUY)' : 'SAT (SELL)');
 
+        // OCO'da SL/TP kutusu (ve içindeki risk hesaplayıcı) tamamen
+        // gizleniyor — adet alanı OCO'nun kendi kullanımı için serbest
+        // kalmalı, risk hesaplayıcının onu kilitli bırakmasına izin verilmez.
+        if (type === 'OCO') setRiskCalcEnabled(false);
+
         updateEstimate();
+        maybeRecomputeRiskQty();
     }
 
     const LEVERAGE_MIN = 1;
@@ -1883,6 +1915,7 @@ const TradingEngine = (() => {
         const hint = byId('leverage-warning-hint');
         if (hint) hint.style.display = state.leverage >= 5 ? 'inline' : 'none';
         updateEstimate();
+        maybeRecomputeRiskQty();
         return state.leverage;
     }
 
@@ -1978,6 +2011,101 @@ const TradingEngine = (() => {
         let saved = null;
         try { saved = localStorage.getItem(MARKET_MODE_STORAGE_KEY); } catch (e) { /* private mode */ }
         apply(saved === 'VIOP' ? 'VIOP' : 'NORMAL');
+    }
+
+    // (26 Temmuz 2026, on üçüncü oturum devamı — "risk yönetimi: pozisyon
+    // büyüklüğü hesaplayıcı") Kullanıcı "bakiyemin %X'ini riske atmak
+    // istiyorum, Stop-Loss'um şu fiyatta olacak, bana kaç adet almam
+    // gerektiğini hesapla" mantığını istedi — bu, çoğu gerçek trading
+    // platformunda olan ama burada olmayan bir özellikti. Girdi:
+    // Stop-Loss fiyatı (#qt-sl-price, zaten SL/TP kutusunda var) ve risk
+    // yüzdesi (#qt-risk-pct, yeni). Formül: risk edilecek tutar = bakiye ×
+    // risk% ; hisse başına risk = |giriş fiyatı − SL fiyatı| ; adet =
+    // risk edilecek tutar / hisse başına risk. Sonuç ayrıca mevcut
+    // kaldıraçla karşılanabilecek maksimum nominal pozisyonla (marj
+    // sınırı) kırpılıyor — çok dar bir Stop-Loss çok büyük bir adede yol
+    // açabilir, o zaman bakiye zaten yetmez. Yalnızca #qt-risk-toggle
+    // işaretliyken çağrılır (bkz. maybeRecomputeRiskQty / setupTicket).
+    function computeRiskBasedQty() {
+        const hint = byId('qt-risk-hint');
+        const qtyInput = byId('qt-qty');
+        const slInput = byId('qt-sl-price');
+        const riskPctInput = byId('qt-risk-pct');
+        if (!qtyInput || !slInput || !riskPctInput) return;
+
+        const price = effectivePrice();
+        const slPrice = slInput.value ? Number(slInput.value) : null;
+        const riskPct = riskPctInput.value ? Number(riskPctInput.value) : 0;
+
+        const setHint = (text, ok) => {
+            if (!hint) return;
+            hint.textContent = text;
+            hint.classList.toggle('qt-risk-hint-ok', !!ok);
+        };
+
+        if (!price || price <= 0) {
+            setHint('Fiyat bilgisi alınamadı.', false);
+            return;
+        }
+        if (!slPrice || slPrice <= 0 || !riskPct || riskPct <= 0) {
+            setHint('Stop-Loss fiyatı girin — miktar otomatik hesaplanacak.', false);
+            return;
+        }
+
+        const perShareRisk = Math.abs(price - slPrice);
+        if (perShareRisk <= 0) {
+            setHint('Stop-Loss fiyatı giriş fiyatından farklı olmalı.', false);
+            return;
+        }
+
+        const riskAmount = portfolio.balance * (riskPct / 100);
+        let qty = Math.floor(riskAmount / perShareRisk);
+
+        const leverage = Math.max(1, Number(state.leverage) || 1);
+        const commissionPct = getCommissionPct();
+        const maxQtyByMargin = Math.floor(portfolio.balance / (price * ((1 / leverage) + (commissionPct / 100))));
+        let clamped = false;
+        if (qty > maxQtyByMargin) {
+            qty = Math.max(0, maxQtyByMargin);
+            clamped = true;
+        }
+
+        qtyInput.value = qty > 0 ? qty : '';
+        updateEstimate();
+
+        if (qty <= 0) {
+            setHint('Bakiye bu risk / Stop-Loss kombinasyonu için yeterli değil.', false);
+        } else if (clamped) {
+            setHint(`${qty} adet — marj sınırı nedeniyle düşürüldü (Stop-Loss çok yakın olabilir).`, true);
+        } else {
+            setHint(`${qty} adet — risk: ${fmtTRY(riskAmount)} (bakiyenin %${riskPct})`, true);
+        }
+    }
+
+    function maybeRecomputeRiskQty() {
+        const toggle = byId('qt-risk-toggle');
+        if (toggle && toggle.checked) computeRiskBasedQty();
+    }
+
+    // Risk hesaplayıcı açıkken adet alanı ve %25/50/75/100 hızlı butonları
+    // manuel girişe kapatılır — aksi halde ikisi birbirinin üzerine yazıp
+    // kullanıcının "risk bazlı" adedi neden değiştiğini anlamasını
+    // zorlaştırırdı. Kapanınca adet alanı serbest kalır (son hesaplanan
+    // değer olduğu gibi kalır, kullanıcı isterse elle değiştirebilir).
+    function setRiskCalcEnabled(enabled) {
+        const toggle = byId('qt-risk-toggle');
+        const row = byId('qt-risk-row');
+        const qtyInput = byId('qt-qty');
+        if (toggle) toggle.checked = enabled;
+        if (row) row.style.display = enabled ? 'block' : 'none';
+        if (qtyInput) qtyInput.disabled = enabled;
+        document.querySelectorAll('.qty-pct-btn').forEach(btn => { btn.disabled = enabled; });
+        if (enabled) {
+            computeRiskBasedQty();
+        } else {
+            const hint = byId('qt-risk-hint');
+            if (hint) { hint.textContent = 'Stop-Loss fiyatı girin — miktar otomatik hesaplanacak.'; hint.classList.remove('qt-risk-hint-ok'); }
+        }
     }
 
     function applyQtyPct(pct) {
@@ -2212,6 +2340,10 @@ const TradingEngine = (() => {
         if (trailingPctInput) trailingPctInput.value = '';
         const trailingRow = byId('qt-trailing-row');
         if (trailingRow) trailingRow.style.display = 'none';
+        // Risk hesaplayıcı da SL/TP ile birlikte sıfırlanır — bir sonraki
+        // emir için adet alanı yeniden manuel girişe (ya da bir sonraki
+        // risk hesaplamasına) hazır, kilitli kalmıyor.
+        setRiskCalcEnabled(false);
         updateEstimate();
     }
 
@@ -2617,6 +2749,13 @@ const TradingEngine = (() => {
         pos.tp = tpPrice || null;
         savePortfolio();
         renderPositions();
+        // (26 Temmuz 2026 devamı) Portföy genel risk uyarısı artık pos.sl'e
+        // bağlı (bkz. computeAccountSnapshot/renderPortfolioRiskWarning) —
+        // bu modaldan bir Stop-Loss eklenip/kaldırıldığında banner'ın anında
+        // güncellenmesi için renderAccountSummary() de çağrılmalı; önceden
+        // yalnızca renderPositions() yeterliydi çünkü hesap özeti SL/TP'den
+        // etkilenmiyordu.
+        renderAccountSummary();
         return true;
     }
 
@@ -2998,17 +3137,32 @@ const TradingEngine = (() => {
     // burada TEK YERDE toplandı — hem renderAccountSummary() (header/ticket
     // panelleri) hem de dışa açık getAccountSnapshot() (profil paneli) aynı
     // hesabı kullanıyor, iki ayrı kopya birbirinden sapmasın diye.
+    // (26 Temmuz 2026, on üçüncü oturum devamı — "risk yönetimi: portföy
+    // genel risk uyarısı") totalRisk/positionsWithoutStopCount buraya
+    // eklendi. Bir pozisyonun Stop-Loss'u (pos.sl) varsa gerçek maksimum
+    // kaybı TAM olarak biliniyor: |avgPrice − sl| × qty. Yoksa (Stop-Loss
+    // ayarlanmamışsa) teorik kayıp sınırsızdır — muhafazakâr/pratik bir
+    // yaklaşımla o pozisyon için yatırılan teminat (margin) kadarının
+    // riskte olduğu varsayılıyor, ayrıca kaç pozisyonun korumasız olduğu
+    // ayrıca sayılıyor ki uyarı metni bunu açıkça belirtebilsin.
     function computeAccountSnapshot() {
-        let usedMargin = 0, openPnl = 0;
+        let usedMargin = 0, openPnl = 0, totalRisk = 0, positionsWithoutStopCount = 0;
         Object.keys(portfolio.positions).forEach(symbol => {
             const pos = portfolio.positions[symbol];
             const current = getPrice(symbol) || pos.avgPrice;
             const leverage = pos.leverage || 1;
-            usedMargin += (pos.avgPrice * pos.qty) / leverage;
+            const margin = (pos.avgPrice * pos.qty) / leverage;
+            usedMargin += margin;
             if (pos.side === 'LONG') {
                 openPnl += (current - pos.avgPrice) * pos.qty;
             } else {
                 openPnl += (pos.avgPrice - current) * pos.qty;
+            }
+            if (pos.sl) {
+                totalRisk += Math.abs(pos.avgPrice - pos.sl) * pos.qty;
+            } else {
+                totalRisk += margin;
+                positionsWithoutStopCount++;
             }
         });
         const equity = portfolio.balance + usedMargin + openPnl;
@@ -3017,7 +3171,9 @@ const TradingEngine = (() => {
             equity,
             openPnl,
             usedMargin,
-            positionsCount: Object.keys(portfolio.positions).length
+            positionsCount: Object.keys(portfolio.positions).length,
+            totalRisk,
+            positionsWithoutStopCount
         };
     }
 
@@ -3025,8 +3181,36 @@ const TradingEngine = (() => {
         return computeAccountSnapshot();
     }
 
+    // (26 Temmuz 2026, on üçüncü oturum devamı) Toplam tanımlı risk
+    // özkaynağın bu yüzdesini aşınca uyarı banner'ı görünür. %10, birçok
+    // trading eğitiminde kullanılan "portföy genelinde tek seferde riske
+    // atılabilecek makul üst sınır" kabul edilen bir eşik (ör. işlem
+    // başına %2 × en fazla ~5 eşzamanlı pozisyon) — sabit ama makul bir
+    // varsayılan; ileride ayarlanabilir hale getirilebilir.
+    const PORTFOLIO_RISK_WARNING_THRESHOLD_PCT = 10;
+
+    function renderPortfolioRiskWarning(equity, totalRisk, positionsWithoutStopCount, positionsCount) {
+        const el = byId('qt-portfolio-risk-warning');
+        if (!el) return;
+        if (!positionsCount || equity <= 0 || totalRisk <= 0) {
+            el.style.display = 'none';
+            return;
+        }
+        const riskPct = (totalRisk / equity) * 100;
+        if (riskPct < PORTFOLIO_RISK_WARNING_THRESHOLD_PCT) {
+            el.style.display = 'none';
+            return;
+        }
+        const stopNote = positionsWithoutStopCount > 0
+            ? ` (${positionsWithoutStopCount} pozisyonda Stop-Loss yok — bunlar için yatırılan teminat riskte kabul edildi)`
+            : '';
+        el.textContent = `Toplam açık risk özkaynağın %${riskPct.toFixed(1)}'i (${fmtTRY(totalRisk)}) — önerilen sınır %${PORTFOLIO_RISK_WARNING_THRESHOLD_PCT}.${stopNote}`;
+        el.style.display = 'block';
+    }
+
     function renderAccountSummary() {
-        const { usedMargin, openPnl, equity } = computeAccountSnapshot();
+        const { usedMargin, openPnl, equity, totalRisk, positionsWithoutStopCount, positionsCount } = computeAccountSnapshot();
+        renderPortfolioRiskWarning(equity, totalRisk, positionsWithoutStopCount, positionsCount);
 
         // Balance now lives in the header pill (top right) rather than the trade ticket itself
         const headerBalEl = byId('header-balance-value');

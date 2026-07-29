@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from typing import List
@@ -70,6 +71,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# (26 Temmuz 2026, on üçüncü oturum devamı — "hızlandırma: backend gzip
+# sıkıştırma") Önceden yanıtlar (özellikle /api/v1/quotes'un toplu 97
+# sembollük yanıtı ve /api/v1/ohlcv/{ticker}'in period="max" ile bazı
+# semboller için binlerce satırlık geçmişi) hiç sıkıştırılmadan
+# gönderiliyordu. GZipMiddleware, istemcinin Accept-Encoding: gzip
+# gönderdiği ve yanıt gövdesi minimum_size'dan büyük olduğu durumlarda
+# gövdeyi şeffaf şekilde sıkıştırır — istemci tarafında (tarayıcının
+# fetch()'i) hiçbir kod değişikliği gerekmez, otomatik açılır. Özellikle
+# mobil/yavaş bağlantıda sayfa yükleme ve sembol değiştirme belirgin
+# şekilde hızlanır; işlevsel hiçbir davranış değişmiyor.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # (18 Temmuz 2026, dokuzuncu oturum — "yfinance hata/rate-limit dayanıklılığı")
 # Yahoo Finance'in ücretsiz/resmi-olmayan API'si sık ve art arda isteklerde
