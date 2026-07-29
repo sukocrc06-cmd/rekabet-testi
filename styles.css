@@ -236,6 +236,71 @@ body {
     overflow: hidden;
 }
 
+/* (29 Temmuz 2026 — Madde 3) Tam genişlikte, sürekli kayan piyasa şeridi.
+   JS tarafı (renderMarketTickerStrip, tradingEngine.js) içeriği İKİ KEZ art
+   arda basıyor (aynı öğe listesi iki kopya) — animasyon %-50 kaydığında
+   ikinci kopya tam olarak ilk kopyanın başladığı yerde olduğu için dikişsiz
+   (seamless) bir döngü oluşuyor. prefers-reduced-motion'a saygı gösteriliyor. */
+.market-ticker-strip {
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--gold-border);
+    white-space: nowrap;
+}
+
+.market-ticker-track {
+    display: inline-flex;
+    align-items: center;
+    animation: market-ticker-scroll 40s linear infinite;
+    will-change: transform;
+}
+
+.market-ticker-strip:hover .market-ticker-track {
+    animation-play-state: paused;
+}
+
+@keyframes market-ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+
+.market-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 6px 18px;
+    border-right: 1px solid var(--tint-06);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.market-ticker-item .mt-label {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.market-ticker-item .mt-change.profit-text {
+    color: var(--success);
+}
+
+.market-ticker-item .mt-change.loss-text {
+    color: var(--danger);
+}
+
+.market-ticker-loading {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .market-ticker-track {
+        animation: none;
+    }
+}
+
 .status-item {
     font-size: 12px;
     display: flex;
@@ -467,6 +532,35 @@ body {
     font-size: 14px;
     font-weight: 700;
     color: var(--gold);
+}
+
+/* (29 Temmuz 2026 — Madde 8: bakiyenin yanına Toplam Varlık) */
+.header-equity-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-balance-divider {
+    color: var(--text-secondary);
+    opacity: 0.5;
+    font-size: 12px;
+}
+
+/* Dar/orta genişlikte header taşmasını önlemek için Toplam Varlık bloğu
+   gizleniyor (bakiye ana rakam olarak kalıyor) — equity zaten işlem
+   panelindeki #qt-equity ve profil panelindeki #profile-equity-value'de
+   her genişlikte erişilebilir durumda. Eşik 950px: bu blok eklenince
+   header'ın gerçek genişlik ihtiyacı (Playwright ile 700-950px arası
+   ölçüldü, 900px'te hâlâ 7px taşma) ancak ~910-950px arasında karşılanıyor
+   — 950 güvenli/yuvarlak bir eşik olarak seçildi. (NOT: 521-699px
+   arasında, bu blok tamamen kaldırılsa bile ~8-49px'e varan BAĞIMSIZ/
+   ÖNCEDEN VAR OLAN bir taşma tespit edildi — bu değişiklikten kaynaklı
+   değil, bu turun kapsamı dışında, ayrıca not düşüldü.) */
+@media (max-width: 950px) {
+    .header-equity-block {
+        display: none;
+    }
 }
 
 /* --- Common Buttons & Controls --- */
@@ -3007,6 +3101,22 @@ body.compact-mode .status-item {
     border-radius: var(--radius-sm);
 }
 
+/* (29 Temmuz 2026 — Madde 20) Gösterge alarmı, aktif grafik sembolüne
+   bağlı olduğu için (serbest sembol seçimi yok) bir <select> yerine sade
+   bir metin rozeti gösteriliyor. */
+.ind-alert-active-symbol {
+    flex: 1.4;
+    min-width: 110px;
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    padding: 0 8px;
+}
+
 .alert-add-btn {
     flex: 0 0 auto;
     padding: 0 14px;
@@ -3021,6 +3131,29 @@ body.compact-mode .status-item {
     color: var(--text-secondary);
     cursor: pointer;
     margin-top: 4px;
+}
+
+/* (29 Temmuz 2026 — Madde 12) Küçük, tıklanabilir/odaklanabilir bilgi
+   ikonu — native title tooltip'i tetikler, ek JS/state gerektirmez. */
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--bg-tertiary, rgba(255,255,255,0.08));
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 1;
+    cursor: help;
+    flex-shrink: 0;
+}
+
+.info-icon:hover,
+.info-icon:focus-visible {
+    color: var(--gold);
+    background: var(--gold-dim);
 }
 
 .alerts-list {

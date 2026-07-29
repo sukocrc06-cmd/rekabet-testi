@@ -411,6 +411,82 @@ def get_quotes(request: QuotesRequest):
     return {"quotes": quotes, "asOf": now, "cached": False}
 
 
+# (29 Temmuz 2026, on üçüncü oturum devamı — Madde 3 "Kayar menüden güncel
+# €,$,altın,gümüş,BIST,brent vs. eklensin") Bu, /api/v1/quotes ve
+# /api/v1/ohlcv'nin kullandığı _is_valid_ticker_format()/format_ticker()
+# BORSA-BAZLI (yalnızca alfanumerik + otomatik ".IS" eki) akışından
+# KASITLI olarak ayrı: döviz (USDTRY=X) ve emtia (GC=F, SI=F, BZ=F)
+# sembolleri Yahoo Finance'te "=" karakteri içeriyor, format_ticker() bunlara
+# yanlışlıkla ".IS" ekleyip bozardı, _is_valid_ticker_format() da "="
+# içerdiği için zaten reddederdi. Semboller burada SABİT/SUNUCU TARAFINDA
+# TANIMLI (kullanıcıdan gelen serbest metin DEĞİL) — bu yüzden ayrı, dar bir
+# allowlist güvenli: enjeksiyon/format riski yok, çünkü hiçbir kullanıcı
+# girdisi bu listeye ulaşmıyor.
+_MARKET_TICKER_ITEMS = [
+    {"symbol": "USDTRY=X", "label": "USD/TRY"},
+    {"symbol": "EURTRY=X", "label": "EUR/TRY"},
+    {"symbol": "GC=F", "label": "Altın (Ons/$)"},
+    {"symbol": "SI=F", "label": "Gümüş (Ons/$)"},
+    {"symbol": "BZ=F", "label": "Brent Petrol ($)"},
+    {"symbol": "XU100.IS", "label": "BIST 100"},
+]
+_MARKET_TICKER_CACHE_TTL_SEC = 60
+_market_ticker_cache = {"ts": 0.0, "data": []}
+
+
+@app.get("/api/v1/market-ticker")
+def get_market_ticker():
+    now = time.time()
+    if _market_ticker_cache["data"] and (now - _market_ticker_cache["ts"]) < _MARKET_TICKER_CACHE_TTL_SEC:
+        return {"items": _market_ticker_cache["data"], "asOf": _market_ticker_cache["ts"], "cached": True}
+
+    symbols = [it["symbol"] for it in _MARKET_TICKER_ITEMS]
+    items_out = []
+    try:
+        raw = _yf_call_with_backoff(
+            lambda: yf.download(
+                tickers=symbols,
+                period="5d",
+                interval="1d",
+                group_by="ticker",
+                threads=True,
+                progress=False,
+                session=session,
+            ),
+            label="market-ticker toplu indirme"
+        )
+        single = len(symbols) == 1
+        for it in _MARKET_TICKER_ITEMS:
+            sym = it["symbol"]
+            try:
+                close_series = raw["Close"] if single else raw[sym]["Close"]
+                close_series = close_series.dropna()
+                if len(close_series) >= 2:
+                    last = float(close_series.iloc[-1])
+                    prev = float(close_series.iloc[-2])
+                    change_pct = ((last - prev) / prev * 100) if prev else 0.0
+                    items_out.append({
+                        "symbol": sym, "label": it["label"],
+                        "price": round(last, 4), "changePct": round(change_pct, 2)
+                    })
+                elif len(close_series) == 1:
+                    items_out.append({
+                        "symbol": sym, "label": it["label"],
+                        "price": round(float(close_series.iloc[-1]), 4), "changePct": None
+                    })
+            except Exception:
+                continue
+        missing = [it["symbol"] for it in _MARKET_TICKER_ITEMS if it["symbol"] not in [o["symbol"] for o in items_out]]
+        if missing:
+            print(f"[market-ticker] {len(missing)}/{len(_MARKET_TICKER_ITEMS)} sembol için veri dönmedi: {missing}")
+    except Exception as e:
+        print(f"[market-ticker] Batch download failed ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
+
+    _market_ticker_cache["ts"] = now
+    _market_ticker_cache["data"] = items_out
+    return {"items": items_out, "asOf": now, "cached": False}
+
+
 # (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
 # Burada önceden /api/v1/backtest/run ve /api/v1/backtest/status/{task_id}
 # uç noktaları vardı — frontend'de (dataController.js/app.js dahil tüm

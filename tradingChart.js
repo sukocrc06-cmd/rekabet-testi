@@ -727,6 +727,47 @@ const TradingChart = (() => {
         return null;
     }
 
+    // (29 Temmuz 2026 — Madde 20 "gösterge bazlı koşullu alarm") tradingEngine.js
+    // içindeki checkIndicatorAlerts()'ın ihtiyaç duyduğu son iki bar'lık RSI/
+    // EMA(20)/fiyat değerlerini döndürür — YENİ bir istek/hesaplama yapmıyor,
+    // state.indicators'ta ZATEN hesaplanmış RSI(14)'ü (bkz. getLastATR ile aynı
+    // desen) ve DataController.computeEMA() ile (calculateIndicators() ana
+    // pipeline'ında yok, hocanın istediği tam "EMA 20" için burada özel olarak
+    // hesaplanıyor) okuyor. Yalnızca AKTİF grafik sembolü için anlamlı —
+    // RSI/EMA geçmiş mum verisi gerektiriyor ve bu yalnızca burada (o an
+    // ekranda açık sembol) yüklü; tradingEngine.js bu kısıtı zaten biliyor
+    // (bkz. ilgili yorum orada) ve alarmı yalnızca bu snapshot'ın symbol'üyle
+    // eşleşen alarmlar için kontrol ediyor.
+    function getIndicatorAlertSnapshot() {
+        if (!state.ticker || !state.candles || state.candles.length < 2) return null;
+        const closes = state.candles.map(c => c.close);
+        // NOT: state.indicators.rsi14 yalnızca sembol/çözünürlük yüklenirken
+        // hesaplanıyor (bkz. getLastATR ile aynı sınır) — her fiyat tick'inde
+        // GÜNCELLENMİYOR (yalnızca son mumun close'u değişiyor, bkz.
+        // updateLastPrice). Alarmın canlı fiyat hareketine tepki verebilmesi
+        // için RSI ve EMA(20) burada HER ÇAĞRIDA closes[] üzerinden taze
+        // hesaplanıyor (computeRSI/computeEMA zaten public API'de var,
+        // maliyeti ihmal edilebilir) — state.indicators'ın statik kopyası
+        // KULLANILMIYOR, bu yüzden tutarsız/gecikmeli tetiklenme olmuyor.
+        const rsiArr = (window.DataController && window.DataController.computeRSI)
+            ? window.DataController.computeRSI(closes, 14)
+            : null;
+        const ema20Arr = (window.DataController && window.DataController.computeEMA)
+            ? window.DataController.computeEMA(closes, 20)
+            : null;
+        const lastOf = (arr) => (Array.isArray(arr) && arr.length) ? arr[arr.length - 1] : null;
+        const prevOf = (arr) => (Array.isArray(arr) && arr.length > 1) ? arr[arr.length - 2] : null;
+        return {
+            symbol: state.ticker,
+            price: closes[closes.length - 1],
+            prevPrice: closes[closes.length - 2],
+            rsiLast: lastOf(rsiArr),
+            rsiPrev: prevOf(rsiArr),
+            ema20Last: lastOf(ema20Arr),
+            ema20Prev: prevOf(ema20Arr)
+        };
+    }
+
     /* ────────── Çoklu Zaman Dilimi Analiz Paneli (MTF Confluence) ──────────
      * (29 Temmuz 2026) Aktif sembolün 4 saatlik/günlük/haftalık zaman
      * dilimlerinde trend yönünü (fiyat > SMA20 > SMA50 ise yükseliş, ters
@@ -4348,6 +4389,7 @@ const TradingChart = (() => {
         renderAllOscillatorPanes,
         getLastClose,
         getLastATR,
+        getIndicatorAlertSnapshot,
         refreshUserTradeMarkers,
         setTheme,
         setChartType,

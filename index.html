@@ -74,6 +74,20 @@
                 <div class="header-balance-pill" id="header-balance-pill">
                     <span class="header-balance-label">Bakiye</span>
                     <span class="header-balance-value" id="header-balance-value">--</span>
+                    <!-- (29 Temmuz 2026 — Madde 8 "Portföy Güncelliği": hocanın
+                         önerdiği çözüm birebir uygulandı — bakiyenin yanına,
+                         işlem yapıldıkça otomatik güncellenen bir "Toplam
+                         Varlık" (özkaynak = bakiye + kullanılan marj + açık
+                         K/Z, computeAccountSnapshot() — tek doğruluk kaynağı)
+                         değeri eklendi. Dar ekranlarda header taşmasın diye
+                         (bkz. .header-equity-block, ≤650px'te gizleniyor;
+                         mobilde equity zaten işlem panelindeki #qt-equity ve
+                         profil panelindeki #profile-equity-value'de mevcut). -->
+                    <span class="header-equity-block" id="header-equity-block">
+                        <span class="header-balance-divider">·</span>
+                        <span class="header-balance-label">Toplam Varlık</span>
+                        <span class="header-balance-value" id="header-equity-value">--</span>
+                    </span>
                 </div>
                 <button class="btn btn-icon" id="btn-mute-toggle" title="Sesli Bildirimleri Aç/Kapat">
                     <svg id="mute-icon-on" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
@@ -178,6 +192,22 @@
                 </div>
             </div>
         </header>
+
+        <!-- (29 Temmuz 2026 — Madde 3 "Kayar menüden güncel €,$,altın,gümüş,
+             BIST,Brent vs. eklensin"): tam genişlikte, sürekli kayan bir
+             piyasa şeridi. Header'ın kendisine EKLENMEDİ (header genişlik
+             bütçesi zaten dar, bkz. yukarıdaki Toplam Varlık notu) — ayrı,
+             tam genişlikte bir satır olarak header'ın hemen altına
+             yerleştirildi. İçerik tradingEngine.js renderMarketTickerStrip()
+             tarafından dolduruluyor; veri /api/v1/market-ticker'dan geliyor
+             (gerçek yfinance sembolleri: USDTRY=X, EURTRY=X, GC=F, SI=F,
+             BZ=F, XU100.IS — ana BIST100 hisse doğrulama/format akışından
+             KASITLI olarak ayrı, çünkü bunlar ".IS" son eki almamalı). -->
+        <div class="market-ticker-strip" id="market-ticker-strip" aria-label="Piyasa Kayan Şeridi">
+            <div class="market-ticker-track" id="market-ticker-track">
+                <span class="market-ticker-item market-ticker-loading">Piyasa verileri yükleniyor…</span>
+            </div>
+        </div>
 
         <!-- MAIN LAYOUT -->
         <div class="dashboard-body">
@@ -800,6 +830,13 @@
                                 <label class="alert-notif-toggle-row" style="margin-top:0; text-transform:none; font-weight:500;">
                                     <input type="checkbox" id="qt-trailing-toggle">
                                     <span>Sabit Stop-Loss yerine Trailing Stop kullan</span>
+                                    <!-- (29 Temmuz 2026 — Madde 12 "Trailing-Stop hangi prensiple,
+                                         sağlıklı mı?"): kod değişikliği değil, bir açıklama isteniyordu.
+                                         Native title tooltip ile mekanizma özetleniyor — gerçek mantık
+                                         checkStopLossTakeProfit()'teki trailingExtreme hesabıyla birebir
+                                         aynı (fiyat lehte ilerledikçe en iyi seviye güncellenir, stop bu
+                                         seviyeden hep aynı % kadar geride kalır, asla geri gitmez). -->
+                                    <span class="info-icon" tabindex="0" title="Trailing Stop nasıl çalışır: Fiyat lehinize hareket ettikçe stop seviyesi otomatik olarak en iyi (en yüksek/en düşük) fiyat seviyenizden belirlediğiniz yüzde kadar geride takip eder. Stop seviyesi kâr yönünde ilerledikçe kilitlenir, asla geriye (zarar yönüne) gitmez — piyasadaki standart trailing-stop mantığıyla aynıdır.">ⓘ</span>
                                 </label>
                                 <div class="qt-sltp-field qt-trailing-field" id="qt-trailing-row" style="display:none;">
                                     <label for="qt-trailing-pct">Trailing Stop Mesafesi (%)</label>
@@ -1197,6 +1234,38 @@
                 <div class="indicator-modal-category" data-category-label="tetiklenen alarmlar" id="triggered-alerts-section" style="display:none;">
                     <div class="indicator-subgroup-label">Tetiklenen Alarmlar</div>
                     <div class="alerts-list" id="triggered-alerts-list"></div>
+                </div>
+
+                <!-- (29 Temmuz 2026 — Madde 20 "Kullanıcının sadece belirli bir
+                     fiyata değil, örneğin RSI 30'u aşağı kestiğinde veya fiyatı
+                     EMA 20'ye dokunduğunda bildirim verebileceği bir uyarı
+                     sistemi"): fiyat alarmlarından AYRI bir bölüm, çünkü kontrol
+                     mekanizması farklı — gösterge alarmları YALNIZCA o an
+                     grafikte açık olan sembol için çalışabiliyor (RSI/EMA
+                     hesaplaması geçmiş mum verisi gerektiriyor, bu sadece aktif
+                     grafik sembolünde yükleniyor), bu yüzden sembol serbest
+                     seçilemiyor — aktif sembol otomatik gösteriliyor. -->
+                <div class="indicator-modal-category" data-category-label="yeni gösterge alarmı">
+                    <div class="indicator-subgroup-label">
+                        Yeni Gösterge Alarmı
+                        <span class="info-icon" tabindex="0" title="Gösterge alarmları yalnızca o an grafikte açık olan sembol için kontrol edilebilir — RSI/EMA hesabı geçmiş mum verisi gerektiriyor ve bu yalnızca aktif grafik sembolünde yükleniyor. Farklı bir sembolde alarm kurmak için önce o sembolü grafikte açın, sonra bu pencereyi tekrar açın.">ⓘ</span>
+                    </div>
+                    <div class="alert-form-row">
+                        <span class="ind-alert-active-symbol" id="ind-alert-active-symbol">Aktif sembol: --</span>
+                        <select id="ind-alert-type-select" class="form-input alert-condition-select" aria-label="Gösterge koşulu">
+                            <option value="RSI_CROSS_BELOW">RSI aşağı kesişim</option>
+                            <option value="RSI_CROSS_ABOVE">RSI yukarı kesişim</option>
+                            <option value="EMA20_TOUCH">Fiyat EMA(20)'ye dokunma</option>
+                        </select>
+                        <input type="number" id="ind-alert-threshold" class="form-input alert-target-input" min="1" max="99" step="1" placeholder="Eşik (ör. 30)" value="30">
+                        <button type="button" class="btn-chip-action alert-add-btn" id="btn-add-indicator-alert">Ekle</button>
+                    </div>
+                </div>
+
+                <div class="indicator-modal-category" data-category-label="aktif gösterge alarmları">
+                    <div class="indicator-subgroup-label">Aktif Gösterge Alarmları</div>
+                    <div class="alerts-list" id="active-indicator-alerts-list"></div>
+                    <div class="alerts-empty" id="indicator-alerts-empty-msg">Henüz gösterge alarmı oluşturulmadı.</div>
                 </div>
             </div>
         </div>

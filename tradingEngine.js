@@ -254,6 +254,7 @@ const TradingEngine = (() => {
         checkMarginCalls();
         checkPendingOcoOrders();
         checkAlerts();
+        checkIndicatorAlerts();
 
         sampleEquity();
         if (byId('panel-tab-performance')?.classList.contains('active')) renderPerformanceTab();
@@ -500,6 +501,54 @@ const TradingEngine = (() => {
             renderPositions();
             renderAccountSummary();
         }
+    }
+
+    // (29 Temmuz 2026 — Madde 3 "Kayar menüden güncel €,$,altın,gümüş,BIST,
+    // brent vs. eklensin") Header'ın altındaki tam genişlikte kayan şeridi
+    // periyodik olarak yeni /api/v1/market-ticker uç noktasından (main.py —
+    // USDTRY=X/EURTRY=X/GC=F/SI=F/BZ=F/XU100.IS için gerçek yfinance verisi)
+    // besliyor. syncWatchlistPrices ile AYNI dostane-hata deseni: backend'e
+    // ulaşılamazsa sessizce vazgeçilip bir sonraki turu bekliyor, hiçbir
+    // hata kullanıcıya sızmıyor, şerit son bilinen veriyle kalıyor.
+    const MARKET_TICKER_SYNC_INTERVAL_MS = 60000;
+    const MARKET_TICKER_URL = (window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000') + '/api/v1/market-ticker';
+
+    function renderMarketTickerStrip(items) {
+        const track = byId('market-ticker-track');
+        if (!track || !Array.isArray(items) || !items.length) return;
+        const itemHtml = items.map(it => {
+            const hasChange = typeof it.changePct === 'number';
+            const isUp = hasChange && it.changePct >= 0;
+            const changeCls = hasChange ? (isUp ? 'profit-text' : 'loss-text') : '';
+            const arrow = hasChange ? (isUp ? '▲' : '▼') : '';
+            const changeText = hasChange ? (arrow + Math.abs(it.changePct).toFixed(2) + '%') : '--';
+            const priceText = (typeof it.price === 'number')
+                ? it.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+                : '--';
+            return '<span class="market-ticker-item"><span class="mt-label">' + it.label + '</span>' +
+                '<span class="mt-price">' + priceText + '</span>' +
+                '<span class="mt-change ' + changeCls + '">' + changeText + '</span></span>';
+        }).join('');
+        // Aynı liste iki kez art arda basılıyor — @keyframes market-ticker-scroll
+        // %-50 kaydırdığında ikinci kopya ilkinin başladığı yerde olduğu için
+        // dikişsiz (seamless) bir döngü oluşuyor (bkz. styles.css).
+        track.innerHTML = itemHtml + itemHtml;
+    }
+
+    async function syncMarketTickerStrip() {
+        let json;
+        try {
+            const res = await fetch(MARKET_TICKER_URL, window.optipulseFetchOpts({
+                method: 'GET',
+                signal: AbortSignal.timeout(15000)
+            }));
+            if (!res.ok) return;
+            json = await res.json();
+        } catch (e) {
+            return; // backend'e ulaşılamadı — sessizce vazgeç, şerit son bilinen veriyle kalır
+        }
+        if (!json || !Array.isArray(json.items) || !json.items.length) return;
+        renderMarketTickerStrip(json.items);
     }
 
     /* ════════════════════════════════════════════════
@@ -901,7 +950,11 @@ const TradingEngine = (() => {
     function updateAlertBadge() {
         const badge = byId('alert-count-badge');
         if (!badge) return;
-        const activeCount = priceAlerts.filter(a => !a.triggered).length;
+        // (29 Temmuz 2026 — Madde 20) Rozet, fiyat alarmları + gösterge
+        // alarmlarının TOPLAM aktif sayısını gösteriyor — kullanıcı için
+        // "bekleyen alarmım var mı" tek bir yerden anlaşılır kalsın diye.
+        const activeCount = priceAlerts.filter(a => !a.triggered).length +
+            indicatorAlerts.filter(a => !a.triggered).length;
         if (activeCount > 0) {
             badge.textContent = String(activeCount);
             badge.style.display = 'inline-flex';
@@ -966,6 +1019,162 @@ const TradingEngine = (() => {
             : (prevValue || sel.value);
     }
 
+    /* ════════════════════════════════════════════════
+       Gösterge Bazlı Koşullu Alarmlar (Madde 20)
+       ════════════════════════════════════════════════
+       Fiyat alarmlarından (yukarısı) KASITLI olarak ayrı bir sistem: kontrol
+       mekanizması farklı ve daha kısıtlı. RSI/EMA hesaplaması geçmiş mum
+       verisi gerektirir, bu veri yalnızca tradingChart.js'in o an ekranda
+       AÇIK olan sembol için yüklediği state.candles/state.indicators'ta
+       mevcut — watchlist'teki diğer ~96 sembol için (priceProfiles'taki
+       basit simüle fiyatın aksine) RSI/EMA geçmişi hiç hesaplanmıyor. Bu
+       yüzden: (a) alarm kurarken sembol serbest seçilemiyor, o an aktif
+       grafik sembolüne bağlanıyor, (b) checkIndicatorAlerts() yalnızca o an
+       aktif sembolün alarmlarını değerlendirebiliyor — başka bir sembol için
+       kurulmuş bir alarm, kullanıcı o sembolü tekrar grafikte açana kadar
+       "uykuda" kalır (bu, alarmın silinmesi/bozuk olması değil, mimari bir
+       kısıt — arayüzde bilgi ikonuyla açıkça belirtiliyor). */
+
+    const INDICATOR_ALERTS_STORAGE_KEY = 'optipulselab_indicator_alerts_v1';
+    let indicatorAlerts = [];
+
+    function loadIndicatorAlerts() {
+        try {
+            const raw = localStorage.getItem(INDICATOR_ALERTS_STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) return parsed;
+            }
+        } catch (e) { /* ignore corrupt storage */ }
+        return [];
+    }
+
+    function saveIndicatorAlerts() {
+        try { localStorage.setItem(INDICATOR_ALERTS_STORAGE_KEY, JSON.stringify(indicatorAlerts)); } catch (e) { /* quota / private mode */ }
+    }
+
+    function indicatorAlertLabel(a) {
+        if (a.indType === 'RSI_CROSS_BELOW') return 'RSI ' + a.threshold + "'un altına inince";
+        if (a.indType === 'RSI_CROSS_ABOVE') return 'RSI ' + a.threshold + "'un üzerine çıkınca";
+        if (a.indType === 'EMA20_TOUCH') return "Fiyat EMA(20)'ye dokununca";
+        return a.indType;
+    }
+
+    function addIndicatorAlert(symbol, indType, threshold) {
+        if (!symbol || !indType) return null;
+        const alert = {
+            id: 'ialrt_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            symbol,
+            indType, // 'RSI_CROSS_BELOW' | 'RSI_CROSS_ABOVE' | 'EMA20_TOUCH'
+            threshold: (indType === 'EMA20_TOUCH') ? null : (+threshold || (indType === 'RSI_CROSS_ABOVE' ? 70 : 30)),
+            createdAt: Date.now(),
+            triggered: false,
+            triggeredAt: null,
+            triggeredValueText: null
+        };
+        indicatorAlerts.push(alert);
+        saveIndicatorAlerts();
+        renderIndicatorAlertsList();
+        updateAlertBadge();
+        return alert;
+    }
+
+    function deleteIndicatorAlert(id) {
+        indicatorAlerts = indicatorAlerts.filter(a => a.id !== id);
+        saveIndicatorAlerts();
+        renderIndicatorAlertsList();
+        updateAlertBadge();
+    }
+
+    // Her fiyat tick'inde (bkz. tickPrices() içindeki çağrı) çalışır. Sadece
+    // o an tradingChart.js'te yüklü olan AKTİF sembol için bir "snapshot"
+    // (son iki bar'lık RSI/EMA20/fiyat) alınabiliyor — kesişim/dokunma
+    // tespiti önceki-şimdiki karşılaştırmasıyla yapılıyor (statik bir eşik
+    // kontrolü DEĞİL, ör. RSI zaten 25 iken yeniden 25'te tetiklenmesin diye
+    // yalnızca eşiği GERÇEKTEN KESTİĞİ an bir kez ateşleniyor).
+    function checkIndicatorAlerts() {
+        if (!indicatorAlerts.length) return;
+        if (!window.TradingChart || !window.TradingChart.getIndicatorAlertSnapshot) return;
+        const snap = window.TradingChart.getIndicatorAlertSnapshot();
+        if (!snap) return;
+
+        let firedAny = false;
+        indicatorAlerts.forEach(a => {
+            if (a.triggered) return;
+            if (a.symbol !== snap.symbol) return; // bu sembol o an aktif değil — kontrol edilemez
+
+            let hit = false, valueText = '';
+            if (a.indType === 'RSI_CROSS_BELOW') {
+                if (snap.rsiPrev != null && snap.rsiLast != null && snap.rsiPrev >= a.threshold && snap.rsiLast < a.threshold) {
+                    hit = true; valueText = 'RSI ' + snap.rsiLast.toFixed(1);
+                }
+            } else if (a.indType === 'RSI_CROSS_ABOVE') {
+                if (snap.rsiPrev != null && snap.rsiLast != null && snap.rsiPrev <= a.threshold && snap.rsiLast > a.threshold) {
+                    hit = true; valueText = 'RSI ' + snap.rsiLast.toFixed(1);
+                }
+            } else if (a.indType === 'EMA20_TOUCH') {
+                if (snap.ema20Prev != null && snap.ema20Last != null && snap.prevPrice != null) {
+                    const prevDiff = snap.prevPrice - snap.ema20Prev;
+                    const currDiff = snap.price - snap.ema20Last;
+                    // İşaret değişimi (kesişim) YA DA fiyat EMA'nın binde 2'sinden
+                    // daha yakınsa ("dokunma") — hem gerçek bir kesişimi hem de
+                    // tam üzerine oturup kesmeyen bir "dokunuşu" yakalar.
+                    const touchedWithoutCross = Math.abs(currDiff) <= snap.ema20Last * 0.002;
+                    if (prevDiff * currDiff <= 0 || touchedWithoutCross) {
+                        hit = true; valueText = 'Fiyat ₺' + fmtPrice(snap.price) + ', EMA(20) ₺' + fmtPrice(snap.ema20Last);
+                    }
+                }
+            }
+            if (!hit) return;
+
+            a.triggered = true;
+            a.triggeredAt = Date.now();
+            a.triggeredValueText = valueText;
+            firedAny = true;
+
+            showToast(`🔔 ${a.symbol} — ${indicatorAlertLabel(a)} tetiklendi (${valueText})`);
+            playAlertChime();
+            flashAlertBadge();
+
+            if (window.Notification && Notification.permission === 'granted') {
+                try {
+                    new Notification('OptiPulseLab — Gösterge Alarmı', {
+                        body: `${a.symbol}: ${indicatorAlertLabel(a)} — ${valueText}`
+                    });
+                } catch (e) { /* notifications unsupported / blocked */ }
+            }
+        });
+        if (firedAny) {
+            saveIndicatorAlerts();
+            renderIndicatorAlertsList();
+            updateAlertBadge();
+        }
+    }
+
+    function indicatorAlertRowHtml(a) {
+        const statusLabel = a.triggered ? 'Tetiklendi' : 'Aktif';
+        return '<div class="alert-item ' + (a.triggered ? 'triggered' : '') + '">' +
+            '<div class="alert-item-main">' +
+                '<span class="alert-item-symbol">' + a.symbol + '</span>' +
+                '<span class="alert-item-cond">' + indicatorAlertLabel(a) + '</span>' +
+                '<span class="alert-item-status">' + statusLabel + '</span>' +
+            '</div>' +
+            '<button type="button" class="indicator-alert-delete-btn" data-id="' + a.id + '" title="Sil">×</button>' +
+        '</div>';
+    }
+
+    function renderIndicatorAlertsList() {
+        const activeEl = byId('active-indicator-alerts-list');
+        const emptyMsg = byId('indicator-alerts-empty-msg');
+        if (!activeEl) return;
+        const active = indicatorAlerts.slice().sort((a, b) => b.createdAt - a.createdAt);
+        activeEl.innerHTML = active.map(indicatorAlertRowHtml).join('');
+        if (emptyMsg) emptyMsg.style.display = active.length ? 'none' : 'block';
+        document.querySelectorAll('.indicator-alert-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteIndicatorAlert(btn.dataset.id));
+        });
+    }
+
     function setupAlertsModal() {
         const backdrop = byId('alerts-modal-backdrop');
         const openBtn = byId('btn-open-alerts');
@@ -974,7 +1183,23 @@ const TradingEngine = (() => {
         const priceInput = byId('alert-target-price');
         const notifRow = byId('alert-notif-toggle-row');
         const notifChk = byId('alert-notif-checkbox');
+        const indAddBtn = byId('btn-add-indicator-alert');
+        const indActiveSymbolEl = byId('ind-alert-active-symbol');
+        const indTypeSelect = byId('ind-alert-type-select');
+        const indThresholdInput = byId('ind-alert-threshold');
         if (!backdrop || !openBtn) return;
+
+        const updateIndicatorThresholdVisibility = () => {
+            if (!indTypeSelect || !indThresholdInput) return;
+            const isEma = indTypeSelect.value === 'EMA20_TOUCH';
+            indThresholdInput.style.display = isEma ? 'none' : '';
+            if (!isEma && indTypeSelect.value === 'RSI_CROSS_ABOVE' && indThresholdInput.value === '30') {
+                indThresholdInput.value = '70';
+            } else if (!isEma && indTypeSelect.value === 'RSI_CROSS_BELOW' && indThresholdInput.value === '70') {
+                indThresholdInput.value = '30';
+            }
+        };
+        if (indTypeSelect) indTypeSelect.addEventListener('change', updateIndicatorThresholdVisibility);
 
         const open = () => {
             closeOtherModals('alerts-modal-backdrop');
@@ -988,7 +1213,16 @@ const TradingEngine = (() => {
                 notifRow.style.display = 'flex';
                 if (notifChk) notifChk.checked = Notification.permission === 'granted';
             }
+            // (Madde 20) Gösterge alarmı her zaman o an aktif olan grafik
+            // sembolüne bağlanıyor — serbest sembol seçimi yok (bkz. yukarıdaki
+            // mimari kısıt notu).
+            if (indActiveSymbolEl) {
+                indActiveSymbolEl.textContent = state.activeSymbol ? ('Aktif sembol: ' + state.activeSymbol) : 'Aktif sembol: (önce bir sembol açın)';
+            }
+            if (indAddBtn) indAddBtn.disabled = !state.activeSymbol;
+            updateIndicatorThresholdVisibility();
             renderAlertsList();
+            renderIndicatorAlertsList();
             backdrop.classList.add('open');
         };
         const close = () => backdrop.classList.remove('open');
@@ -1021,6 +1255,20 @@ const TradingEngine = (() => {
                 addAlert(symbol, condition, targetPrice);
                 if (priceInput) priceInput.value = '';
                 showToast(`Alarm oluşturuldu: ${symbol} ${condition === 'above' ? '≥' : '≤'} ₺${fmtPrice(targetPrice)}`);
+            });
+        }
+
+        if (indAddBtn) {
+            indAddBtn.addEventListener('click', () => {
+                if (!state.activeSymbol) { showToast('Önce grafikte bir sembol açın.'); return; }
+                const indType = indTypeSelect?.value || 'RSI_CROSS_BELOW';
+                const threshold = indThresholdInput ? parseFloat(indThresholdInput.value) : null;
+                if (indType !== 'EMA20_TOUCH' && (!threshold || threshold <= 0 || threshold >= 100)) {
+                    showToast('RSI eşiği için 1-99 arası bir değer girin.');
+                    return;
+                }
+                const alert = addIndicatorAlert(state.activeSymbol, indType, threshold);
+                if (alert) showToast(`Gösterge alarmı oluşturuldu: ${state.activeSymbol} — ${indicatorAlertLabel(alert)}`);
             });
         }
     }
@@ -3422,11 +3670,18 @@ const TradingEngine = (() => {
 
         // Balance now lives in the header pill (top right) rather than the trade ticket itself
         const headerBalEl = byId('header-balance-value');
+        const headerEqEl = byId('header-equity-value');
         const eqEl = byId('qt-equity');
         const pnlEl = byId('qt-openpnl');
         const usedMarginEl = byId('qt-used-margin');
         const marginLevelEl = byId('qt-margin-level');
         if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
+        // (29 Temmuz 2026 — Madde 8) Header'daki Toplam Varlık, bu fonksiyon
+        // her çağrıldığında (işlem sonrası, fiyat tick'inde, SL/TP
+        // değişiminde vb. — bkz. yukarıdaki çağrı noktaları) otomatik
+        // güncelleniyor; hoca sorusuna somut cevap: portföy GERÇEKTEN
+        // otomatik güncelleniyor, bu rozet bunu görünür kılıyor.
+        if (headerEqEl) headerEqEl.textContent = fmtTRY(equity);
         if (eqEl) eqEl.textContent = fmtTRY(equity);
         if (pnlEl) {
             pnlEl.textContent = (openPnl >= 0 ? '+' : '') + fmtTRY(openPnl);
@@ -3599,6 +3854,7 @@ const TradingEngine = (() => {
         priceProfiles = buildPriceProfiles();
         portfolio = loadPortfolio();
         priceAlerts = loadAlerts();
+        indicatorAlerts = loadIndicatorAlerts();
         watchlistSymbols = loadWatchlistSymbols();
 
         renderWatchlistRows();
@@ -3631,6 +3887,12 @@ const TradingEngine = (() => {
         // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve
         // canlı akış (WS) bağlantısı önce kurulsun, ağ istekleri çakışmasın.
         setTimeout(syncWatchlistPrices, 8000);
+
+        // (29 Temmuz 2026 — Madde 3) Kayan piyasa şeridi — bağımsız, döviz/
+        // emtia/BIST100 endeksi verisi watchlist senkronizasyonundan ayrı
+        // bir uç noktadan geliyor, o yüzden ayrı zamanlayıcı.
+        setInterval(syncMarketTickerStrip, MARKET_TICKER_SYNC_INTERVAL_MS);
+        setTimeout(syncMarketTickerStrip, 3000);
 
         // Resume on whatever symbol was last being viewed, so a reload/revisit
         // doesn't silently jump back to a default symbol while old ticket
@@ -3665,7 +3927,16 @@ const TradingEngine = (() => {
         // (29 Temmuz 2026 — Madde 18) tradingChart.js'in grafik üzerinde
         // kullanıcının gerçek al-sat noktalarını ok işaretiyle gösterebilmesi
         // için.
-        getTradeHistoryForSymbol
+        getTradeHistoryForSymbol,
+        // (29 Temmuz 2026 — Madde 20) tradingChart.js'teki debugGet*/debugIs*
+        // ailesiyle AYNI amaç: salt-okunur/tetikleyici QA yardımcıları,
+        // yalnızca Playwright testlerinde kullanılıyor, hiçbir üretim kodu
+        // bunlara bağımlı değil. checkIndicatorAlerts() normalde her
+        // TICK_MS'de (2sn) bir otomatik çalışıyor — testlerde rastgele fiyat
+        // yürüyüşünü beklemek yerine deterministik olarak hemen tetiklemek
+        // için burada dışa açılıyor.
+        debugCheckIndicatorAlertsNow: () => checkIndicatorAlerts(),
+        debugGetIndicatorAlerts: () => indicatorAlerts.map(a => ({ ...a }))
     });
 })();
 
