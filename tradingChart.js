@@ -1027,16 +1027,16 @@ const TradingChart = (() => {
                 position: isBuy ? 'belowBar' : 'aboveBar',
                 color: isBuy ? '#42A5F5' : '#FF7043',
                 shape: isBuy ? 'arrowUp' : 'arrowDown',
-                text: (isBuy ? 'AL' : 'SAT') + ' ' + h.qty + ' @₺' + fmtPrice2(h.price),
+                // (29 Temmuz 2026 — sukru geri bildirimi) once "AL 353 @₺376.25"
+                // gibi uzun metin gosteriliyordu; birden fazla islem ayni muma
+                // denk gelince yazilar ust uste binip karmasik gorunuyordu.
+                // Yon zaten ok sekli + renk ile belli oldugu icin metni sadece
+                // adete indirdik; tam fiyat/taraf detayi "Son Islemler"
+                // sekmesinde zaten mevcut.
+                text: String(h.qty),
                 _userTrade: true
             };
         }).sort((a, b) => a.time - b.time);
-    }
-
-    // fmtPrice, tradingEngine.js'te — burada aynı biçimi tekrarlamamak için
-    // basit bir yerel yardımcı (aynı 2 ondalık kural).
-    function fmtPrice2(v) {
-        return (typeof v === 'number') ? v.toFixed(2) : String(v);
     }
 
     function applySignalMarkersForCurrentState() {
