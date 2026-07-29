@@ -56,6 +56,16 @@
                     <span class="status-value" id="market-status-val" style="font-weight: 600;">CHECKING...</span>
                     <span id="market-status-sub" style="font-size: 9px; color: var(--text-muted); margin-left: 5px; display: none;">(Displaying last closing data)</span>
                 </div>
+                <!-- (29 Temmuz 2026 — "Piyasa Nabzı / Market Breadth") BIST100
+                     evrenindeki tüm sembollerin günlük açılışa göre kaç tanesinin
+                     yükselişte/düşüşte olduğunu gösteren özet — bkz. tradingEngine.js
+                     computeHeatmapData()/renderMarketBreadth(). Zaten var olan ısı
+                     haritası verisinin (priceProfiles) yeniden kullanımı, YENİ bir
+                     backend isteği gerektirmiyor. -->
+                <div class="status-item text-hide-mobile" id="market-breadth-container" title="BIST100 evreninde günlük açılışa göre yükselen/düşen sembol sayısı">
+                    <span class="status-label">Piyasa Nabzı:</span>
+                    <span class="status-value" id="market-breadth-val" style="font-weight: 600;">--</span>
+                </div>
             </div>
             <div class="header-actions">
                 <button type="button" class="btn btn-icon mobile-drawer-toggle" id="btn-toggle-tradepanel" aria-label="İşlem panelini aç/kapat" title="İşlem Paneli">
@@ -352,6 +362,16 @@
                         <span id="tv-fund-eps">Hisse Başı Kazanç: --</span>
                     </div>
 
+                    <!-- (29 Temmuz 2026 — "Çoklu Zaman Dilimi Analiz Paneli")
+                         Aktif sembolün 4 saatlik/günlük/haftalık zaman dilimlerinde
+                         SMA20/SMA50 hizasına göre trend yönünü özetler — bkz.
+                         tradingChart.js renderMTFPanel(). 4H ve haftalık, GERÇEK
+                         günlük mumlardan (state.dailyCandles) türetiliyor — ana
+                         çözünürlük seçicinin (15dk/1sa/4sa/1g/1hf) kullandığı AYNI
+                         deterministik türetim motoru (synthesizeIntradayCandles /
+                         aggregateWeeklyCandles), uydurma veri değil. -->
+                    <div class="tv-mtf-bar" id="tv-mtf-bar" title="Fiyat/SMA20/SMA50 hizasına göre her zaman diliminin trend yönü"></div>
+
                     <!-- Zaman dilimi şeridi: TradingView'daki gerçek konumu — ana araç
                          çubuğunun hemen altında, mum grafiğinin üstünde. -->
                     <div class="tv-resolution-bar" id="tv-resolution-bar" role="group" aria-label="Zaman dilimi">
@@ -419,12 +439,36 @@
                                 <span class="tv-dual-pane-label" id="tv-dual-pane-label" tabindex="0" role="button" title="Karşılaştırma sembolünü değiştirmek için tıklayın">Karşılaştırma</span>
                                 <input type="text" id="tv-dual-symbol-input" class="tv-dual-symbol-input" list="tv-dual-symbol-datalist" placeholder="Sembol yaz (ör. AKBNK)..." maxlength="12" style="display:none;">
                                 <datalist id="tv-dual-symbol-datalist"></datalist>
-                                <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur) Dual-Chart panelinin
-                                     kendi temel overlay göstergeleri — SMA20/EMA9 — ana grafiğin tam
-                                     çizim/gösterge motorunu çoğaltmadan, sade toggle butonlarıyla. -->
+                                <!-- (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") Tek
+                                     tıkla, karşılaştırma sembolünü GERÇEK BIST100 endeksine
+                                     (XU100.IS, backend zaten format_ticker() ile otomatik ekliyor)
+                                     çeviren kısayol çip — bkz. tradingChart.js setDualSymbol()
+                                     içindeki SPECIAL_DUAL_SYMBOLS istisnası. -->
+                                <button type="button" class="tv-dual-index-chip" id="btn-dual-bist100" title="Karşılaştırma sembolünü BIST100 Endeksi (XU100) yap">BIST100 Endeksi</button>
+                                <!-- (18 Temmuz 2026, onuncu oturum, ikinci tur; 29 Temmuz 2026'da
+                                     genişletildi) Dual-Chart panelinin kendi overlay göstergeleri —
+                                     artık ana grafiğin tam calculateIndicators() çıktısını (kendi
+                                     BAĞIMSIZ sembol/çözünürlük kümesi üzerinde) yeniden kullanıyor,
+                                     sadece hangi çizgilerin gösterileceği hâlâ sade toggle
+                                     butonlarıyla seçiliyor — bkz. tradingChart.js refreshDualOverlays(). -->
                                 <div class="tv-dual-overlay-row" id="tv-dual-overlay-row" role="group" aria-label="Karşılaştırma grafiği göstergeleri">
                                     <button type="button" class="tv-dual-overlay-btn" data-doverlay="sma20">SMA20</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="sma50">SMA50</button>
                                     <button type="button" class="tv-dual-overlay-btn" data-doverlay="ema9">EMA9</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="ema21">EMA21</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="bollinger">BB</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-doverlay="vwap">VWAP</button>
+                                </div>
+                                <!-- (29 Temmuz 2026 — "Dual-Chart panelinde bağımsız gösterge
+                                     desteği") Osilatör mini-panelleri — ana grafiğin oscillator
+                                     pane motoruyla AYNI buildOscillatorSeries() üretici fonksiyonu,
+                                     sadece hedef chart örneği ve konteyner farklı — bkz.
+                                     ensureDualOscillatorPane()/renderDualOscillatorPanes(). -->
+                                <div class="tv-dual-overlay-row" id="tv-dual-osc-row" role="group" aria-label="Karşılaştırma grafiği osilatörleri">
+                                    <button type="button" class="tv-dual-overlay-btn" data-dosc="rsi">RSI</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-dosc="macd">MACD</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-dosc="stoch">Stoch</button>
+                                    <button type="button" class="tv-dual-overlay-btn" data-dosc="atr">ATR</button>
                                 </div>
                                 <div class="tv-dual-res-row" id="tv-dual-res-row" role="group" aria-label="İkinci grafik zaman dilimi">
                                     <button type="button" class="tv-res-btn" data-dres="1h">1H</button>
@@ -433,9 +477,16 @@
                                     <button type="button" class="tv-res-btn active" data-dres="1w">1W</button>
                                 </div>
                             </div>
+                            <!-- (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") Ana
+                                 sembol ile karşılaştırma sembolünün paylaşılan pencerede
+                                 kümülatif getiri farkı — bkz. tradingChart.js
+                                 computeRelativeStrength(). Yalnızca bir karşılaştırma sembolü
+                                 seçiliyken (ayna modu değilken) görünür. -->
+                            <div class="tv-dual-relstrength" id="tv-dual-relstrength" style="display:none;"></div>
                             <div class="tv-dual-chart-body">
                                 <div id="tv-main-chart-2" class="tv-main-chart"></div>
                             </div>
+                            <div class="tv-dual-subpanes-container" id="tv-dual-subpanes-container"></div>
                         </div>
                     </div>
 
@@ -723,6 +774,15 @@
                                         <label for="qt-risk-pct">Risk (bakiyenin %'si)</label>
                                         <input type="number" id="qt-risk-pct" class="form-input" min="0.1" max="100" step="0.1" value="1" placeholder="örn. 1">
                                     </div>
+                                    <!-- (29 Temmuz 2026 — "ATR bazlı akıllı Stop-Loss önerisi")
+                                         Aktif sembolün grafikte zaten hesaplanmış ATR(14) değerinden
+                                         (bkz. tradingChart.js getLastATR(), dataController.js
+                                         computeATR() — GERÇEK/hesaplanmış veri, uydurma değil) bir
+                                         SL mesafesi önerir ve Stop-Loss alanını doldurur. Butonun
+                                         kendisi risk hesaplayıcının İÇİNDE çünkü SL fiyatı, risk
+                                         bazlı adet hesaplamasının GİRDİSİ — bkz.
+                                         tradingEngine.js suggestAtrStopLoss(). -->
+                                    <button type="button" class="qt-atr-suggest-btn" id="qt-atr-suggest-btn">ATR'ye göre Stop-Loss öner (×1.5)</button>
                                     <p class="qt-risk-hint" id="qt-risk-hint">Stop-Loss fiyatı girin — miktar otomatik hesaplanacak.</p>
                                 </div>
                             </div>

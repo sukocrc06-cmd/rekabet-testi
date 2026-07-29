@@ -3193,6 +3193,32 @@ body.compact-mode .status-item {
     font-weight: 600;
 }
 
+/* (29 Temmuz 2026 — "ATR bazlı akıllı Stop-Loss önerisi") bkz.
+   tradingEngine.js suggestAtrStopLoss(). */
+.qt-atr-suggest-btn {
+    margin-top: 8px;
+    width: 100%;
+    background: transparent;
+    border: 1px dashed var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--gold);
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 6px 8px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.qt-atr-suggest-btn:hover {
+    background-color: var(--gold-dim);
+    border-style: solid;
+}
+
+.qt-atr-suggest-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* ────────── Portföy genel risk uyarısı ──────────
  * (26 Temmuz 2026, on üçüncü oturum devamı) Tüm açık pozisyonlardaki
  * tanımlı risk toplamı özkaynağın belirli bir yüzdesini aşınca görünür —
@@ -3521,6 +3547,80 @@ body.compact-mode .status-item {
     opacity: 0.5;
 }
 
+/* (29 Temmuz 2026 — "Çoklu Zaman Dilimi Analiz Paneli / MTF Confluence")
+   bkz. tradingChart.js renderMTFPanel(). #tv-fundamentals-bar ile aynı
+   görsel dil, ince ikinci bir bilgi şeridi. Boşken (sembol henüz
+   yüklenmediğinde) içerik boş bırakılıyor, bu yüzden görünmez bir boş
+   satır olarak da düzgün davranıyor. */
+.tv-mtf-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 14px;
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    min-height: 22px;
+}
+
+.mtf-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: 9.5px;
+    flex-shrink: 0;
+}
+
+.mtf-chip {
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--tint-08);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.mtf-chip-up {
+    color: var(--success, #4CAF50);
+    border-color: rgba(76,175,80,0.35);
+    background-color: rgba(76,175,80,0.08);
+}
+
+.mtf-chip-down {
+    color: var(--danger, #F44336);
+    border-color: rgba(244,67,54,0.35);
+    background-color: rgba(244,67,54,0.08);
+}
+
+.mtf-chip-neutral {
+    color: var(--text-muted);
+}
+
+.mtf-chip-na {
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+
+.mtf-overall {
+    margin-left: auto;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
+.mtf-up { color: var(--success, #4CAF50); }
+.mtf-down { color: var(--danger, #F44336); }
+.mtf-up-lean { color: var(--gold, #D4AF37); }
+.mtf-down-lean { color: var(--gold, #D4AF37); }
+.mtf-mixed { color: var(--text-muted); }
+
 .tv-resolution-bar {
     display: flex;
     align-items: center;
@@ -3764,6 +3864,61 @@ body.compact-mode .status-item {
     background-color: var(--gold-dim);
     border-color: var(--gold);
     color: var(--gold-light);
+}
+
+/* (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") Karşılaştırma
+   sembolünü tek tıkla gerçek BIST100 endeksine (XU100) çeviren kısayol çip. */
+.tv-dual-index-chip {
+    background: transparent;
+    border: 1px dashed var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--gold);
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 3px 7px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    white-space: nowrap;
+}
+
+.tv-dual-index-chip:hover {
+    background-color: var(--gold-dim);
+    border-style: solid;
+}
+
+.tv-dual-relstrength {
+    padding: 3px 10px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--tint-05);
+    flex-shrink: 0;
+}
+
+.tv-dual-relstrength .relstr-positive {
+    color: var(--success, #4CAF50);
+    font-weight: 700;
+}
+
+.tv-dual-relstrength .relstr-negative {
+    color: var(--danger, #F44336);
+    font-weight: 700;
+}
+
+/* (29 Temmuz 2026 — "Dual-chart panelinde bağımsız gösterge desteği")
+   Dual-chart'ın kendi osilatör mini-panelleri — ana grafiğin
+   #tv-subpanes-container'ıyla AYNI görsel dil, ama Karşılaştırma
+   panelinin (tv-chart-pane-2) İÇİNDE, kendi bağımsız akışında. */
+.tv-dual-subpanes-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex-shrink: 0;
+}
+
+.tv-dual-subpanes-container .tv-osc-pane {
+    flex: 0 0 110px;
+    min-height: 70px;
 }
 
 .tv-dual-chart-body {

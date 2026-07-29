@@ -1608,6 +1608,33 @@ const TradingEngine = (() => {
                 if (sparkEl) drawSparkline(sparkEl, p.history);
             }
         });
+        renderMarketBreadth();
+    }
+
+    /* ════════════════════════════════════════════════
+       Piyasa Nabzı / Market Breadth
+       (29 Temmuz 2026 — "dual chart gibi başka ne özellikler ekleyebiliriz")
+       BIST100 evreninin TAMAMINDA (97+ sembol) kaç tanesinin günlük açılışa
+       göre yükselişte/düşüşte olduğunu özetler — computeHeatmapData()'nın
+       (ısı haritası özelliği için zaten var olan) AYNI priceProfiles kaynağını
+       yeniden kullanıyor, yeni bir backend isteği veya sentetik veri
+       gerektirmiyor. renderWatchlistPrices() her tetiklendiğinde (fiyat
+       tick'i, syncWatchlistPrices) otomatik güncellenir.
+       ════════════════════════════════════════════════ */
+
+    function renderMarketBreadth() {
+        const el = byId('market-breadth-val');
+        if (!el) return;
+        const data = computeHeatmapData();
+        if (!data.length) { el.textContent = '--'; return; }
+        let up = 0, down = 0, flat = 0;
+        data.forEach(d => {
+            if (d.chgPct > 0.01) up++;
+            else if (d.chgPct < -0.01) down++;
+            else flat++;
+        });
+        el.innerHTML = '<span class="profit-text">' + up + '↑</span> / <span class="loss-text">' + down + '↓</span>' +
+            (flat ? ' / <span style="color:var(--text-muted);">' + flat + '=</span>' : '');
     }
 
     // (23 Temmuz 2026 düzeltmesi) Önceden bu arama yalnızca mevcut 97
@@ -1831,6 +1858,9 @@ const TradingEngine = (() => {
         }
         if (riskPctInput) riskPctInput.addEventListener('input', maybeRecomputeRiskQty);
         if (slPriceInput) slPriceInput.addEventListener('input', maybeRecomputeRiskQty);
+
+        const atrSuggestBtn = byId('qt-atr-suggest-btn');
+        if (atrSuggestBtn) atrSuggestBtn.addEventListener('click', suggestAtrStopLoss);
 
         document.querySelectorAll('.qty-pct-btn').forEach(btn => {
             btn.addEventListener('click', () => applyQtyPct(parseInt(btn.dataset.pct, 10)));
@@ -2106,6 +2136,44 @@ const TradingEngine = (() => {
             const hint = byId('qt-risk-hint');
             if (hint) { hint.textContent = 'Stop-Loss fiyatı girin — miktar otomatik hesaplanacak.'; hint.classList.remove('qt-risk-hint-ok'); }
         }
+    }
+
+    /* ════════════════════════════════════════════════
+       ATR bazlı akıllı Stop-Loss önerisi
+       (29 Temmuz 2026 — "dual chart gibi başka ne özellikler ekleyebiliriz")
+       Grafikte AKTİF sembol için zaten hesaplanmış ATR(14) — bkz.
+       dataController.js computeATR() (Wilder düzeltmesi), tradingChart.js
+       getLastATR() — kullanılarak "fiyattan ATR×çarpan kadar uzakta" bir SL
+       öneriyor. Klasik bir volatilite bazlı stop mesafesi yaklaşımı (2 ATR
+       yerine biraz daha sıkı 1.5 ATR seçildi — demo/eğitim amaçlı, kesin bir
+       tavsiye değil). YÖN (uzun/kısa), o an seçili AL/SAT sekmesine
+       (state.side) göre otomatik belirleniyor.
+       ════════════════════════════════════════════════ */
+    const ATR_SL_MULTIPLIER = 1.5;
+
+    function suggestAtrStopLoss() {
+        const symbol = state.activeSymbol;
+        if (!symbol) { showToast('Önce bir sembol seçin.'); return; }
+        const price = effectivePrice();
+        if (!price) { showToast('Fiyat okunamadı.'); return; }
+        const atr = (window.TradingChart && window.TradingChart.getLastATR) ? window.TradingChart.getLastATR() : null;
+        if (!atr || atr <= 0) {
+            showToast('ATR(14) henüz hesaplanamadı — grafikte bu sembol için yeterli geçmiş yok.');
+            return;
+        }
+        const distance = atr * ATR_SL_MULTIPLIER;
+        const isLong = state.side !== 'SELL'; // BUY ya da tanımsızsa uzun kabul edilir (varsayılan sekme)
+        const suggestedSl = isLong ? (price - distance) : (price + distance);
+        if (suggestedSl <= 0) {
+            showToast('Önerilen Stop-Loss geçersiz (ATR mesafesi fiyattan büyük) — manuel girin.');
+            return;
+        }
+        const slInput = byId('qt-sl-price');
+        if (slInput) {
+            slInput.value = suggestedSl.toFixed(2);
+            slInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        showToast(`ATR(14)×${ATR_SL_MULTIPLIER} ≈ ₺${fmtPrice(distance)} mesafeyle önerilen Stop-Loss: ₺${fmtPrice(suggestedSl)}`);
     }
 
     function applyQtyPct(pct) {

@@ -190,10 +190,36 @@ const TradingChart = (() => {
     let dualResolution = '1w';
     let dualRefreshTimer = null;
     let dualOverlaySeries = {};
-    let dualOverlayActive = { sma20: false, ema9: false };
+    // (29 Temmuz 2026 — "Dual-chart panelinde bağımsız gösterge desteği")
+    // 2 sabit göstergeden (SMA20/EMA9) 6'ya genişletildi — hâlâ ana
+    // grafiğin 14 checkbox'lı tam motorunu ÇOĞALTMIYOR, ama artık dual
+    // panelin KENDİ bağımsız sembol/çözünürlük çiftinde anlamlı bir
+    // gösterge seti sunuyor (bkz. refreshDualOverlays()).
+    let dualOverlayActive = { sma20: false, sma50: false, ema9: false, ema21: false, bollinger: false, vwap: false };
+    // Dual panelin kendi osilatör mini-panelleri (RSI/MACD/Stoch/ATR) —
+    // ana grafiğin state.activeOscillators/oscillatorPanes'ının bire bir
+    // paraleli, ama tamamen ayrı bir liste/konteyner (bkz.
+    // ensureDualOscillatorPane()/renderDualOscillatorPanes()). Kasıtlı
+    // olarak localStorage'a YAZILMIYOR (main.js'teki gibi kalıcı değil) —
+    // dual-chart zaten varsayılan kapalı bir panel, her açılışta sade
+    // başlaması daha öngörülebilir.
+    let dualActiveOscillators = [];
+    let dualOscillatorPanes = {};
+    // dualSymbol/dualResolution çiftinin TAM calculateIndicators() çıktısı
+    // — hem overlay hem osilatör render'ı bundan besleniyor, ikisi de aynı
+    // hesaplamayı tekrar yapmasın diye refreshDualChart() içinde bir kez
+    // hesaplanıp burada tutuluyor.
+    let dualIndicators = null;
+    let dualLastRenderedCandles = []; // { time, open, high, low, close } — dualOverlays/dualOscillators bu diziyi paylaşır
     let dualSymbol = null;          // null = "ayna modu" (ana sembolü takip eder); aksi halde karşılaştırma sembolü
     let dualDailyCandles = [];      // dualSymbol set edildiğinde onun BAĞIMSIZ günlük mum verisi
     let dualSymbolLoadToken = 0;    // hızlı ardışık sembol değişimlerinde eski bir fetch'in geç gelip yeniyi ezmesini önler
+    // (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") XU100, backend'in
+    // format_ticker()'ı tarafından otomatik olarak "XU100.IS"e çevriliyor —
+    // bu GERÇEK Yahoo Finance BIST100 endeks sembolü (yfinance'te gerçekten
+    // var), STOCK_PROFILES'taki 97 hisseden biri DEĞİL. setDualSymbol()
+    // içinde bu yüzden ayrı bir istisna listesiyle tanınıyor.
+    const SPECIAL_DUAL_SYMBOLS = { XU100: 'BIST100 Endeksi' };
 
     // ── Fullscreen chart mode (18 Temmuz 2026, onuncu oturum) ──
     let fullscreenActive = false;
@@ -672,6 +698,84 @@ const TradingChart = (() => {
         return { ticker: state.ticker, lastClose: last.close, dayOpen: last.open };
     }
 
+    // (29 Temmuz 2026 — "ATR bazlı akıllı Stop-Loss önerisi") Aktif sembol
+    // için grafikte ZATEN hesaplanmış olan ATR(14)'ün en son (null olmayan)
+    // değerini döndürür — bkz. dataController.js computeATR() (Wilder
+    // düzeltmesi). tradingEngine.js risk hesaplayıcısı bunu SL mesafesi
+    // önerisi için kullanıyor; yeni bir hesaplama/istek YAPMIYOR, mevcut
+    // state.indicators'ı okuyor.
+    function getLastATR() {
+        if (!state.indicators || !Array.isArray(state.indicators.atr14)) return null;
+        const arr = state.indicators.atr14;
+        for (let i = arr.length - 1; i >= 0; i--) {
+            if (arr[i] !== null && arr[i] !== undefined) return arr[i];
+        }
+        return null;
+    }
+
+    /* ────────── Çoklu Zaman Dilimi Analiz Paneli (MTF Confluence) ──────────
+     * (29 Temmuz 2026) Aktif sembolün 4 saatlik/günlük/haftalık zaman
+     * dilimlerinde trend yönünü (fiyat > SMA20 > SMA50 ise yükseliş, ters
+     * sıralamaysa düşüş, aksi halde nötr) özetler. 4 saatlik ve haftalık
+     * mumlar, ana çözünürlük seçicinin de kullandığı AYNI deterministik
+     * türetim fonksiyonlarından (synthesizeIntradayCandles/
+     * aggregateWeeklyCandles) geliyor — gerçek günlük mumlardan (backend/
+     * yfinance) türetiliyor, ayrıca uydurulmuş bir seri DEĞİL. */
+    function trendLabelFor(candles) {
+        if (!candles || candles.length < 55 || !window.DataController) return null;
+        const closes = candles.map(c => c.close);
+        const sma20 = window.DataController.computeSMA(closes, 20);
+        const sma50 = window.DataController.computeSMA(closes, 50);
+        const lastClose = closes[closes.length - 1];
+        const lastSma20 = sma20[sma20.length - 1];
+        const lastSma50 = sma50[sma50.length - 1];
+        if (lastSma20 === null || lastSma50 === null || lastSma20 === undefined || lastSma50 === undefined) return null;
+        if (lastClose > lastSma20 && lastSma20 > lastSma50) return 'up';
+        if (lastClose < lastSma20 && lastSma20 < lastSma50) return 'down';
+        return 'neutral';
+    }
+
+    function renderMTFPanel() {
+        const bar = byId('tv-mtf-bar');
+        if (!bar) return;
+        if (!state.dailyCandles.length || !window.DataController) { bar.innerHTML = ''; return; }
+        const daily = state.dailyCandles;
+        // 4 saatlik türetim için son ~40 günlük kaynak yeterli (ana
+        // çözünürlük motorunun INTRADAY_SOURCE_WINDOW_DAYS'iyle tutarlı
+        // büyüklük mertebesi) — TÜM 750 günlük geçmişi patlatmaya gerek yok.
+        const fourH = window.DataController.synthesizeIntradayCandles(daily.slice(-40), 240);
+        const weekly = window.DataController.aggregateWeeklyCandles(daily);
+        const frames = [
+            { key: '4h', label: '4 Saatlik', candles: fourH },
+            { key: '1d', label: 'Günlük', candles: daily },
+            { key: '1w', label: 'Haftalık', candles: weekly }
+        ];
+        const results = frames.map(f => ({ key: f.key, label: f.label, trend: trendLabelFor(f.candles) }));
+        const upCount = results.filter(r => r.trend === 'up').length;
+        const downCount = results.filter(r => r.trend === 'down').length;
+        const knownCount = results.filter(r => r.trend !== null).length;
+
+        let overall = 'Yetersiz Veri';
+        let overallClass = 'mtf-mixed';
+        if (knownCount === results.length) {
+            if (upCount === results.length) { overall = 'Güçlü Yükseliş Uyumu'; overallClass = 'mtf-up'; }
+            else if (downCount === results.length) { overall = 'Güçlü Düşüş Uyumu'; overallClass = 'mtf-down'; }
+            else if (upCount >= 2) { overall = 'Yükseliş Ağırlıklı'; overallClass = 'mtf-up-lean'; }
+            else if (downCount >= 2) { overall = 'Düşüş Ağırlıklı'; overallClass = 'mtf-down-lean'; }
+            else { overall = 'Karışık / Net Değil'; overallClass = 'mtf-mixed'; }
+        }
+
+        const trendText = (t) => t === 'up' ? 'YÜKSELİŞ' : t === 'down' ? 'DÜŞÜŞ' : t === 'neutral' ? 'NÖTR' : '--';
+        const trendClass = (t) => t === 'up' ? 'mtf-chip-up' : t === 'down' ? 'mtf-chip-down' : t === 'neutral' ? 'mtf-chip-neutral' : 'mtf-chip-na';
+
+        const chipsHtml = results.map(r =>
+            '<span class="mtf-chip ' + trendClass(r.trend) + '" title="Fiyat/SMA20/SMA50 hizası">' + r.label + ': ' + trendText(r.trend) + '</span>'
+        ).join('');
+
+        bar.innerHTML = '<span class="mtf-label">Çoklu Zaman Dilimi:</span>' + chipsHtml +
+            '<span class="mtf-overall ' + overallClass + '">' + overall + '</span>';
+    }
+
     /* ────────── Resolution engine (functional 15m/1H/4H/1D/1W selector) ────────── */
 
     function parseBackendDate(rawDate) {
@@ -744,6 +848,7 @@ const TradingChart = (() => {
         state.indicators = window.DataController.calculateIndicators(state.candles);
         renderOverlays();
         renderAllOscillatorPanes();
+        renderMTFPanel();
 
         if (chart) {
             if (intraday && state.candles.length > DEFAULT_INTRADAY_VISIBLE_BARS) {
@@ -1212,34 +1317,51 @@ const TradingChart = (() => {
             clearInterval(dualRefreshTimer);
             dualRefreshTimer = null;
         }
+        // (29 Temmuz 2026) Osilatör mini-panelleri de dual grafikle birlikte
+        // temizleniyor — dualActiveOscillators seçimi (localStorage'a
+        // yazılmadığı için zaten kalıcı değil) korunuyor ki panel tekrar
+        // açıldığında aynı seçim otomatik geri gelsin.
+        Object.keys(dualOscillatorPanes).forEach(id => destroyDualOscillatorPane(id));
         if (dualChart) {
             try { dualChart.remove(); } catch (e) { /* already gone */ }
             dualChart = null;
             dualSeries = null;
             dualOverlaySeries = {};
         }
+        dualIndicators = null;
+        dualLastRenderedCandles = [];
     }
 
-    // Dual-Chart panelinin kendi sade overlay göstergeleri (SMA20/EMA9).
-    // Bilinçli olarak ana grafiğin overlaySeries/renderOverlays() motorunu
-    // ÇOĞALTMIYORUZ — sadece 2 sabit gösterge, ayrı, küçük bir yol.
+    // (29 Temmuz 2026 — genişletildi) Dual-Chart panelinin kendi overlay
+    // göstergeleri — artık dualIndicators (dual panelin BAĞIMSIZ sembol/
+    // çözünürlük çifti için hesaplanmış TAM calculateIndicators() çıktısı)
+    // üzerinden besleniyor, ayrı ayrı computeSMA/computeEMA çağrıları yerine.
+    // Hâlâ ana grafiğin renderOverlays()'ini/14 checkbox'ını ÇOĞALTMIYORUZ —
+    // sadece 6 seçilebilir çizgi, kendi küçük toggle satırıyla.
     function refreshDualOverlays(candles) {
-        if (!dualChart || !window.DataController) return;
+        if (!dualChart || !window.DataController || !dualIndicators) return;
         Object.values(dualOverlaySeries).forEach(s => { try { dualChart.removeSeries(s); } catch (e) {} });
         dualOverlaySeries = {};
-        if (!dualOverlayActive.sma20 && !dualOverlayActive.ema9) return;
 
-        const closes = candles.map(c => c.close);
         const dates = candles.map(c => c.time);
-        if (dualOverlayActive.sma20) {
-            const sma20 = window.DataController.computeSMA(closes, 20);
-            dualOverlaySeries.sma20 = dualChart.addLineSeries({ color: COLORS.sma20, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-            dualOverlaySeries.sma20.setData(seriesFromValues(dates, sma20));
-        }
-        if (dualOverlayActive.ema9) {
-            const ema9 = window.DataController.computeEMA(closes, 9);
-            dualOverlaySeries.ema9 = dualChart.addLineSeries({ color: COLORS.ema9, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: LightweightCharts.LineStyle.Dashed });
-            dualOverlaySeries.ema9.setData(seriesFromValues(dates, ema9));
+        const ind = dualIndicators;
+        const addDLine = (key, values, color, opts = {}) => {
+            const series = dualChart.addLineSeries({
+                color, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false,
+                crosshairMarkerVisible: false, ...opts
+            });
+            series.setData(seriesFromValues(dates, values));
+            dualOverlaySeries[key] = series;
+        };
+
+        if (dualOverlayActive.sma20) addDLine('sma20', ind.sma20, COLORS.sma20);
+        if (dualOverlayActive.sma50) addDLine('sma50', ind.sma50, COLORS.sma50);
+        if (dualOverlayActive.ema9)  addDLine('ema9', ind.ema9, COLORS.ema9, { lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (dualOverlayActive.ema21) addDLine('ema21', ind.ema21, COLORS.ema21, { lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (dualOverlayActive.vwap)  addDLine('vwap', ind.vwap, COLORS.vwap, { lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 2 });
+        if (dualOverlayActive.bollinger) {
+            addDLine('bbUpper', ind.bollingerUpper, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addDLine('bbLower', ind.bollingerLower, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
         }
     }
 
@@ -1248,7 +1370,140 @@ const TradingChart = (() => {
         document.querySelectorAll('#tv-dual-overlay-row [data-doverlay]').forEach(b => {
             b.classList.toggle('active', dualOverlayActive[b.dataset.doverlay]);
         });
-        refreshDualChart();
+        refreshDualOverlays(dualLastRenderedCandles);
+    }
+
+    /* ────────── Dual-Chart'ın kendi osilatör mini-panelleri ──────────
+     * (29 Temmuz 2026 — "Dual-chart panelinde bağımsız gösterge desteği")
+     * Ana grafiğin ensureOscillatorPane()/buildOscillatorSeries()/
+     * renderAllOscillatorPanes() üçlüsünün dual panel için ayrı konteynere
+     * (#tv-dual-subpanes-container) ve ayrı chart kümesine (dualChart)
+     * yönlendirilmiş paraleli. buildOscillatorSeries() zaten hedef chart
+     * örneğini parametre olarak aldığı için (bkz. yukarıdaki tanım) burada
+     * SIFIRDAN yazılmadı, doğrudan yeniden kullanıldı — tek yeni kod,
+     * pane DOM/chart YAŞAM DÖNGÜSÜ yönetimi. */
+    function ensureDualOscillatorPane(id) {
+        if (dualOscillatorPanes[id]) return dualOscillatorPanes[id];
+        const container = byId('tv-dual-subpanes-container');
+        if (!container || !window.LightweightCharts) return null;
+
+        const paneEl = document.createElement('div');
+        paneEl.className = 'tv-osc-pane';
+        paneEl.dataset.dosc = id;
+        paneEl.innerHTML =
+            '<div class="tv-osc-pane-header">' +
+                '<span class="tv-osc-title"></span>' +
+                '<span class="tv-osc-close-btn" data-dosc="' + id + '" title="Paneli kapat">×</span>' +
+            '</div>' +
+            '<div class="tv-osc-chart-mount"></div>';
+        container.appendChild(paneEl);
+
+        const mount = paneEl.querySelector('.tv-osc-chart-mount');
+        const paneChart = LightweightCharts.createChart(mount, baseChartOptions(mount, true));
+        paneChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+            if (range && dualChart) dualChart.timeScale().setVisibleLogicalRange(range);
+        });
+
+        const closeBtn = paneEl.querySelector('.tv-osc-close-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                dualActiveOscillators = dualActiveOscillators.filter(o => o !== id);
+                document.querySelectorAll('#tv-dual-osc-row [data-dosc]').forEach(b => {
+                    b.classList.toggle('active', dualActiveOscillators.includes(b.dataset.dosc));
+                });
+                renderDualOscillatorPanes();
+            });
+        }
+
+        const entry = { el: paneEl, chart: paneChart, series: {} };
+        dualOscillatorPanes[id] = entry;
+        return entry;
+    }
+
+    function destroyDualOscillatorPane(id) {
+        const entry = dualOscillatorPanes[id];
+        if (!entry) return;
+        try { entry.chart.remove(); } catch (e) {}
+        if (entry.el && entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+        delete dualOscillatorPanes[id];
+    }
+
+    function renderDualOscillatorPanes() {
+        Object.keys(dualOscillatorPanes).forEach(id => {
+            if (!dualActiveOscillators.includes(id)) destroyDualOscillatorPane(id);
+        });
+        if (!dualChart || !dualIndicators || !dualLastRenderedCandles.length) return;
+        const dates = dualLastRenderedCandles.map(c => c.time);
+        dualActiveOscillators.forEach(id => {
+            const entry = ensureDualOscillatorPane(id);
+            if (!entry) return;
+            Object.values(entry.series).forEach(s => { try { entry.chart.removeSeries(s); } catch (e) {} });
+            entry.series = {};
+            const built = buildOscillatorSeries(entry.chart, id, dualIndicators, dates);
+            entry.series = built.series;
+            const titleEl = entry.el.querySelector('.tv-osc-title');
+            if (titleEl) titleEl.textContent = built.title;
+        });
+        const range = dualChart.timeScale().getVisibleLogicalRange();
+        if (range) {
+            Object.values(dualOscillatorPanes).forEach(p => p.chart.timeScale().setVisibleLogicalRange(range));
+        }
+        resizeDualOscillatorPanes();
+    }
+
+    function resizeDualOscillatorPanes() {
+        Object.values(dualOscillatorPanes).forEach(p => {
+            const mount = p.el.querySelector('.tv-osc-chart-mount');
+            if (mount) p.chart.applyOptions({ width: mount.clientWidth, height: mount.clientHeight });
+        });
+    }
+
+    function toggleDualOscillator(id) {
+        if (dualActiveOscillators.includes(id)) {
+            dualActiveOscillators = dualActiveOscillators.filter(o => o !== id);
+        } else {
+            dualActiveOscillators.push(id);
+        }
+        document.querySelectorAll('#tv-dual-osc-row [data-dosc]').forEach(b => {
+            b.classList.toggle('active', dualActiveOscillators.includes(b.dataset.dosc));
+        });
+        renderDualOscillatorPanes();
+    }
+
+    /* ────────── BIST100 Endeksi ile Göreceli Güç ──────────
+     * (29 Temmuz 2026) Ana sembol ile karşılaştırma sembolünün (veya
+     * BIST100 Endeksi'nin) PAYLAŞILAN son N günlük penceredeki kümülatif
+     * getiri farkı. "Göreceli güç" burada TradingView'daki klasik "relative
+     * strength" göstergesi gibi ayrı bir çizgi değil, daha basit ve
+     * anlaşılır bir ÖZET rakam (bkz. sunulan öneri metni) — iki serinin
+     * paylaştığı GERÇEK gün sayısı kadar geriye gidip son kapanışları
+     * karşılaştırıyor, uydurma bir normalize edilmiş seri üretmiyor. */
+    const REL_STRENGTH_WINDOW_DAYS = 60;
+
+    function computeRelativeStrength() {
+        if (!dualSymbol || !state.dailyCandles.length || !dualDailyCandles.length) return null;
+        const n = Math.min(state.dailyCandles.length, dualDailyCandles.length, REL_STRENGTH_WINDOW_DAYS);
+        if (n < 2) return null;
+        const mainSlice = state.dailyCandles.slice(-n);
+        const dualSlice = dualDailyCandles.slice(-n);
+        const mainRet = (mainSlice[mainSlice.length - 1].close / mainSlice[0].close - 1) * 100;
+        const dualRet = (dualSlice[dualSlice.length - 1].close / dualSlice[0].close - 1) * 100;
+        return { mainRet, dualRet, spread: mainRet - dualRet, days: n };
+    }
+
+    function renderRelativeStrength() {
+        const el = byId('tv-dual-relstrength');
+        if (!el) return;
+        const rs = computeRelativeStrength();
+        if (!rs) { el.style.display = 'none'; el.innerHTML = ''; return; }
+        const dualLabel = SPECIAL_DUAL_SYMBOLS[dualSymbol] || dualSymbol;
+        const spreadCls = rs.spread >= 0 ? 'relstr-positive' : 'relstr-negative';
+        const spreadSign = rs.spread >= 0 ? '+' : '';
+        el.style.display = '';
+        el.innerHTML = 'Göreceli Güç (son ' + rs.days + ' gün): ' +
+            '<b>' + (state.ticker || '') + '</b> ' + (rs.mainRet >= 0 ? '+' : '') + rs.mainRet.toFixed(2) + '% · ' +
+            '<b>' + dualLabel + '</b> ' + (rs.dualRet >= 0 ? '+' : '') + rs.dualRet.toFixed(2) + '% · ' +
+            'Fark: <span class="' + spreadCls + '">' + spreadSign + rs.spread.toFixed(2) + '%</span>';
     }
 
     // (22 Temmuz 2026, on ikinci oturum, ikinci tur) dualSymbol set edilmişse
@@ -1259,11 +1514,18 @@ const TradingChart = (() => {
         if (!dualActive || !dualSeries) return;
         const sourceDaily = dualSymbol ? dualDailyCandles : state.dailyCandles;
         if (!sourceDaily.length) return;
-        const candles = deriveCandlesFromDaily(sourceDaily, dualResolution).map(c => ({
+        // (29 Temmuz 2026) `derivedRaw` volume alanını KORUYOR (VWAP/OBV/MFI
+        // gibi göstergeler için gerekli) — candlestick serisine verilen
+        // `candles` bunun sadece OHLC'ye indirgenmiş bir izdüşümü.
+        const derivedRaw = deriveCandlesFromDaily(sourceDaily, dualResolution);
+        const candles = derivedRaw.map(c => ({
             time: c.date, open: c.open, high: c.high, low: c.low, close: c.close
         }));
+        dualLastRenderedCandles = candles;
         dualSeries.setData(candles);
+        dualIndicators = (window.DataController && derivedRaw.length) ? window.DataController.calculateIndicators(derivedRaw) : null;
         refreshDualOverlays(candles);
+        renderDualOscillatorPanes();
         // (22 Temmuz 2026, on ikinci oturum, ikinci tur) Kullanıcı ekran
         // görüntüsünde bu panelin (kendi bağımsız çözünürlüğü intraday —
         // 1H/4H — iken) TÜM geçmişi fitContent() ile aşırı sıkıştırıp
@@ -1278,13 +1540,15 @@ const TradingChart = (() => {
             dualChart.timeScale().fitContent();
         }
         updateDualSymbolLabel();
+        renderRelativeStrength();
     }
 
     function updateDualSymbolLabel() {
         const label = byId('tv-dual-pane-label');
         if (!label) return;
         if (dualSymbol) {
-            label.textContent = dualSymbol + ' vs ' + (state.ticker || '');
+            const displayName = SPECIAL_DUAL_SYMBOLS[dualSymbol] || dualSymbol;
+            label.textContent = displayName + ' vs ' + (state.ticker || '');
         } else if (state.ticker) {
             label.textContent = state.ticker + ' — Karşılaştırma';
         }
@@ -1317,7 +1581,7 @@ const TradingChart = (() => {
     // PROFILES'ta yoksa) sessizce reddedilir ve kullanıcıya kısa bir toast
     // ile bildirilir — mevcut sembol değişmeden kalır.
     async function setDualSymbol(rawTicker) {
-        const normalized = (rawTicker || '').trim().toUpperCase();
+        let normalized = (rawTicker || '').trim().toUpperCase();
         if (!normalized || normalized === state.ticker) {
             dualSymbol = null;
             dualDailyCandles = [];
@@ -1325,12 +1589,23 @@ const TradingChart = (() => {
             refreshDualChart();
             return;
         }
-        const profiles = window.DataController && window.DataController.STOCK_PROFILES;
-        if (!profiles || !profiles[normalized]) {
-            if (window.TradingEngine && window.TradingEngine.showToast) {
-                window.TradingEngine.showToast(`"${normalized}" tanınan bir sembol değil.`);
+        // (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") "BIST100" /
+        // "XU100" kullanıcı için eşanlamlı — ikisi de gerçek BIST100 endeks
+        // sembolüne (backend'in format_ticker()'ı "XU100.IS"e çevirir, bu
+        // yfinance'te GERÇEKTEN var olan bir endeks sembolü) yönleniyor.
+        // STOCK_PROFILES doğrulamasından bilerek MUAF — orada zaten yok,
+        // 97 hisse listesi bir endeks sembolü içermiyor.
+        if (normalized === 'BIST100' || normalized === 'BIST 100' || normalized === 'XU100.IS') {
+            normalized = 'XU100';
+        }
+        if (!SPECIAL_DUAL_SYMBOLS[normalized]) {
+            const profiles = window.DataController && window.DataController.STOCK_PROFILES;
+            if (!profiles || !profiles[normalized]) {
+                if (window.TradingEngine && window.TradingEngine.showToast) {
+                    window.TradingEngine.showToast(`"${normalized}" tanınan bir sembol değil.`);
+                }
+                return;
             }
-            return;
         }
         const myToken = ++dualSymbolLoadToken;
         const candles = await fetchDailyCandlesForCompare(normalized);
@@ -1400,6 +1675,21 @@ const TradingChart = (() => {
             });
         }
 
+        // (29 Temmuz 2026 — "Dual-chart panelinde bağımsız gösterge desteği")
+        const oscRow = byId('tv-dual-osc-row');
+        if (oscRow) {
+            oscRow.querySelectorAll('[data-dosc]').forEach(btn => {
+                btn.addEventListener('click', () => toggleDualOscillator(btn.dataset.dosc));
+            });
+        }
+
+        // (29 Temmuz 2026 — "BIST100 Endeksi ile Göreceli Güç") Tek tıkla
+        // karşılaştırma sembolünü gerçek BIST100 endeksine çevirir.
+        const bist100Btn = byId('btn-dual-bist100');
+        if (bist100Btn) {
+            bist100Btn.addEventListener('click', () => setDualSymbol('XU100'));
+        }
+
         setupDualSymbolPicker();
     }
 
@@ -1418,7 +1708,8 @@ const TradingChart = (() => {
         const populateDatalist = () => {
             const profiles = window.DataController && window.DataController.STOCK_PROFILES;
             if (!profiles || datalist.children.length) return;
-            datalist.innerHTML = Object.keys(profiles).sort()
+            datalist.innerHTML = '<option value="XU100">BIST100 Endeksi</option>' +
+                Object.keys(profiles).sort()
                 .map(t => '<option value="' + t + '"></option>')
                 .join('');
         };
@@ -3883,6 +4174,7 @@ const TradingChart = (() => {
         if (dualChart && dualContainer) {
             dualChart.applyOptions({ width: dualContainer.clientWidth, height: dualContainer.clientHeight });
         }
+        resizeDualOscillatorPanes();
         resizeDrawCanvas();
     }
 
@@ -3917,6 +4209,7 @@ const TradingChart = (() => {
         renderOverlays,
         renderAllOscillatorPanes,
         getLastClose,
+        getLastATR,
         setTheme,
         setChartType,
         setVolumeVisible,
