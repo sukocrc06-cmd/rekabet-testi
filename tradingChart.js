@@ -241,6 +241,17 @@ const TradingChart = (() => {
         drawings: [],          // committed shapes
         pendingShape: null,    // in-progress shape while dragging
         pendingPoints: null,   // accumulated points for multi-click tools (channel/triangle/position)
+        // (29 Temmuz 2026 — Madde 14 "Cetvel düzeltilsin") Ölçüm aracının
+        // SONUCU — eskiden diğer tüm araçlar gibi state.drawings'e KALICI
+        // olarak ekleniyordu (bir trend çizgisi gibi grafikte kalıyor, elle
+        // silinmesi gerekiyordu ve HER ölçümden sonra araç "İmleç"e dönüyordu,
+        // art arda ölçüm yapmak için tekrar tekrar araç seçmek gerekiyordu —
+        // gerçek bir cetvel/ölçüm aracının davranışı bu değil). Artık ayrı,
+        // GEÇİCİ bir alanda tutuluyor: state.drawings'e hiç eklenmiyor (Tümünü
+        // Sil/kopyala-yapıştır/geri al onu hiç görmüyor), araç seçili kaldığı
+        // sürece ekranda kalıyor ve yeni bir ölçüme başlanınca ya da araç
+        // değişince temizleniyor.
+        measureShape: null,
         selectedDrawingIndex: -1,
         dayOpenPrice: null,
 
@@ -678,6 +689,9 @@ const TradingChart = (() => {
 
         state.drawings = drawingsBySymbol[ticker] ? drawingsBySymbol[ticker].slice() : [];
         state.selectedDrawingIndex = -1;
+        // Bir önceki sembolün mum indekslerine göre hesaplanmış geçici ölçüm
+        // yeni sembolde anlamsız kalır — sembol değişince temizleniyor.
+        state.measureShape = null;
         redrawDrawings();
 
         // Hand the real last close back to the caller (TradingEngine) so its
@@ -987,6 +1001,44 @@ const TradingChart = (() => {
     // yorumu) ama mum-dışı bir grafik tipinde (line/area/bars/baseline) gizli
     // olur ve görünen seri typeSeries olur — işaretlerin görünür seride de
     // aynı anda uygulanması gerekiyor, aksi halde o tiplerde hiç görünmezler.
+    // (29 Temmuz 2026 — Madde 18 "kullanıcının geçmişte yaptığı al-sat
+    // noktalarını grafikte ok ile göster") tradingEngine.js'teki GERÇEK işlem
+    // geçmişini (portfolio.history — AI sinyallerinden TAMAMEN farklı, bu
+    // KULLANICININ kendi gerçekleştirdiği alım/satımlar) okuyup, aktif
+    // sembole ait her işlemi en yakın muma eşleyip küçük bir ok işaretine
+    // çeviriyor. Sinyal anlatıcısının renk/şekil şemasından KASITLI olarak
+    // farklı bir renk kullanılıyor (mavi/turuncu) — ikisi karıştırılmasın.
+    function computeUserTradeMarkers() {
+        if (!window.TradingEngine || !window.TradingEngine.getTradeHistoryForSymbol) return [];
+        if (!state.ticker || !state.candles.length) return [];
+        const history = window.TradingEngine.getTradeHistoryForSymbol(state.ticker);
+        if (!history || !history.length) return [];
+        const dates = state.candles.map(c => c.date);
+        return history.map(h => {
+            const targetSec = Math.floor(h.ts / 1000);
+            let nearestIdx = 0, nearestDiff = Infinity;
+            for (let i = 0; i < dates.length; i++) {
+                const diff = Math.abs(dates[i] - targetSec);
+                if (diff < nearestDiff) { nearestDiff = diff; nearestIdx = i; }
+            }
+            const isBuy = h.side === 'BUY';
+            return {
+                time: dates[nearestIdx],
+                position: isBuy ? 'belowBar' : 'aboveBar',
+                color: isBuy ? '#42A5F5' : '#FF7043',
+                shape: isBuy ? 'arrowUp' : 'arrowDown',
+                text: (isBuy ? 'AL' : 'SAT') + ' ' + h.qty + ' @₺' + fmtPrice2(h.price),
+                _userTrade: true
+            };
+        }).sort((a, b) => a.time - b.time);
+    }
+
+    // fmtPrice, tradingEngine.js'te — burada aynı biçimi tekrarlamamak için
+    // basit bir yerel yardımcı (aynı 2 ondalık kural).
+    function fmtPrice2(v) {
+        return (typeof v === 'number') ? v.toFixed(2) : String(v);
+    }
+
     function applySignalMarkersForCurrentState() {
         if (!candleSeries) return;
         let markers = [];
@@ -994,8 +1046,17 @@ const TradingChart = (() => {
             const lastTime = state.candles[state.candles.length - 1].date;
             markers = state.signalMarkers.filter(m => m.time <= lastTime);
         }
+        markers = markers.concat(computeUserTradeMarkers()).sort((a, b) => a.time - b.time);
         try { candleSeries.setMarkers(markers); } catch (e) { /* eski/stub kütüphane sürümü */ }
         if (typeSeries) { try { typeSeries.setMarkers(markers); } catch (e) {} }
+    }
+
+    // (29 Temmuz 2026 — Madde 18) tradingEngine.js her başarılı emirden sonra
+    // bunu çağırır — o an grafikte gösterilen sembolle eşleşiyorsa işaretler
+    // anında yenilenir (sembol değişimini beklemeye gerek kalmaz).
+    function refreshUserTradeMarkers(symbol) {
+        if (symbol && state.ticker && symbol !== state.ticker) return;
+        applySignalMarkersForCurrentState();
     }
 
     function setupSignalExplainerToggle() {
@@ -1855,6 +1916,7 @@ const TradingChart = (() => {
 
         const MIN_H = 90;
         const MAX_H = 420;
+        const RESIZE_STEP = 40; // Madde 16 — tek tıkla büyüt/küçült adımı
         let resizingPane = null;
         let startY = 0;
         let startH = 0;
@@ -1923,6 +1985,17 @@ const TradingChart = (() => {
                 document.addEventListener('mousemove', onReorderMove);
                 document.addEventListener('mouseup', onReorderUp);
                 e.preventDefault();
+                return;
+            }
+            const resizeBtn = e.target.closest('.tv-osc-resize-btn');
+            if (resizeBtn) {
+                const pane = resizeBtn.closest('.tv-osc-pane');
+                if (!pane) return;
+                const currentH = pane.getBoundingClientRect().height;
+                const dir = resizeBtn.dataset.oscResize === 'grow' ? 1 : -1;
+                const newH = Math.min(MAX_H, Math.max(MIN_H, currentH + dir * RESIZE_STEP));
+                pane.style.flexBasis = newH + 'px';
+                resizeOscillatorPanes();
                 return;
             }
             const closeBtn = e.target.closest('.tv-osc-close-btn');
@@ -2047,8 +2120,13 @@ const TradingChart = (() => {
                 });
                 typeSeries.setData(candleData);
             } else if (type === 'line' || type === 'step_line') {
+                // (29 Temmuz 2026 — hocanın geri bildirimi, madde 5) "Adım
+                // Çizgisi" (step_line) tipi, basamaklı (dik köşeli) çizim
+                // biçimi yüzünden aynı kalınlıkta bile normal Çizgi tipinden
+                // daha ince/zayıf görünüyordu — kalınlığı 2'den 3'e çıkarıldı.
+                // Normal Çizgi (line) tipi bu şikayette anılmadı, 2'de bırakıldı.
                 typeSeries = chart.addLineSeries({
-                    color: COLORS.up, lineWidth: 2, priceLineVisible: true, lastValueVisible: true,
+                    color: COLORS.up, lineWidth: type === 'step_line' ? 3 : 2, priceLineVisible: true, lastValueVisible: true,
                     lineType: type === 'step_line' ? LightweightCharts.LineType.WithSteps : LightweightCharts.LineType.Simple
                 });
                 typeSeries.setData(sourceCandles.map(c => ({ time: c.date, value: c.close })));
@@ -2119,7 +2197,13 @@ const TradingChart = (() => {
                 ? window.DataController.buildLogoHtml(ticker, 22)
                 : '';
         }
-        if (nameEl) nameEl.textContent = ticker ? `${ticker}.IS` : '---';
+        // (29 Temmuz 2026 — hocanın geri bildirimi, madde 2) Önceden burada
+        // sembol adı bilerek "${ticker}.IS" (ör. "AKSEN.IS") olarak
+        // gösteriliyordu — muhtemelen backend/yfinance formatını yansıtmak
+        // içindi ama kullanıcı için anlamsız/kafa karıştırıcı görünüyordu.
+        // Backend'e giden gerçek istek zaten kendi ".IS" ekleme mantığını
+        // (format_ticker()) ayrıca uyguluyor, bu ekranda göstermeye gerek yok.
+        if (nameEl) nameEl.textContent = ticker || '---';
         if (priceEl) priceEl.textContent = price !== null ? '₺' + fmtPrice(price) : '---';
         if (chgEl) {
             if (price !== null && prevClose) {
@@ -2399,6 +2483,10 @@ const TradingChart = (() => {
             '<div class="tv-osc-pane-header">' +
                 '<span class="tv-osc-drag-handle" title="Sürükleyerek sırala">⋮⋮</span>' +
                 '<span class="tv-osc-title"></span>' +
+                // (29 Temmuz 2026 — Madde 16) Sürükleme tutamacına ek olarak,
+                // tek tıkla sabit adımlarla büyüt/küçült butonları.
+                '<span class="tv-osc-resize-btn" data-osc-resize="shrink" data-osc="' + id + '" title="Küçült">−</span>' +
+                '<span class="tv-osc-resize-btn" data-osc-resize="grow" data-osc="' + id + '" title="Büyüt">+</span>' +
                 '<span class="tv-osc-close-btn" data-osc="' + id + '" title="Paneli kapat">×</span>' +
             '</div>' +
             '<div class="tv-osc-chart-mount"></div>' +
@@ -3089,6 +3177,10 @@ const TradingChart = (() => {
         state.activeTool = tool;
         state.pendingShape = null;
         state.pendingPoints = null;
+        // Ölçüm aracından başka bir araca geçilirken son ölçüm sonucu da
+        // ekrandan kalkmalı (bkz. Madde 14 — measureShape artık kalıcı bir
+        // çizim değil, sadece "aktif ölçüm aracı" ekranıyla ilişkili).
+        if (state.activeTool !== 'measure') state.measureShape = null;
         updateToolbarActiveState();
         syncDrawCanvasCursor();
     }
@@ -3123,8 +3215,20 @@ const TradingChart = (() => {
 
     function handleToolbarAction(action) {
         if (action === 'clear') {
+            // (29 Temmuz 2026 — Madde 7 düzeltmesi) Eskiden sadece tamamlanmış
+            // state.drawings sıfırlanıyordu; kullanıcı bir şekli çizerken
+            // (örn. trend çizgisinin ilk noktası tıklanmış, ikinci nokta
+            // henüz bekleniyor) "Tümünü Sil"e basarsa state.pendingShape/
+            // pendingPoints TEMİZLENMİYORDU — bu da yarım kalan çizimin
+            // görünmeye devam etmesine veya bir sonraki tıklamada bozuk bir
+            // şekle dönüşmesine yol açabiliyordu. selectTool() ve Escape
+            // tuşu zaten bunu sıfırlıyor (bkz. aşağıda); "Tümünü Sil" de
+            // aynı sıfırlamayı yapmalı.
             state.drawings = [];
             state.selectedDrawingIndex = -1;
+            state.pendingShape = null;
+            state.pendingPoints = null;
+            state.measureShape = null;
             redrawDrawings();
         } else if (action === 'undo') {
             state.drawings.pop();
@@ -3232,6 +3336,13 @@ const TradingChart = (() => {
                     state.pendingShape = null;
                     redrawDrawings();
                 }
+                // (29 Temmuz 2026 — Madde 14) Escape, ekranda duran son ölçüm
+                // sonucunu da temizler — cetvel aracı seçili kalmaya devam
+                // eder, sadece görüntü kalkar.
+                if (state.measureShape) {
+                    state.measureShape = null;
+                    redrawDrawings();
+                }
             }
         });
     }
@@ -3298,6 +3409,11 @@ const TradingChart = (() => {
         const y = e.clientY - rect.top;
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
+
+        if (state.activeTool === 'measure') {
+            // Yeni bir ölçüme başlarken önceki geçici sonucu temizle.
+            state.measureShape = null;
+        }
 
         if (state.activeTool === 'text') {
             const label = window.prompt('Grafik notu:', '');
@@ -3373,6 +3489,16 @@ const TradingChart = (() => {
         pending.dragging = false;
         state.pendingShape = null;
 
+        if (pending.type === 'measure') {
+            // (29 Temmuz 2026 — Madde 14) Kalıcı bir çizim OLARAK eklenmiyor —
+            // geçici measureShape'e yazılıyor ve araç "İmleç"e dönmüyor, aynı
+            // araçla art arda ölçüm yapılabiliyor (finishDrawing() BİLEREK
+            // çağrılmıyor).
+            state.measureShape = { p1: pending.p1, p2: pending.p2 };
+            redrawDrawings();
+            return;
+        }
+
         if (pending.points) {
             if (pending.points.length > 1) {
                 state.drawings.push({ type: pending.type, points: pending.points });
@@ -3443,6 +3569,7 @@ const TradingChart = (() => {
             state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
         }
         if (state.pendingShape) drawShape(state.pendingShape, false);
+        if (state.measureShape) drawShape({ type: 'measure', p1: state.measureShape.p1, p2: state.measureShape.p2 }, false);
 
         renderSessionCloseMarker(rect);
     }
@@ -3913,11 +4040,22 @@ const TradingChart = (() => {
 
     function pasteDrawing() {
         if (!copiedDrawing || !state.candles.length) return false;
+        // (29 Temmuz 2026 — Madde 13 düzeltmesi) Eskiden sadece ZAMAN ekseninde
+        // 3 mumluk bir kayma uygulanıyordu. Bu, konumu SADECE fiyata bağlı
+        // olan çizim türlerinde (örn. "Yatay Çizgi" — tüm grafik genişliğini
+        // p1.price'a göre çizer, x/zaman konumunu hiç kullanmaz) görsel
+        // olarak HİÇBİR fark yaratmıyordu: yapıştırılan kopya orijinalin TAM
+        // üzerine düşüyor, kullanıcı ayırt edip ayırmak için ok tuşlarıyla
+        // elle taşımak zorunda kalıyordu ("Hareket kısıtlılığı" şikayeti).
+        // Artık fiyat ekseninde de küçük (%1) bir kayma uygulanıyor — şekil
+        // türü ne olursa olsun yapıştırılan kopya orijinalden görünür şekilde
+        // ayrışıyor.
         const shiftPoint = (point) => {
             if (!point) return point;
             const idx = state.candles.findIndex(c => c.date === point.time);
             const newIdx = Math.max(0, Math.min(state.candles.length - 1, (idx >= 0 ? idx : 0) + 3));
-            return { time: state.candles[newIdx].date, price: point.price };
+            const shiftedPrice = (typeof point.price === 'number') ? point.price * 1.01 : point.price;
+            return { time: state.candles[newIdx].date, price: shiftedPrice };
         };
 
         let clone;
@@ -4210,6 +4348,7 @@ const TradingChart = (() => {
         renderAllOscillatorPanes,
         getLastClose,
         getLastATR,
+        refreshUserTradeMarkers,
         setTheme,
         setChartType,
         setVolumeVisible,
@@ -4231,7 +4370,19 @@ const TradingChart = (() => {
         debugGetDualResolution: () => dualResolution,
         debugIsFullscreenActive: () => fullscreenActive,
         debugGetActiveOscillators: () => state.activeOscillators.slice(),
-        debugGetOscillatorPaneCount: () => Object.keys(oscillatorPanes).length
+        debugGetOscillatorPaneCount: () => Object.keys(oscillatorPanes).length,
+        // (29 Temmuz 2026 — Madde 6 doğrulaması) Test/QA amaçlı: dual-chart
+        // panelinde EN SON çizilen mumun kapanışını döndürür — "ayna" modunda
+        // (dualSymbol=null) ana sembol değiştiğinde bu değerin de gerçekten
+        // değiştiğini empirik olarak doğrulamak için eklendi.
+        debugGetDualLastClose: () => dualLastRenderedCandles.length ? dualLastRenderedCandles[dualLastRenderedCandles.length - 1].close : null,
+        // (29 Temmuz 2026 — Madde 14 doğrulaması) Ölçüm aracının artık
+        // state.drawings'e KALICI eklenmediğini, sadece geçici measureShape'te
+        // tutulduğunu doğrulamak için.
+        debugGetMeasureShape: () => state.measureShape ? JSON.parse(JSON.stringify(state.measureShape)) : null,
+        // (29 Temmuz 2026 — Madde 18 doğrulaması) Kullanıcının gerçek al-sat
+        // işaretçilerinin hesaplanan halini (aktif sembol için) döndürür.
+        debugGetUserTradeMarkers: () => computeUserTradeMarkers()
     });
 })();
 

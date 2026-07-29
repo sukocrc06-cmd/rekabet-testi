@@ -757,6 +757,15 @@
                                 </div>
                             </div>
 
+                            <!-- (29 Temmuz 2026 — Madde 19 "SL/TP girilince otomatik risk %
+                                 ön hesabı") Risk hesaplayıcının aksine (o, %'den ADET hesaplar
+                                 ve ayrı bir onay kutusuyla açılır), bu satır her zaman görünür:
+                                 elde ne kadar adet varsa (manuel girilmiş ya da risk
+                                 hesaplayıcıdan gelmiş fark etmez) ve Stop-Loss ne kadar
+                                 uzaktaysa, o kombinasyonun bakiyenin kaçına mal olacağını anlık
+                                 gösterir — bkz. tradingEngine.js updateRiskPreview(). -->
+                            <p class="qt-risk-preview" id="qt-risk-preview" style="display:none;"></p>
+
                             <!-- (26 Temmuz 2026, on üçüncü oturum devamı — "risk yönetimi:
                                  pozisyon büyüklüğü hesaplayıcı") Girilen Stop-Loss fiyatını
                                  kullanarak "bakiyemin %X'ini riske atmak istiyorum" mantığıyla

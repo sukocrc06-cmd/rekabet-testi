@@ -3193,6 +3193,23 @@ body.compact-mode .status-item {
     font-weight: 600;
 }
 
+/* (29 Temmuz 2026 — Madde 19 "SL/TP girilince otomatik risk % ön hesabı") */
+.qt-risk-preview {
+    margin: 8px 0 0 0;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    background: rgba(212, 175, 55, 0.08);
+    color: var(--text-primary);
+}
+
+.qt-risk-preview.qt-risk-preview-warn {
+    background: rgba(198, 40, 40, 0.12);
+    color: var(--danger);
+}
+
 /* (29 Temmuz 2026 — "ATR bazlı akıllı Stop-Loss önerisi") bkz.
    tradingEngine.js suggestAtrStopLoss(). */
 .qt-atr-suggest-btn {
@@ -4259,6 +4276,22 @@ body.compact-mode .status-item {
 
 .tv-osc-close-btn:hover {
     color: var(--danger);
+}
+
+/* (29 Temmuz 2026 — Madde 16 "Alt grafik büyüt/küçült butonları") Sürükleme
+   tutamacı (⋮⋮) zaten var ama fark edilmesi/hassas kullanılması zor —
+   tek tıkla sabit adımlarla büyütüp küçültmek için ek butonlar. */
+.tv-osc-resize-btn {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 3px;
+    user-select: none;
+}
+
+.tv-osc-resize-btn:hover {
+    color: var(--text-primary);
 }
 
 .tv-osc-chart-mount {

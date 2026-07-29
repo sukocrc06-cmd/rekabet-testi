@@ -1733,8 +1733,8 @@ const TradingEngine = (() => {
                 if (sltpRow) sltpRow.style.display = 'none';
             }
             const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
-            if (slInput) slInput.value = '';
-            if (tpInput) tpInput.value = '';
+            if (slInput) { slInput.value = ''; delete slInput.dataset.userEdited; }
+            if (tpInput) { tpInput.value = ''; delete tpInput.dataset.userEdited; }
         }
 
         state.activeSymbol = symbol;
@@ -1828,6 +1828,11 @@ const TradingEngine = (() => {
         if (limitTab) limitTab.addEventListener('click', () => setOrderType('LIMIT'));
         if (ocoTab) ocoTab.addEventListener('click', () => setOrderType('OCO'));
         if (qtyInput) qtyInput.addEventListener('input', updateEstimate);
+        // (29 Temmuz 2026 — Madde 19) Adet elle değiştirildiğinde de risk %
+        // ön hesabı güncel kalsın (maybeRecomputeRiskQty DEĞİL — o, risk
+        // hesaplayıcı açıkken adedi TERSİNE hesaplıyor; burada adet zaten
+        // GİRDİ, döngüye girmeden sadece önizlemeyi tazeliyoruz).
+        if (qtyInput) qtyInput.addEventListener('input', updateRiskPreview);
         if (limitInput) limitInput.addEventListener('input', () => { updateEstimate(); maybeRecomputeRiskQty(); });
         if (ocoUpperInput) ocoUpperInput.addEventListener('input', updateEstimate);
         if (ocoLowerInput) ocoLowerInput.addEventListener('input', updateEstimate);
@@ -1839,6 +1844,14 @@ const TradingEngine = (() => {
                 // adet alanı manuel girişe geri döndürülüyor.
                 if (!sltpToggle.checked) {
                     setRiskCalcEnabled(false);
+                } else {
+                    // (29 Temmuz 2026 — Madde 10 düzeltmesi) Kutu ilk açıldığında
+                    // alanlar boş kalıp sadece "0.00" placeholder'ı gösteriyordu
+                    // — kullanıcının sıfırdan bir fiyat düşünüp yazması
+                    // gerekiyordu. Artık kutu her açıldığında (alanlar henüz
+                    // boşsa) mevcut fiyattan makul bir varsayılan SL/TP
+                    // öneriliyor — kullanıcı dilerse direkt değiştirebilir.
+                    applyDefaultSlTp();
                 }
             });
         }
@@ -1851,6 +1864,10 @@ const TradingEngine = (() => {
                 // hesaplayıcı sabit SL fiyatına dayandığı için trailing
                 // seçilince otomatik kapatılır.
                 if (trailingToggle.checked) setRiskCalcEnabled(false);
+                // (29 Temmuz 2026 — Madde 19) Aynı sebeple risk ön izlemesi de
+                // (sabit bir SL mesafesi gerektiriyor) trailing seçilince
+                // gizlenmeli / kapatılınca varsa yeniden hesaplanmalı.
+                updateRiskPreview();
             });
         }
         if (riskToggle && riskRow) {
@@ -1858,6 +1875,12 @@ const TradingEngine = (() => {
         }
         if (riskPctInput) riskPctInput.addEventListener('input', maybeRecomputeRiskQty);
         if (slPriceInput) slPriceInput.addEventListener('input', maybeRecomputeRiskQty);
+        // (29 Temmuz 2026 — Madde 10) Kullanıcı SL/TP alanına GERÇEKTEN
+        // dokunduysa bunu işaretle ki applyDefaultSlTp() bir daha üzerine
+        // yazmasın (bkz. applyDefaultSlTp() yorumu).
+        if (slPriceInput) slPriceInput.addEventListener('input', markSlTpUserEdited);
+        const tpPriceInput = byId('qt-tp-price');
+        if (tpPriceInput) tpPriceInput.addEventListener('input', markSlTpUserEdited);
 
         const atrSuggestBtn = byId('qt-atr-suggest-btn');
         if (atrSuggestBtn) atrSuggestBtn.addEventListener('click', suggestAtrStopLoss);
@@ -1893,6 +1916,12 @@ const TradingEngine = (() => {
         }
         updateEstimate();
         maybeRecomputeRiskQty();
+        // (29 Temmuz 2026 — Madde 10) SL/TP kutusu zaten açıkken AL<->SAT
+        // sekmesi değiştirilirse, yönle ters düşmüş eski varsayılan
+        // değerlerin ekranda kalmaması için (kullanıcı henüz elle
+        // düzenlemediyse) yeniden hesaplanır.
+        const sltpToggleEl = byId('qt-sltp-toggle');
+        if (sltpToggleEl && sltpToggleEl.checked) applyDefaultSlTp();
     }
 
     function setOrderType(type) {
@@ -2115,6 +2144,54 @@ const TradingEngine = (() => {
     function maybeRecomputeRiskQty() {
         const toggle = byId('qt-risk-toggle');
         if (toggle && toggle.checked) computeRiskBasedQty();
+        updateRiskPreview();
+    }
+
+    /* ════════════════════════════════════════════════
+       SL/TP girilince otomatik risk % ön hesabı
+       (29 Temmuz 2026 — Madde 19) computeRiskBasedQty()'den FARKLI: o, "%X
+       riske et" mantığıyla ADET hesaplıyor ve ayrı bir onay kutusuyla açılan
+       bir mod. Bu, tam tersine, elde ne kadar adet varsa (elle girilmiş ya da
+       risk hesaplayıcıdan gelmiş, farketmez) ve Stop-Loss ne kadar
+       uzaktaysa, bu kombinasyonun bakiyenin YÜZDE KAÇINA mal olacağını
+       SL/TP kutusu açık olduğu sürece HER ZAMAN gösterir — kullanıcı ayrıca
+       bir şey açmasına gerek kalmadan "bu işlemde bakiyemin %kaçını
+       riske ediyorum" sorusuna anında yanıt.
+       ════════════════════════════════════════════════ */
+    const RISK_PREVIEW_WARN_THRESHOLD_PCT = 5;
+
+    function updateRiskPreview() {
+        const previewEl = byId('qt-risk-preview');
+        if (!previewEl) return;
+        const sltpToggle = byId('qt-sltp-toggle');
+        if (!sltpToggle || !sltpToggle.checked) { previewEl.style.display = 'none'; return; }
+
+        const trailingToggle = byId('qt-trailing-toggle');
+        if (trailingToggle && trailingToggle.checked) {
+            // Trailing stop'un sabit bir SL fiyatı yok — mesafe önceden
+            // bilinmediği için bir risk ön hesabı yapılamaz.
+            previewEl.style.display = 'none';
+            return;
+        }
+
+        const qtyInput = byId('qt-qty');
+        const slInput = byId('qt-sl-price');
+        const qty = qtyInput ? Number(qtyInput.value) : 0;
+        const slPrice = slInput && slInput.value ? Number(slInput.value) : null;
+        const price = effectivePrice();
+
+        if (!qty || qty <= 0 || !slPrice || slPrice <= 0 || !price || price <= 0 || !portfolio.balance) {
+            previewEl.style.display = 'none';
+            return;
+        }
+
+        const perShareRisk = Math.abs(price - slPrice);
+        const riskAmount = perShareRisk * qty;
+        const riskPct = (riskAmount / portfolio.balance) * 100;
+
+        previewEl.style.display = '';
+        previewEl.textContent = `Bu işlemde bakiyenizin yaklaşık %${riskPct.toFixed(2)}'sini (${fmtTRY(riskAmount)}) riske ediyorsunuz.`;
+        previewEl.classList.toggle('qt-risk-preview-warn', riskPct >= RISK_PREVIEW_WARN_THRESHOLD_PCT);
     }
 
     // Risk hesaplayıcı açıkken adet alanı ve %25/50/75/100 hızlı butonları
@@ -2176,6 +2253,54 @@ const TradingEngine = (() => {
         showToast(`ATR(14)×${ATR_SL_MULTIPLIER} ≈ ₺${fmtPrice(distance)} mesafeyle önerilen Stop-Loss: ₺${fmtPrice(suggestedSl)}`);
     }
 
+    /* ════════════════════════════════════════════════
+       SL/TP kutusu için makul varsayılan değerler
+       (29 Temmuz 2026 — Madde 10 "Stop-loss 0,00 yerine makul bir
+       varsayılanla açılsın") Kutu açıldığında alanlar boşsa (kullanıcı daha
+       önce bir şey yazmadıysa) mevcut fiyattan basit, sabit yüzdelik bir
+       mesafeyle (SL %2, TP %4 — yaklaşık 1:2 risk/ödül, eğitim amaçlı) bir
+       başlangıç değeri öneriliyor. ATR bazlı öneri butonu (suggestAtrStopLoss)
+       zaten var ve daha isabetli bir SL veriyor — bu, o butona hiç
+       dokunmadan yazmayı gerektirmeyen basit bir ilk değer.
+       "Boş mu" kontrolü YETERLİ DEĞİL: kutuyu kapatıp AL<->SAT sekmesini
+       değiştirip tekrar açtığında alan hâlâ ÖNCEKİ varsayılanla dolu
+       olduğundan (boş değil), yeni yöne göre yeniden hesaplanmıyordu — bu
+       yüzden gerçek kullanıcı girişini bir dataset bayrağıyla (userEdited)
+       ayrı takip ediyoruz: sadece kullanıcı GERÇEKTEN yazdıysa üzerine
+       yazmıyoruz, aksi halde (boş VEYA bizim önceki varsayılanımız) güncel
+       yöne göre yeniden dolduruyoruz.
+       ════════════════════════════════════════════════ */
+    const DEFAULT_SL_PCT = 2;
+    const DEFAULT_TP_PCT = 4;
+
+    function markSlTpUserEdited(e) {
+        if (e && e.target) e.target.dataset.userEdited = '1';
+    }
+
+    function applyDefaultSlTp() {
+        const slInput = byId('qt-sl-price');
+        const tpInput = byId('qt-tp-price');
+        const price = effectivePrice();
+        if (!price) return;
+        const isLong = state.side !== 'SELL';
+        if (slInput && slInput.dataset.userEdited !== '1') {
+            const sl = isLong ? price * (1 - DEFAULT_SL_PCT / 100) : price * (1 + DEFAULT_SL_PCT / 100);
+            if (sl > 0) {
+                slInput.value = sl.toFixed(2);
+                maybeRecomputeRiskQty();
+            }
+        }
+        if (tpInput && tpInput.dataset.userEdited !== '1') {
+            const tp = isLong ? price * (1 + DEFAULT_TP_PCT / 100) : price * (1 - DEFAULT_TP_PCT / 100);
+            if (tp > 0) tpInput.value = tp.toFixed(2);
+        }
+        // (29 Temmuz 2026 — Madde 19) SL zaten kullanıcı tarafından
+        // düzenlenmişse yukarıdaki dal hiç çalışmıyor olabilir — kutu her
+        // açıldığında risk ön izlemesinin YİNE DE tazelenmesi garanti
+        // ediliyor.
+        updateRiskPreview();
+    }
+
     function applyQtyPct(pct) {
         if (!state.activeSymbol) return;
         const price = effectivePrice();
@@ -2201,6 +2326,7 @@ const TradingEngine = (() => {
         const qtyInput = byId('qt-qty');
         if (qtyInput) qtyInput.value = Math.max(0, qty);
         updateEstimate();
+        updateRiskPreview();
     }
 
     function effectivePrice() {
@@ -2402,8 +2528,8 @@ const TradingEngine = (() => {
         const sltpRow = byId('qt-sltp-row');
         if (sltpRow) sltpRow.style.display = 'none';
         const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
-        if (slInput) { slInput.value = ''; slInput.disabled = false; }
-        if (tpInput) tpInput.value = '';
+        if (slInput) { slInput.value = ''; slInput.disabled = false; delete slInput.dataset.userEdited; }
+        if (tpInput) { tpInput.value = ''; delete tpInput.dataset.userEdited; }
         if (trailingToggle) trailingToggle.checked = false;
         if (trailingPctInput) trailingPctInput.value = '';
         const trailingRow = byId('qt-trailing-row');
@@ -2621,6 +2747,14 @@ const TradingEngine = (() => {
         return margin - releasedMargin;
     }
 
+    // (29 Temmuz 2026 — Madde 18 "kullanıcının geçmişte yaptığı al-sat
+    // noktalarını grafikte ok ile göster") tradingChart.js'in belirli bir
+    // sembol için GERÇEK işlem geçmişini okuyup grafikte ok işareti
+    // çizebilmesi için salt-okunur bir kopya döndürür.
+    function getTradeHistoryForSymbol(symbol) {
+        return portfolio.history.filter(h => h.symbol === symbol).map(h => ({ ...h }));
+    }
+
     function placeOrder(symbol, side, qty, price, commissionPct, leverage) {
         qty = Math.floor(Number(qty));
         price = Number(price);
@@ -2715,6 +2849,12 @@ const TradingEngine = (() => {
 
         portfolio.history = portfolio.history.slice(0, 50);
         savePortfolio();
+        // (29 Temmuz 2026 — Madde 18) Grafikte o an bu sembol gösteriliyorsa
+        // yeni işlemin ok işaretinin sembol değiştirmeden hemen görünmesi
+        // için.
+        if (window.TradingChart && window.TradingChart.refreshUserTradeMarkers) {
+            window.TradingChart.refreshUserTradeMarkers(symbol);
+        }
         return { ok: true };
     }
 
@@ -3521,7 +3661,11 @@ const TradingEngine = (() => {
         // dual-chart karşılaştırma sembolü seçicisinin geçersiz sembol
         // girişinde kullanıcıya kısa bir geri bildirim verebilmesi için —
         // ayrı bir toast mekanizması yazmak yerine mevcut olanı dışa açıyoruz.
-        showToast
+        showToast,
+        // (29 Temmuz 2026 — Madde 18) tradingChart.js'in grafik üzerinde
+        // kullanıcının gerçek al-sat noktalarını ok işaretiyle gösterebilmesi
+        // için.
+        getTradeHistoryForSymbol
     });
 })();
 
