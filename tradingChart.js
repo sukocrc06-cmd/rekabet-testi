@@ -4323,10 +4323,43 @@ const TradingChart = (() => {
     // (nokta OLMAYAN) alanlar sadece fiyatça kayar, zaman kayması onlara
     // uygulanmaz.
     function translateShapePoints(shape, indexDelta, priceDelta) {
+        // (3 Ağustos 2026 — kullanıcı video geri bildirimi: "üstteki trend
+        // çizgisini kopyalayıp alta bir tane daha koyduğumda ve onu sağa
+        // sola kaydırdığımda eğimi değişiyor ve hissenin güncel fiyatından
+        // daha sağa gitmiyor") Kök neden: aşağıdaki shiftPoint() her NOKTAYI
+        // BAĞIMSIZ olarak [0, son mum] aralığına clamp ediyordu. Bir çizginin
+        // sağ ucu son muma (bugüne) ulaşıp orada kilitlenirken, sol ucu aynı
+        // indexDelta kadar kaymaya DEVAM ediyordu — bu da tüm gövdeyi
+        // TAŞIRKEN çizginin EĞİMİNİ bozuyordu (gerçek bir trend çizgisi
+        // taşınırken şekli/eğimi hiç değişmemeli, yalnızca konumu kayar).
+        // Düzeltme: önce şeklin TÜM noktalarının orijinal index'lerine bakıp,
+        // hangi yönde ne kadar kaymaya izin verildiğini (en soldaki nokta 0'a,
+        // en sağdaki nokta son muma değene kadar) hesaplayıp indexDelta'yı
+        // TEK SEFERDE, ŞEKLİN TAMAMI İÇİN clamp ediyoruz — sonra bu ORTAK
+        // (tek) delta'yı her noktaya aynı şekilde uyguluyoruz. Böylece çizgi
+        // sınırdan öteye kaymayı durdurur ama eğimi/şekli hiç bozulmaz.
+        const points = [];
+        if (shape.points) points.push(...shape.points);
+        if (shape.p1) points.push(shape.p1);
+        if (shape.p2) points.push(shape.p2);
+        if (shape.apex) points.push(shape.apex);
+
+        let clampedDelta = indexDelta;
+        const origIndices = points
+            .filter(p => p && p.time != null)
+            .map(p => { const idx = state.candles.findIndex(c => c.date === p.time); return idx >= 0 ? idx : 0; });
+        if (origIndices.length) {
+            const minOrig = Math.min(...origIndices);
+            const maxOrig = Math.max(...origIndices);
+            const minAllowedDelta = 0 - minOrig;
+            const maxAllowedDelta = (state.candles.length - 1) - maxOrig;
+            clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, indexDelta));
+        }
+
         const shiftPoint = (point) => {
             if (!point || point.time == null) return point;
             const curIdx = state.candles.findIndex(c => c.date === point.time);
-            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (curIdx >= 0 ? curIdx : 0) + indexDelta));
+            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (curIdx >= 0 ? curIdx : 0) + clampedDelta));
             const newTime = state.candles[newIdx] ? state.candles[newIdx].date : point.time;
             return { time: newTime, price: point.price + priceDelta };
         };

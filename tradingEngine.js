@@ -1881,8 +1881,29 @@ const TradingEngine = (() => {
         body.querySelectorAll('.wl-remove-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                removeFromWatchlist(btn.dataset.removeSymbol);
-                renderWatchlistRows();
+                const symbol = btn.dataset.removeSymbol;
+                removeFromWatchlist(symbol);
+                // (3 Ağustos 2026 — kullanıcı geri bildirimi: "burada bir
+                // tanesini sildiğimizde tüm hisseleri yenilemesine gerek yok
+                // sadece silinen hissenin altındakileri birer satır yukarı
+                // taşıyacak") Eskiden burada TÜM liste renderWatchlistRows()
+                // ile sıfırdan yeniden çiziliyordu — kalan onlarca satırın
+                // DOM'u (ve sparkline canvas'ları) gereksiz yere yeniden
+                // oluşturuluyordu. Artık SADECE silinen satır DOM'dan
+                // kaldırılıyor; altındaki satırlar normal blok akışıyla
+                // kendiliğinden bir satır yukarı kayıyor — diğer satırların
+                // canvas/sparkline durumu hiç bozulmuyor.
+                const row = btn.closest('.watchlist-row');
+                if (row) {
+                    if (sparkObserver) sparkObserver.unobserve(row);
+                    visibleSparkSymbols.delete(symbol);
+                    row.remove();
+                }
+                // Liste tamamen boşaldıysa boş-durum mesajını göstermek için
+                // (nadir/ucuz bir durum) tam render'a düşülüyor.
+                if (!body.querySelector('.watchlist-row')) {
+                    renderWatchlistRows();
+                }
             });
         });
 
