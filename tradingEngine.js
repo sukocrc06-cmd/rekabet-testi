@@ -311,11 +311,6 @@ const TradingEngine = (() => {
         renderPositions();
         renderAccountSummary();
 
-        if (state.activeSymbol) {
-            renderOrderBook(state.activeSymbol);
-            maybePushRecentTrade(state.activeSymbol);
-        }
-
         checkStopLossTakeProfit();
         checkMarginCalls();
         checkPendingOcoOrders();
@@ -367,7 +362,6 @@ const TradingEngine = (() => {
         renderWatchlistPrices();
         if (symbol === state.activeSymbol) {
             updateActiveSymbolTicket();
-            renderOrderBook(symbol);
         }
     }
 
@@ -619,108 +613,16 @@ const TradingEngine = (() => {
     }
 
     /* ════════════════════════════════════════════════
-       Simulated Order Book (bid/ask depth, Binance-style)
+       Right panel sub-tabs (Alım-Satım / Performans / Özet Detay)
        ════════════════════════════════════════════════ */
-
-    function fmtQty(n) {
-        return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(Math.round(n));
-    }
-
-    function buildOrderBookSide(midPrice, levels, isAsk) {
-        const rows = [];
-        let cumQty = 0;
-        // Tick size scales with price magnitude (kuruş-level for cheap stocks,
-        // whole-lira steps for expensive ones) so the ladder looks sensible.
-        const tick = midPrice >= 500 ? 0.5 : midPrice >= 100 ? 0.1 : midPrice >= 20 ? 0.02 : 0.01;
-        for (let i = 1; i <= levels; i++) {
-            const price = isAsk ? midPrice + tick * i : midPrice - tick * i;
-            if (price <= 0) break;
-            // Depth tends to thin out further from the mid price, with noise.
-            const qty = Math.max(10, Math.round((2200 / i) * (0.4 + Math.random() * 1.2)));
-            cumQty += qty;
-            rows.push({ price, qty, cumQty });
-        }
-        return rows;
-    }
-
-    function renderOrderBook(symbol) {
-        const asksEl = byId('orderbook-asks');
-        const bidsEl = byId('orderbook-bids');
-        const midEl = byId('orderbook-mid-price');
-        if (!asksEl || !bidsEl) return; // tab not in DOM / not built yet
-        const price = getPrice(symbol);
-        if (!price) return;
-
-        const LEVELS = 9;
-        const asks = buildOrderBookSide(price, LEVELS, true);
-        const bids = buildOrderBookSide(price, LEVELS, false);
-        const maxCum = Math.max(asks[asks.length - 1]?.cumQty || 1, bids[bids.length - 1]?.cumQty || 1);
-
-        // Asks render top-to-bottom from farthest to nearest (best ask sits
-        // just above the mid-price row), matching standard order book UX.
-        asksEl.innerHTML = asks.slice().reverse().map(r => orderBookRowHtml(r, 'ask', maxCum)).join('');
-        bidsEl.innerHTML = bids.map(r => orderBookRowHtml(r, 'bid', maxCum)).join('');
-        if (midEl) midEl.textContent = '₺' + price.toFixed(price >= 500 ? 1 : 2);
-    }
-
-    function orderBookRowHtml(row, side, maxCum) {
-        const widthPct = Math.min(100, (row.cumQty / maxCum) * 100);
-        return '<div class="orderbook-row ' + side + '">' +
-            '<span class="ob-depth-bar" style="width:' + widthPct.toFixed(0) + '%"></span>' +
-            '<span class="ob-price">' + row.price.toFixed(row.price >= 500 ? 1 : 2) + '</span>' +
-            '<span class="ob-qty">' + fmtQty(row.qty) + '</span>' +
-            '</div>';
-    }
-
-    /* ════════════════════════════════════════════════
-       Simulated Recent Trades tape
-       ════════════════════════════════════════════════ */
-
-    const recentTradesBySymbol = {};
-    const MAX_RECENT_TRADES = 40;
-
-    function maybePushRecentTrade(symbol) {
-        const price = getPrice(symbol);
-        if (!price) return;
-        if (!recentTradesBySymbol[symbol]) recentTradesBySymbol[symbol] = [];
-        const list = recentTradesBySymbol[symbol];
-        const prevPrice = list.length ? list[0].price : price;
-        // 1-3 prints per tick for a livelier tape, each with tiny price noise
-        // around the current simulated price and a side biased by the recent
-        // direction of travel (mimics real tape behavior on up/down moves).
-        const printCount = 1 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < printCount; i++) {
-            const noise = (Math.random() - 0.5) * price * 0.0015;
-            const printPrice = +(price + noise).toFixed(price >= 500 ? 1 : 2);
-            const upBias = printPrice >= prevPrice ? 0.62 : 0.38;
-            const side = Math.random() < upBias ? 'buy' : 'sell';
-            const qty = Math.max(1, Math.round(5 + Math.random() * 250));
-            list.unshift({ price: printPrice, qty, side, ts: Date.now() });
-        }
-        if (list.length > MAX_RECENT_TRADES) list.length = MAX_RECENT_TRADES;
-        renderRecentTrades(symbol);
-    }
-
-    function renderRecentTrades(symbol) {
-        const el = byId('recent-trades-list');
-        if (!el) return;
-        const list = recentTradesBySymbol[symbol] || [];
-        el.innerHTML = list.map(t => {
-            const time = new Date(t.ts);
-            const hh = String(time.getHours()).padStart(2, '0');
-            const mm = String(time.getMinutes()).padStart(2, '0');
-            const ss = String(time.getSeconds()).padStart(2, '0');
-            return '<div class="trade-tape-row ' + t.side + '">' +
-                '<span class="tt-price">' + t.price.toFixed(t.price >= 500 ? 1 : 2) + '</span>' +
-                '<span class="tt-qty">' + fmtQty(t.qty) + '</span>' +
-                '<span class="tt-time">' + hh + ':' + mm + ':' + ss + '</span>' +
-                '</div>';
-        }).join('');
-    }
-
-    /* ════════════════════════════════════════════════
-       Right panel sub-tabs (Alım-Satım / Emir Defteri / Son İşlemler)
-       ════════════════════════════════════════════════ */
+    // (3 Ağustos 2026 — kullanıcı isteği: "emir ve son işlemler demo fake ise
+    // onları kaldır") Emir Defteri (bid/ask depth) ve Son İşlemler (tape)
+    // sekmeleri BURADAN kaldırıldı — ikisi de tamamen Math.random() tabanlı
+    // simülasyondu, gerçek BIST verisi ücretsiz hiçbir kaynaktan alınamıyor
+    // (bkz. proje dokümanı "Emir Defteri Teknik Açıklama"). fmtQty/
+    // buildOrderBookSide/renderOrderBook/orderBookRowHtml/
+    // maybePushRecentTrade/renderRecentTrades fonksiyonlarının hepsi bu
+    // sekimlerle birlikte kaldırıldı.
 
     function setupPanelSubtabs() {
         const tabs = document.querySelectorAll('.panel-subtab');
@@ -734,8 +636,6 @@ const TradingEngine = (() => {
                 if (target) target.classList.add('active');
                 // Populate on-demand the first time a tab is revealed, rather
                 // than waiting for the next 2s price tick.
-                if (tab.dataset.panelTab === 'orderbook' && state.activeSymbol) renderOrderBook(state.activeSymbol);
-                if (tab.dataset.panelTab === 'trades' && state.activeSymbol) renderRecentTrades(state.activeSymbol);
                 if (tab.dataset.panelTab === 'performance') renderPerformanceTab();
                 if (tab.dataset.panelTab === 'summary') renderSummaryDetailTab();
             });
@@ -2147,8 +2047,10 @@ const TradingEngine = (() => {
 
         updateActiveSymbolTicket();
         renderPositions();
-        renderOrderBook(symbol);
-        renderRecentTrades(symbol);
+        // (3 Ağustos 2026 — "emir defteri/son işlemler kaldırma") Bu iki
+        // fonksiyon (renderOrderBook/renderRecentTrades) tamamen simüle
+        // (fake) veri ürettiği için hoca geri bildirimiyle kaldırıldı;
+        // burada kalan çağrılar da o yüzden silindi.
 
         // (23 Temmuz 2026, on üçüncü oturum — "canlı veri akışı hızlandırma")
         // Önceden WebSocket bağlantısı, aşağıdaki tam OHLCV geçmişi
@@ -2181,7 +2083,6 @@ const TradingEngine = (() => {
                 priceProfiles[symbol].dayOpen = chartInfo.lastClose;
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
-                renderOrderBook(symbol);
             }
         }
     }

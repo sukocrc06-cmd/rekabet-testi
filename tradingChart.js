@@ -428,7 +428,19 @@ const TradingChart = (() => {
                 borderColor: c.border,
                 timeVisible: false,
                 secondsVisible: false,
-                visible: !isSub ? false : true // main chart hides its own time axis; sub-chart shows the shared axis
+                visible: !isSub ? false : true, // main chart hides its own time axis; sub-chart shows the shared axis
+                // (3 Ağustos 2026 — kullanıcı/hoca geri bildirimi: "çizgi sağa
+                // gitmiyor") Önceden rightOffset hiç ayarlanmamıştı (varsayılan
+                // 0) — bu da son mumun grafığın SAĞ KENARINA TAM OTURMASI,
+                // ötesinde hiç boş alan olmaması anlamına geliyordu. Bir trend
+                // çizgisini/hedef çizgisini son mumun ÖTESİNE (geleceğe doğru)
+                // sürüklemek isteyen kullanıcı için görsel olarak sürükleyecek
+                // hiç yer yoktu. 20 barlık boş alan bırakarak (TradingView'daki
+                // standart davranışla tutarlı) çizimlerin geleceğe doğru
+                // uzatılabileceği bir alan açılıyor — aşağıdaki
+                // pixelToDataPoint()/dataPointToPixel()/indexForTime()/
+                // translateShapePoints() değişiklikleriyle birlikte çalışır.
+                rightOffset: 20
             },
             handleScroll: true,
             handleScale: true
@@ -3530,26 +3542,96 @@ const TradingChart = (() => {
         return { time: dp.time, price: best, idx: dp.idx };
     }
 
+    // (3 Ağustos 2026 — kullanıcı/hoca geri bildirimi: "çizgi sağa gitmiyor")
+    // Kök neden analizi: çizim noktaları HER ZAMAN state.candles içindeki
+    // GERÇEK bir mumun index'ine ([0, state.candles.length-1]) sabitlenmek
+    // zorundaydı — pixelToDataPoint() bunu SERT şekilde clamp ediyor,
+    // dataPointToPixel()/indexForTime() ise findIndex ile arıyordu (bulamazsa
+    // -1/null döner, çizim o noktada hiç görünmezdi). Bu yüzden bir çizgiyi
+    // son muma (bugüne) ulaşana kadar sağa sürüklemek mümkündü, ama daha
+    // ÖTESİNE (geleceğe) hiç geçilemiyordu — imleç sağa gitmeye devam etse
+    // bile çizginin ucu son mumda kilitli kalıyordu.
+    //
+    // Çözüm: "sanal index" kavramı eklendi. Gerçek mum aralığının
+    // ([0, length-1]) ÖTESİNDEKİ index'ler artık geçersiz sayılmıyor — bunun
+    // yerine son mumun tarihinden itibaren, mumlar arasındaki gerçek bar
+    // aralığı (inferBarIntervalSeconds()) kadar EKSTRAPOLE edilen sentetik
+    // bir "time" değeri üretiliyor (virtualIndexToTime). virtualTimeToIndex
+    // bunun tersini yapar: gerçek bir mum tarihiyle eşleşmeyen ama son
+    // mumdan ilerideki bir zaman damgasını, geriye doğru aynı aralıkla
+    // sanal index'e çevirir. Sol tarafta (index 0'ın altında) böyle bir
+    // ekstrapolasyona gerek yok — geçmişe doğru "boş alan" sürüklemenin
+    // kullanıcı için bir anlamı yok, o taraf hâlâ 0'da clamp'li kalıyor.
+    //
+    // Bu iki fonksiyon merkezi olduğu için (tüm çizim render/hit-test/
+    // taşıma/uç-nokta-düzenleme kodu dataPointToPixel/pixelToDataPoint/
+    // indexForTime üzerinden çalışıyor), buradaki değişiklik TÜM çizim
+    // araçlarının geleceğe doğru uzatılabilmesini otomatik olarak sağlıyor —
+    // ayrıca bkz. baseChartOptions()'a eklenen rightOffset (görsel olarak
+    // sürüklenecek boş alan) ve translateShapePoints()/pasteDrawing()'teki
+    // ilgili clamp güncellemeleri.
+    const MAX_FUTURE_BARS = 2000; // aşırı/patolojik sürüklemelere karşı güvenlik sınırı, pratikte hiç dokunulmaz
+
+    function inferBarIntervalSeconds() {
+        if (state.candles.length >= 2) {
+            const n = state.candles.length;
+            const diff = state.candles[n - 1].date - state.candles[n - 2].date;
+            if (diff > 0) return diff;
+        }
+        return 86400; // güvenli varsayılan: 1 gün
+    }
+
+    function virtualIndexToTime(idx) {
+        if (!state.candles.length) return null;
+        const lastIdx = state.candles.length - 1;
+        const rounded = Math.round(idx);
+        if (rounded <= lastIdx) {
+            const clamped = Math.max(0, rounded);
+            return state.candles[clamped].date;
+        }
+        const interval = inferBarIntervalSeconds();
+        const stepsAhead = Math.min(rounded - lastIdx, MAX_FUTURE_BARS);
+        return state.candles[lastIdx].date + stepsAhead * interval;
+    }
+
+    // Gerçek bir mum tarihini KESİN index'ine, son mumdan SONRAKİ sentetik
+    // (virtualIndexToTime tarafından üretilmiş) bir zaman damgasını ise
+    // ekstrapole edilmiş sanal index'ine çevirir. Eşleşmeyen ve son mumdan
+    // ÖNCEKİ bir zaman için (normalde oluşmaz) eski davranışla tutarlı
+    // olarak -1 döner.
+    function virtualTimeToIndex(time) {
+        if (time == null || !state.candles.length) return -1;
+        const real = state.candles.findIndex(c => c.date === time);
+        if (real >= 0) return real;
+        const lastIdx = state.candles.length - 1;
+        const lastDate = state.candles[lastIdx].date;
+        if (time > lastDate) {
+            const interval = inferBarIntervalSeconds();
+            return lastIdx + Math.round((time - lastDate) / interval);
+        }
+        return -1;
+    }
+
     function pixelToDataPoint(x, y) {
         if (!chart || !candleSeries || !state.candles.length) return { time: null, price: null, idx: -1 };
         const logical = chart.timeScale().coordinateToLogical(x);
         let idx = Math.round(logical);
-        idx = Math.max(0, Math.min(state.candles.length - 1, idx));
-        const time = state.candles[idx] ? state.candles[idx].date : null;
+        idx = Math.max(0, Math.min(state.candles.length - 1 + MAX_FUTURE_BARS, idx));
+        const time = virtualIndexToTime(idx);
         const price = candleSeries.coordinateToPrice(y);
         return snapToOHLC({ time, price, idx });
     }
 
     function dataPointToPixel(point) {
         if (!chart || !candleSeries || !point) return { x: null, y: null };
-        const idx = state.candles.findIndex(c => c.date === point.time);
+        const idx = virtualTimeToIndex(point.time);
         const x = idx >= 0 ? chart.timeScale().logicalToCoordinate(idx) : null;
         const y = candleSeries.priceToCoordinate(point.price);
         return { x, y };
     }
 
     function indexForTime(time) {
-        return state.candles.findIndex(c => c.date === time);
+        return virtualTimeToIndex(time);
     }
 
     function finishDrawing() {
@@ -3724,12 +3806,19 @@ const TradingChart = (() => {
             if (pending.type === 'channel') {
                 state.drawings.push({ type: 'channel', p1: pending.p1, p2: pending.p2, offset: range * 0.12 });
             } else if (pending.type === 'triangle') {
+                // (3 Ağustos 2026 EK) idx1/idx2 artık indexForTime()
+                // (virtualTimeToIndex) sayesinde son mumun ÖTESİNDEKİ
+                // (gelecekteki) p1/p2 noktalarını da doğru çözüyor; midIdx'in
+                // üst sınırı da length-1 yerine virtualMaxIdx, apex zamanı da
+                // virtualIndexToTime ile üretiliyor — üçgenin bir kısmı
+                // gelecek alana çizildiğinde apex noktası de "yapışmıyor".
                 const idx1 = indexForTime(pending.p1.time), idx2 = indexForTime(pending.p2.time);
-                const midIdx = Math.max(0, Math.min(state.candles.length - 1, Math.round((idx1 + idx2) / 2)));
+                const virtualMaxIdx = state.candles.length - 1 + MAX_FUTURE_BARS;
+                const midIdx = Math.max(0, Math.min(virtualMaxIdx, Math.round((idx1 + idx2) / 2)));
                 const apexPrice = Math.max(pending.p1.price, pending.p2.price) + (Math.abs(pending.p1.price - pending.p2.price) || range * 0.1);
                 state.drawings.push({
                     type: 'triangle', p1: pending.p1, p2: pending.p2,
-                    apex: { time: state.candles[midIdx].date, price: apexPrice }
+                    apex: { time: virtualIndexToTime(midIdx), price: apexPrice }
                 });
             } else {
                 // pos_long / pos_short: p1 = entry, p2 = stop; target auto-computed at 2:1 reward:risk
@@ -4280,12 +4369,20 @@ const TradingChart = (() => {
         // Artık fiyat ekseninde de küçük (%1) bir kayma uygulanıyor — şekil
         // türü ne olursa olsun yapıştırılan kopya orijinalden görünür şekilde
         // ayrışıyor.
+        // (3 Ağustos 2026 EK — "çizgi sağa gitmiyor" düzeltmesi) idx artık
+        // virtualTimeToIndex ile hesaplanıyor (kopyalanan şekil zaten son
+        // mumun ÖTESİNDE — gelecekte — bir noktaya sahipse doğru sanal
+        // index'ini bulur; eskiden findIndex bunu bulamayıp -1/0'a
+        // düşüyordu, bu da geleceğe yerleştirilmiş bir çizimin
+        // yapıştırılınca sıfırıncı muma "ışınlanmasına" sebep olurdu). Üst
+        // sınır da length-1 yerine virtualMaxIdx.
+        const virtualMaxIdx = state.candles.length - 1 + MAX_FUTURE_BARS;
         const shiftPoint = (point) => {
             if (!point) return point;
-            const idx = state.candles.findIndex(c => c.date === point.time);
-            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (idx >= 0 ? idx : 0) + 3));
+            const idx = virtualTimeToIndex(point.time);
+            const newIdx = Math.max(0, Math.min(virtualMaxIdx, (idx >= 0 ? idx : 0) + 3));
             const shiftedPrice = (typeof point.price === 'number') ? point.price * 1.01 : point.price;
-            return { time: state.candles[newIdx].date, price: shiftedPrice };
+            return { time: virtualIndexToTime(newIdx), price: shiftedPrice };
         };
 
         let clone;
@@ -4338,29 +4435,40 @@ const TradingChart = (() => {
         // TEK SEFERDE, ŞEKLİN TAMAMI İÇİN clamp ediyoruz — sonra bu ORTAK
         // (tek) delta'yı her noktaya aynı şekilde uyguluyoruz. Böylece çizgi
         // sınırdan öteye kaymayı durdurur ama eğimi/şekli hiç bozulmaz.
+        //
+        // (3 Ağustos 2026 EK — "çizgi sağa gitmiyor" düzeltmesi) Yukarıdaki
+        // clamp mantığı (tek ortak delta) AYNEN korunuyor — sadece üst sınır
+        // artık state.candles.length-1 değil, pixelToDataPoint()'teki ile
+        // TUTARLI olan (length-1+MAX_FUTURE_BARS) sanal üst sınır. Böylece
+        // bir şeklin sağ ucu artık son mumun ÖTESİNE (geleceğe) de
+        // kayabiliyor — index/time dönüşümleri virtualTimeToIndex/
+        // virtualIndexToTime üzerinden yapılıyor, findIndex ile ARANAMAYAN
+        // (henüz gerçek bir mumla eşleşmeyen) sentetik gelecek zaman
+        // damgaları da doğru şekilde çözülüyor.
         const points = [];
         if (shape.points) points.push(...shape.points);
         if (shape.p1) points.push(shape.p1);
         if (shape.p2) points.push(shape.p2);
         if (shape.apex) points.push(shape.apex);
 
+        const virtualMaxIdx = state.candles.length - 1 + MAX_FUTURE_BARS;
         let clampedDelta = indexDelta;
         const origIndices = points
             .filter(p => p && p.time != null)
-            .map(p => { const idx = state.candles.findIndex(c => c.date === p.time); return idx >= 0 ? idx : 0; });
+            .map(p => { const idx = virtualTimeToIndex(p.time); return idx >= 0 ? idx : 0; });
         if (origIndices.length) {
             const minOrig = Math.min(...origIndices);
             const maxOrig = Math.max(...origIndices);
             const minAllowedDelta = 0 - minOrig;
-            const maxAllowedDelta = (state.candles.length - 1) - maxOrig;
+            const maxAllowedDelta = virtualMaxIdx - maxOrig;
             clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, indexDelta));
         }
 
         const shiftPoint = (point) => {
             if (!point || point.time == null) return point;
-            const curIdx = state.candles.findIndex(c => c.date === point.time);
-            const newIdx = Math.max(0, Math.min(state.candles.length - 1, (curIdx >= 0 ? curIdx : 0) + clampedDelta));
-            const newTime = state.candles[newIdx] ? state.candles[newIdx].date : point.time;
+            const curIdx = virtualTimeToIndex(point.time);
+            const newIdx = Math.max(0, Math.min(virtualMaxIdx, (curIdx >= 0 ? curIdx : 0) + clampedDelta));
+            const newTime = virtualIndexToTime(newIdx);
             return { time: newTime, price: point.price + priceDelta };
         };
 

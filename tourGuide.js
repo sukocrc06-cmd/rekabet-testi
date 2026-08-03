@@ -305,20 +305,14 @@ const TourGuide = (() => {
                 title: 'Gelişmiş Emirler: OCO / Trailing Stop',
                 desc: '"OCO" sekmesinde üst ve alt tetikleyici fiyat girerek bekleyen bir emir çifti oluşturabilirsiniz — biri gerçekleşince diğeri otomatik iptal olur. SL/TP alanında ise sabit bir stop yerine fiyatı lehte takip eden "Trailing Stop" seçilebiliyor.'
             },
-            {
-                setup: async () => { closeAllAppModals(); switchPanelTab('orderbook'); },
-                mobilePanel: 'trade',
-                selector: '#panel-tab-orderbook',
-                title: 'Emir Defteri (Order Book)',
-                desc: 'Sağdaki panel şimdi "Emir Defteri" sekmesinde — Binance tarzı simüle edilmiş alım/satım derinliği, canlı değişen fiyat kademeleri ve orta fiyat çizgisiyle.'
-            },
-            {
-                setup: async () => { switchPanelTab('trades'); },
-                mobilePanel: 'trade',
-                selector: '#panel-tab-trades',
-                title: 'Son İşlemler Akışı',
-                desc: 'Şimdi "Son İşlemler" sekmesindesiniz — simüle edilmiş canlı işlem akışı (trade tape), her işlemin fiyatı, miktarı ve saatiyle birlikte akıyor.'
-            },
+            // (3 Ağustos 2026 — "emir ve son işlemler demo fake ise onları
+            // kaldır") "Emir Defteri (Order Book)" ve "Son İşlemler Akışı"
+            // tur adımları buradan kaldırıldı — ilgili paneller (tamamen
+            // simüle/fake veri ürettikleri için) index.html/tradingEngine.js/
+            // styles.css'ten tamamen silindi, bu yüzden bu adımlar artık
+            // var olmayan bir #panel-tab-orderbook / #panel-tab-trades
+            // seçicisine işaret ediyordu (bkz. tradingEngine.js'teki ilgili
+            // silme yorumu).
             {
                 setup: async () => { switchPanelTab('performance'); },
                 mobilePanel: 'trade',

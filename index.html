@@ -681,8 +681,14 @@
                 <!-- Panel tabs: trade ticket / order book / recent trades -->
                 <div class="panel-subtabs" role="tablist" aria-label="Alım-satım paneli sekmeleri">
                     <button type="button" class="panel-subtab active" data-panel-tab="trade">Alım-Satım</button>
-                    <button type="button" class="panel-subtab" data-panel-tab="orderbook">Emir Defteri</button>
-                    <button type="button" class="panel-subtab" data-panel-tab="trades">Son İşlemler</button>
+                    <!-- (3 Ağustos 2026 — kullanıcı isteği: "emir ve son işlemler
+                         demo fake ise onları kaldır") Emir Defteri ve Son
+                         İşlemler sekmeleri TAMAMEN rastgele/simüle veriye
+                         dayanıyordu (gerçek BIST derinlik/tape verisi ücretsiz
+                         hiçbir kaynaktan alınamıyor — bkz. proje dokümanı
+                         "Emir Defteri Teknik Açıklama"). Kullanıcı, gerçek
+                         olmayacaksa hiç göstermemeyi tercih etti; bu yüzden bu
+                         iki sekme ve içerikleri kaldırıldı. -->
                     <button type="button" class="panel-subtab" data-panel-tab="performance">Performans</button>
                     <!-- (2 Ağustos 2026 — revize planı madde 12) "Örnek bir özet
                          detay konulabilir" — referans mobil uygulama ekran
@@ -903,30 +909,6 @@
                     <div class="qt-ticket-alert" id="qt-ticket-alert" style="display:none;" role="alert"></div>
 
                     <button type="button" id="qt-submit" class="btn-trade-submit btn-buy">AL (BUY)</button>
-                </div>
-
-                <!-- Order Book (simulated bid/ask depth, Binance-style) -->
-                <div class="panel-subtab-content" id="panel-tab-orderbook">
-                    <div class="orderbook-header-row">
-                        <span>Fiyat (₺)</span>
-                        <span>Miktar</span>
-                    </div>
-                    <div class="orderbook-asks" id="orderbook-asks"></div>
-                    <div class="orderbook-mid-row" id="orderbook-mid-row">
-                        <span id="orderbook-mid-price">--</span>
-                        <span class="orderbook-mid-label">Son Fiyat</span>
-                    </div>
-                    <div class="orderbook-bids" id="orderbook-bids"></div>
-                </div>
-
-                <!-- Recent Trades (simulated live tape) -->
-                <div class="panel-subtab-content" id="panel-tab-trades">
-                    <div class="orderbook-header-row trades-header-row">
-                        <span>Fiyat (₺)</span>
-                        <span>Miktar</span>
-                        <span>Saat</span>
-                    </div>
-                    <div class="recent-trades-list" id="recent-trades-list"></div>
                 </div>
 
                 <!-- Portfolio performance analytics -->
