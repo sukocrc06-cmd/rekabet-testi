@@ -152,13 +152,27 @@ const TradingChart = (() => {
         mfi:   { title: 'MFI (14)' }
     };
 
+    // (2 Ağustos 2026 — revize planı madde 7) Osilatör kimlikleri artık iki
+    // biçimde olabilir: sade tip adı ("rsi" → varsayılan periyot 14) ya da
+    // "tip:periyot" biçiminde özel periyotlu bir örnek ("rsi:20" gibi) — bu
+    // sayede aynı osilatör tipinden birden fazla, farklı periyotlarda panel
+    // aynı anda açık kalabiliyor (kullanıcı isteği: "iki farklı değerde rsi
+    // değerlerini görebilmek"). parseOscType() bu iki biçimi ayrıştırır.
+    function parseOscType(id) {
+        const s = String(id || '');
+        const idx = s.indexOf(':');
+        if (idx === -1) return { base: s, period: null };
+        const period = parseInt(s.slice(idx + 1), 10);
+        return { base: s.slice(0, idx), period: Number.isFinite(period) ? period : null };
+    }
+
     function loadActiveOscillators() {
         try {
             const raw = localStorage.getItem(ACTIVE_OSC_STORAGE_KEY);
             if (!raw) return ['rsi'];
             const arr = JSON.parse(raw);
             if (Array.isArray(arr) && arr.length) {
-                const filtered = arr.filter(id => OSCILLATOR_META[id]);
+                const filtered = arr.filter(id => OSCILLATOR_META[parseOscType(id).base]);
                 return filtered.length ? filtered : ['rsi'];
             }
             return ['rsi'];
@@ -378,6 +392,7 @@ const TradingChart = (() => {
         setupSignalExplainerToggle();
         setupSignalTooltipDismiss();
         setupReplayControls();
+        setupChartNoteModal();
 
         window.addEventListener('resize', () => {
             resizeAll();
@@ -900,7 +915,11 @@ const TradingChart = (() => {
         state.signalMarkers = computeSignalMarkers(state.candles);
         applyChartType();
 
-        state.indicators = window.DataController.calculateIndicators(state.candles);
+        // (2 Ağustos 2026 — revize planı madde 4) dailyCandles ayrıca iletiliyor;
+        // computePivotPoints() bunu pivot referans günü olarak kullanacak (bkz.
+        // dataController.js açıklaması) — diğer tüm göstergeler hâlâ o anki
+        // çözünürlüğün (state.candles) barlarına göre hesaplanmaya devam ediyor.
+        state.indicators = window.DataController.calculateIndicators(state.candles, state.dailyCandles);
         renderOverlays();
         renderAllOscillatorPanes();
         renderMTFPanel();
@@ -912,6 +931,22 @@ const TradingChart = (() => {
             } else {
                 chart.timeScale().fitContent();
             }
+            // (2 Ağustos 2026 — revize planı madde 1) `fitContent()`/
+            // `setVisibleLogicalRange()` yalnızca ZAMAN eksenini ayarlar —
+            // Lightweight Charts'ın FİYAT ekseni autoScale'i, kullanıcı fiyat
+            // eksenini eliyle bir kez sürükleyip ölçeklendirdiği an
+            // kütüphane tarafından SESSİZCE kalıcı olarak kapatılıyor. Bu
+            // yüzden ör. AKCNS (160-255 aralığı) görüntülendikten sonra
+            // AKBNK'a (63 TL) geçilince, fiyat ekseni eski manuel aralıkta
+            // kilitli kalıyor ve yeni mumlar ekran dışında (görünmez)
+            // kalıyordu — hoca bunu "fiyat aralığı bir önceki hisseden
+            // kalıyor" diye bildirdi. Düzeltme: her sembol/çözünürlük
+            // değişiminde autoScale açıkça yeniden zorlanıyor, böylece fiyat
+            // ekseni her zaman o an yüklenen sembolün gerçek verisine göre
+            // otomatik ölçekleniyor — kullanıcı isterse yine elle
+            // sürükleyip özelleştirebilir, bir sonraki sembol/çözünürlük
+            // değişiminde bu yeniden sıfırlanır.
+            chart.priceScale('right').applyOptions({ autoScale: true });
         }
 
         // Drawings anchored to a different resolution's time axis simply
@@ -1625,7 +1660,7 @@ const TradingChart = (() => {
         }));
         dualLastRenderedCandles = candles;
         dualSeries.setData(candles);
-        dualIndicators = (window.DataController && derivedRaw.length) ? window.DataController.calculateIndicators(derivedRaw) : null;
+        dualIndicators = (window.DataController && derivedRaw.length) ? window.DataController.calculateIndicators(derivedRaw, sourceDaily) : null;
         refreshDualOverlays(candles);
         renderDualOscillatorPanes();
         // (22 Temmuz 2026, on ikinci oturum, ikinci tur) Kullanıcı ekran
@@ -1969,6 +2004,24 @@ const TradingChart = (() => {
             const delta = startY - clientY; // dragging UP increases pane height
             const newH = Math.min(MAX_H, Math.max(MIN_H, startH + delta));
             resizingPane.style.flexBasis = newH + 'px';
+            // (2 Ağustos 2026 — revize planı madde 6) Eskiden burada SADECE
+            // DOM kutusunun (flexBasis) yüksekliği güncelleniyordu; panelin
+            // içindeki gerçek Lightweight Charts canvas'ı ise ancak fare
+            // bırakıldığında (onResizeUp → resizeOscillatorPanes()) yeniden
+            // boyutlandırılıyordu. Bu da sürükleme SIRASINDA panelin DOM
+            // kutusu ile içindeki grafik/çizgilerin (RSI 70/30 referans
+            // çizgileri, MACD sıfır çizgisi vb.) birbirinden kopmasına,
+            // kutunun yeni sınırına göre değil ESKİ boyuta göre çizilmeye
+            // devam etmesine yol açıyordu — kullanıcı bunu "boyutlandırma
+            // diğer sınır çizgilerinden de ayar getiriyor" olarak
+            // algılıyordu. Düzeltme: sürükleme sırasında da canvas'ı anlık
+            // olarak yeniden boyutlandır (sadece resizingPane'i, gereksiz
+            // yere tüm panelleri değil — performans için).
+            const mount = resizingPane.querySelector('.tv-osc-chart-mount');
+            const entry = Object.values(oscillatorPanes).find(p => p.el === resizingPane);
+            if (mount && entry) {
+                entry.chart.applyOptions({ width: mount.clientWidth, height: mount.clientHeight });
+            }
         }
 
         function onResizeUp() {
@@ -2504,6 +2557,32 @@ const TradingChart = (() => {
                 renderAllOscillatorPanes();
             });
         });
+
+        setupCustomRsiInstance();
+    }
+
+    // (2 Ağustos 2026 — revize planı madde 7) "Farklı periyotlu RSI ekle"
+    // düğmesi — girilen periyotla 'rsi:<periyot>' kimlikli YENİ bir osilatör
+    // paneli açar (mevcut varsayılan 'rsi' (14) panelinin YANINDA, onu
+    // DEĞİŞTİRMEDEN). Panel, diğer tüm osilatör panelleri gibi kendi
+    // başlığındaki × düğmesiyle kapatılabilir — ek bir "kaldır" arayüzüne
+    // gerek yok, mevcut mekanizma zaten id'ye bakmaksızın genel çalışıyor.
+    function setupCustomRsiInstance() {
+        const btn = byId('btn-add-custom-rsi');
+        const input = byId('rsi-custom-period-input');
+        if (!btn || !input || btn.dataset.wired) return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+            let period = parseInt(input.value, 10);
+            if (!Number.isFinite(period) || period < 2) period = 20;
+            if (period > 200) period = 200;
+            input.value = period;
+            const id = 'rsi:' + period;
+            if (state.activeOscillators.includes(id)) return; // zaten ekli
+            state.activeOscillators.push(id);
+            saveActiveOscillators();
+            renderAllOscillatorPanes();
+        });
     }
 
     // Belirli bir osilatör id'si için pane DOM'unu + kendi hafif chart
@@ -2562,11 +2641,24 @@ const TradingChart = (() => {
     // geliyor, ayrıca yeni 'willr' (Williams %R) dalı eklendi.
     function buildOscillatorSeries(paneChart, type, ind, dates) {
         const series = {};
-        const title = (OSCILLATOR_META[type] && OSCILLATOR_META[type].title) || type;
+        // (2 Ağustos 2026 — revize planı madde 7) 'rsi:20' gibi özel periyotlu
+        // kimlikler için taban tipe (parsed.base) göre meta/seri seçimi
+        // yapılıyor; başlık de periyotu yansıtacak şekilde dinamik kuruluyor.
+        const parsed = parseOscType(type);
+        const title = parsed.period
+            ? (OSCILLATOR_META[parsed.base] ? OSCILLATOR_META[parsed.base].title.replace(/\(\d+.*?\)/, '(' + parsed.period + ')') : type)
+            : ((OSCILLATOR_META[type] && OSCILLATOR_META[type].title) || type);
 
-        if (type === 'rsi') {
+        if (parsed.base === 'rsi') {
+            // Varsayılan (periyotsuz) 'rsi' kimliği hâlâ önceden hesaplanmış
+            // ind.rsi14'ü kullanıyor (performans — tekrar hesaplamaya gerek
+            // yok); özel periyotlu bir örnekse (ör. 'rsi:20') o periyotla
+            // DataController.computeRSI() DOĞRUDAN çağrılıyor.
+            const rsiValues = parsed.period
+                ? (window.DataController.computeRSI(state.candles.map(c => c.close), parsed.period))
+                : ind.rsi14;
             series.rsi = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
-            series.rsi.setData(seriesFromValues(dates, ind.rsi14));
+            series.rsi.setData(seriesFromValues(dates, rsiValues));
             series.rsi.createPriceLine({ price: 70, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '70' });
             series.rsi.createPriceLine({ price: 30, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '30' });
         } else if (type === 'macd') {
@@ -3399,7 +3491,29 @@ const TradingChart = (() => {
 
     function priceRangeApprox() {
         if (!state.candles.length) return 1;
-        const closes = state.candles.map(c => c.close);
+        // (2 Ağustos 2026 — revize planı madde 3) Paralel Kanal ve diğer "türetilmiş
+        // üçüncü nokta" araçları (channel/triangle/pos_long/pos_short), ikinci çizginin
+        // dikey ofsetini bu fonksiyonun döndürdüğü "fiyat aralığı"na göre hesaplıyor.
+        // Eskiden bu aralık TÜM state.candles dizisi (750 günlük / ~3 yıllık geçmiş)
+        // üzerinden hesaplanıyordu — kullanıcı yakınlaştırıp ekranda sadece son birkaç
+        // günü görüntülerken bile ofset 3 yıllık min-max farkına göre belirleniyordu,
+        // bu da ikinci çizgiyi ekranın çok dışına taşırıyor, kanal görünmez hale
+        // geliyordu. Düzeltme: mümkünse sadece o an GÖRÜNÜR (visible logical range)
+        // mum aralığındaki close değerlerini kullan; grafik hazır değilse veya görünür
+        // aralık alınamıyorsa eski davranışa (tüm dizi) geri düş.
+        let candles = state.candles;
+        if (chart) {
+            const vr = chart.timeScale().getVisibleLogicalRange();
+            if (vr) {
+                const from = Math.max(0, Math.floor(vr.from));
+                const to = Math.min(state.candles.length - 1, Math.ceil(vr.to));
+                if (to > from) {
+                    const visible = state.candles.slice(from, to + 1);
+                    if (visible.length) candles = visible;
+                }
+            }
+        }
+        const closes = candles.map(c => c.close);
         const range = Math.max(...closes) - Math.min(...closes);
         return range || Math.max(...closes) * 0.05 || 1;
     }
@@ -3443,6 +3557,63 @@ const TradingChart = (() => {
         redrawDrawings();
     }
 
+    // (2 Ağustos 2026 — revize planı madde 8) Grafik notu modali — bkz.
+    // onDrawStart()'taki 'text' aracı dalı ve setupChartNoteModal().
+    let chartNotePendingPoint = null;
+
+    function closeChartNoteModal() {
+        const backdrop = byId('chart-note-modal-backdrop');
+        if (backdrop) backdrop.classList.remove('open');
+        chartNotePendingPoint = null;
+    }
+
+    function openChartNoteModal(dp) {
+        const backdrop = byId('chart-note-modal-backdrop');
+        const input = byId('chart-note-input');
+        if (!backdrop) return;
+        chartNotePendingPoint = dp;
+        if (input) input.value = '';
+        if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals('chart-note-modal-backdrop');
+        backdrop.classList.add('open');
+        if (input) setTimeout(() => input.focus(), 30);
+    }
+
+    function commitChartNote() {
+        const input = byId('chart-note-input');
+        const label = input ? input.value.trim() : '';
+        if (label && chartNotePendingPoint) {
+            state.drawings.push({ type: 'text', p1: chartNotePendingPoint, p2: chartNotePendingPoint, label });
+            finishDrawing();
+        } else {
+            // Boş not girildiyse aracı seçili bırak (eski window.prompt()
+            // davranışıyla aynı) — sadece modali kapat.
+        }
+        closeChartNoteModal();
+    }
+
+    function setupChartNoteModal() {
+        const backdrop = byId('chart-note-modal-backdrop');
+        const closeBtn = byId('btn-close-chart-note');
+        const cancelBtn = byId('btn-chart-note-cancel');
+        const saveBtn = byId('btn-chart-note-save');
+        const input = byId('chart-note-input');
+        if (!backdrop) return;
+
+        if (closeBtn) closeBtn.addEventListener('click', closeChartNoteModal);
+        if (cancelBtn) cancelBtn.addEventListener('click', closeChartNoteModal);
+        if (saveBtn) saveBtn.addEventListener('click', commitChartNote);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeChartNoteModal(); });
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitChartNote(); }
+                else if (e.key === 'Escape') { e.preventDefault(); closeChartNoteModal(); }
+            });
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && backdrop.classList.contains('open')) closeChartNoteModal();
+        });
+    }
+
     function onDrawStart(e) {
         if (state.activeTool === 'cursor') return;
         const rect = drawCanvas.getBoundingClientRect();
@@ -3457,10 +3628,14 @@ const TradingChart = (() => {
         }
 
         if (state.activeTool === 'text') {
-            const label = window.prompt('Grafik notu:', '');
-            if (label === null || label.trim() === '') return;
-            state.drawings.push({ type: 'text', p1: dp, p2: dp, label: label.trim() });
-            finishDrawing();
+            // (2 Ağustos 2026 — revize planı madde 8) Eskiden burada çıplak
+            // window.prompt() kullanılıyordu — hem uygulamanın kendi görsel
+            // dilinden kopuk hem de tarayıcı native dialog'u olduğu için
+            // stillendirilemiyordu. Artık uygulamanın diğer modalleriyle
+            // (SLTP, Alarm, vb.) aynı desendeki özel bir modal açılıyor;
+            // asıl "not ekle" işlemi kullanıcı modalde Enter'a basınca ya da
+            // "Ekle" butonuna tıklayınca commitChartNote() içinde yapılıyor.
+            openChartNoteModal(dp);
             return;
         }
 
@@ -3846,7 +4021,21 @@ const TradingChart = (() => {
             const pct = shape.p1.price !== 0 ? (priceDiff / shape.p1.price * 100) : 0;
             const idx1 = indexForTime(shape.p1.time), idx2 = indexForTime(shape.p2.time);
             const bars = Math.abs(idx2 - idx1);
-            const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+            const midX = (a.x + b.x) / 2;
+            // (2 Ağustos 2026 — revize planı madde 2) Etiket kutusu, iki
+            // noktanın tam ortasına (midY) hiçbir sınır kontrolü olmadan
+            // çiziliyordu — ölçüm alt/üst kenara yakın iki nokta arasında
+            // yapılırsa, kutu ana grafiğin en alt/üst şeridine (tarih
+            // ekseninin oturduğu paylaşılan alan dahil) taşıp orayı görsel
+            // olarak kaplayabiliyordu ("tarih bölümü kayboluyor" şikayeti).
+            // Düzeltme: kutunun dikey konumu, üstte/altta küçük bir pay
+            // (LABEL_EDGE_MARGIN_PX) bırakacak şekilde grafik alanının
+            // içine kenetleniyor — ölçüm noktaları nerede olursa olsun
+            // etiket her zaman görünür ve kenarları kaplamıyor.
+            const LABEL_EDGE_MARGIN_PX = 16;
+            const rawMidY = (a.y + b.y) / 2;
+            const rect = drawCanvas.getBoundingClientRect();
+            const midY = Math.min(Math.max(rawMidY, LABEL_EDGE_MARGIN_PX + 9), rect.height - LABEL_EDGE_MARGIN_PX - 9);
             const text = (priceDiff >= 0 ? '+' : '') + fmtPrice(priceDiff) + '  (' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)  ' + bars + ' bar';
             drawCtx.font = '10px "Fira Code", monospace';
             const tw = drawCtx.measureText(text).width + 12;
@@ -4381,6 +4570,32 @@ const TradingChart = (() => {
         Object.values(oscillatorPanes).forEach(p => { if (p.chart) p.chart.applyOptions(opts); });
     }
 
+    // (2 Ağustos 2026 — revize planı madde 12) "Örnek bir özet detay
+    // konulabilir" — referans (mobil uygulama) ekran görüntüsündeki
+    // Günlük/Aylık/Yıllık aralık çubuklarının basitleştirilmiş bir sürümü.
+    // Ham hesaplama burada (state.dailyCandles üzerinden) yapılıyor;
+    // tradingEngine.js'teki Özet Detay sekmesi sadece bu hazır özeti render
+    // ediyor — iki dosyanın birbirinin iç state'ine erişmesine gerek kalmıyor
+    // (getLastClose/getLastATR ile aynı köprü deseni).
+    function getDailyRangeSummary() {
+        const daily = state.dailyCandles;
+        if (!daily || !daily.length) return null;
+        const last = daily[daily.length - 1].close;
+        function rangeOver(n) {
+            const slice = daily.slice(-n);
+            return {
+                low: Math.min(...slice.map(c => c.low)),
+                high: Math.max(...slice.map(c => c.high))
+            };
+        }
+        return {
+            last,
+            daily: rangeOver(1),
+            monthly: rangeOver(21),  // ~1 işlem ayı (gün sayısı)
+            yearly: rangeOver(252)   // ~1 işlem yılı (gün sayısı)
+        };
+    }
+
     return Object.freeze({
         init,
         loadSymbol,
@@ -4389,6 +4604,7 @@ const TradingChart = (() => {
         renderAllOscillatorPanes,
         getLastClose,
         getLastATR,
+        getDailyRangeSummary,
         getIndicatorAlertSnapshot,
         refreshUserTradeMarkers,
         setTheme,

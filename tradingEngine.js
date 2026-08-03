@@ -70,6 +70,37 @@ const TradingEngine = (() => {
         watchlistSymbols.delete(symbol);
         saveWatchlistSymbols();
         showToast(`${symbol} izleme listesinden çıkarıldı.`);
+        // (2 Ağustos 2026 — revize planı madde 9) Kullanıcı geri bildirimi:
+        // "çarpıya basıp hisseleri sildikten sonra o hisseler geri gelmiyor".
+        // Aslında sembol Sembol Ara kutusuna yazılarak her zaman geri
+        // eklenebiliyordu (renderWatchlistRows() zaten izleme listesindeki
+        // semboller için ✓ rozeti gösteriyor) — ama bu hiç belli değildi,
+        // kullanıcı hisseyi kalıcı olarak kaybettiğini düşünüyordu. Şimdi
+        // silme işleminden hemen sonra birkaç saniyeliğine bir "Geri Al"
+        // bildirimi çıkıyor; tıklanırsa sembol tek adımda geri ekleniyor.
+        showWatchlistUndoToast(symbol);
+    }
+
+    let watchlistUndoTimer = null;
+    function showWatchlistUndoToast(symbol) {
+        const el = byId('watchlist-undo-toast');
+        const textEl = byId('watchlist-undo-text');
+        const btn = byId('btn-watchlist-undo');
+        if (!el || !btn) return;
+        if (textEl) textEl.textContent = `${symbol} kaldırıldı.`;
+        el.style.display = '';
+        clearTimeout(watchlistUndoTimer);
+        // Butonu klonlayıp değiştiriyoruz ki art arda birden fazla kaldırma
+        // işleminde eski dinleyiciler birikip yanlış sembolü geri eklemesin.
+        const freshBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(freshBtn, btn);
+        freshBtn.addEventListener('click', () => {
+            addToWatchlist(symbol);
+            renderWatchlistRows();
+            el.style.display = 'none';
+            clearTimeout(watchlistUndoTimer);
+        });
+        watchlistUndoTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
     }
 
     const state = {
@@ -95,7 +126,8 @@ const TradingEngine = (() => {
 
     // All full-screen modal backdrop ids in the app — used so opening one
     // reliably closes any other that might already be open.
-    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop', 'command-palette-backdrop'];
+    // (2 Ağustos 2026 — revize planı madde 8) 'chart-note-modal-backdrop' eklendi.
+    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop', 'command-palette-backdrop', 'chart-note-modal-backdrop'];
     function closeOtherModals(exceptId) {
         ALL_MODAL_BACKDROP_IDS.forEach(id => {
             if (id === exceptId) return;
@@ -168,11 +200,19 @@ const TradingEngine = (() => {
                     // portföylerde pendingOrders alanı yok — geriye dönük
                     // uyumluluk için varsayılan boş dizi ile tamamla.
                     if (!Array.isArray(parsed.pendingOrders)) parsed.pendingOrders = [];
+                    // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Daha eski
+                    // kaydedilmiş portföylerde VİOP'a ait ayrı defter alanları
+                    // hiç yok — geriye dönük uyumluluk için boş varsayılanlarla
+                    // tamamlanıyor. Böylece önceki oturumlardan gelen bir
+                    // portföy (yalnızca spot pozisyonlar içeren) hatasız yüklenir.
+                    if (!parsed.viopPositions || typeof parsed.viopPositions !== 'object' || Array.isArray(parsed.viopPositions)) parsed.viopPositions = {};
+                    if (!Array.isArray(parsed.viopHistory)) parsed.viopHistory = [];
+                    if (!Array.isArray(parsed.viopPendingOrders)) parsed.viopPendingOrders = [];
                     return parsed;
                 }
             }
         } catch (e) { /* ignore corrupt storage */ }
-        return { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [] };
+        return { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [], viopPositions: {}, viopHistory: [], viopPendingOrders: [] };
     }
 
     function savePortfolio() {
@@ -180,7 +220,7 @@ const TradingEngine = (() => {
     }
 
     function resetPortfolio() {
-        portfolio = { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [] };
+        portfolio = { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [], viopPositions: {}, viopHistory: [], viopPendingOrders: [] };
         savePortfolio();
         renderPositions();
         renderOrders();
@@ -190,6 +230,32 @@ const TradingEngine = (() => {
         sampleEquity();
         renderPerformanceTab();
         showToast('Portföy sıfırlandı: ' + fmtTRY(DEFAULT_BALANCE));
+    }
+
+    // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Hocanın geri bildirimi:
+    // VİOP'un kendi kaldıraç/açığa satış davranışı zaten vardı (23 Temmuz
+    // düzeltmesi, state.market toggle'ı) ama pozisyonlar/emirler/geçmiş TEK
+    // bir ortak defterde (portfolio.positions/history/pendingOrders)
+    // tutuluyordu — yani VİOP'ta açılan bir pozisyon, Normal Seans'ta aynı
+    // sembolde açık bir spot pozisyonla YANLIŞLIKLA aynı kayda karışabilirdi
+    // (ör. VİOP'ta 5x kaldıraçla eklenen bir AKBNK, spot'taki 1x AKBNK
+    // pozisyonuna sessizce "eklenir" ve kaldıraç ağırlıklı ortalamaya
+    // karışırdı — gerçek bir borsada spot hisse ile VİOP kontratı TAMAMEN
+    // ayrı enstrümanlardır, birbirine asla karışmaz).
+    //
+    // Çözüm: portfolio nesnesine VİOP için tamamen ayrı bir pozisyon/geçmiş/
+    // bekleyen-emir defteri eklendi (viopPositions/viopHistory/
+    // viopPendingOrders). book(market) bu iki defterden doğru olanına bir
+    // referans döndürür; placeOrder/closePosition/checkStopLossTakeProfit/
+    // checkMarginCalls/checkPendingOcoOrders gibi TÜM pozisyon/emir mantığı
+    // artık hangi defter üzerinde çalışacağını bu fonksiyondan alıyor. Demo
+    // bakiye (portfolio.balance) kasıtlı olarak TEK ve ortak kalıyor — gerçek
+    // hayatta da aynı yatırım hesabından hem spot hem VİOP işlemi yapılır,
+    // yalnızca pozisyonlar ayrı tutulur.
+    function book(market) {
+        return market === 'VIOP'
+            ? { positions: portfolio.viopPositions, history: portfolio.viopHistory, pending: portfolio.viopPendingOrders }
+            : { positions: portfolio.positions, history: portfolio.history, pending: portfolio.pendingOrders };
     }
 
     /* ════════════════════════════════════════════════
@@ -258,6 +324,7 @@ const TradingEngine = (() => {
 
         sampleEquity();
         if (byId('panel-tab-performance')?.classList.contains('active')) renderPerformanceTab();
+        if (byId('panel-tab-summary')?.classList.contains('active')) renderSummaryDetailTab();
         if (byId('heatmap-modal-backdrop')?.classList.contains('open')) renderHeatmap();
         // (22 Temmuz 2026, on ikinci oturum — madde 7) Profil paneli açıkken
         // bakiye/özkaynak/K-Z rakamları da canlı tik ile birlikte tazelensin.
@@ -670,6 +737,7 @@ const TradingEngine = (() => {
                 if (tab.dataset.panelTab === 'orderbook' && state.activeSymbol) renderOrderBook(state.activeSymbol);
                 if (tab.dataset.panelTab === 'trades' && state.activeSymbol) renderRecentTrades(state.activeSymbol);
                 if (tab.dataset.panelTab === 'performance') renderPerformanceTab();
+                if (tab.dataset.panelTab === 'summary') renderSummaryDetailTab();
             });
         });
     }
@@ -683,11 +751,18 @@ const TradingEngine = (() => {
 
     function currentEquity() {
         let longValue = 0, shortValue = 0;
-        Object.keys(portfolio.positions).forEach(symbol => {
-            const pos = portfolio.positions[symbol];
-            const current = getPrice(symbol) || pos.avgPrice;
-            if (pos.side === 'LONG') longValue += pos.qty * current;
-            else shortValue += pos.qty * current;
+        // (29 Temmuz 2026 — Madde 11) Özkaynak eğrisi artık Spot VE VİOP
+        // pozisyonlarının ikisini de kapsıyor — aksi halde VİOP'ta açık bir
+        // pozisyon varken Performans sekmesindeki özkaynak eğrisi/Maks.
+        // Drawdown hesabı eksik/yanlış olurdu.
+        ['NORMAL', 'VIOP'].forEach(market => {
+            const positions = book(market).positions;
+            Object.keys(positions).forEach(symbol => {
+                const pos = positions[symbol];
+                const current = getPrice(symbol) || pos.avgPrice;
+                if (pos.side === 'LONG') longValue += pos.qty * current;
+                else shortValue += pos.qty * current;
+            });
         });
         return portfolio.balance + longValue - shortValue;
     }
@@ -698,7 +773,10 @@ const TradingEngine = (() => {
     }
 
     function computePerformanceStats() {
-        const closed = portfolio.history.filter(h => h.type === 'CLOSE' && h.pnl !== null);
+        // (29 Temmuz 2026 — Madde 11) Performans istatistikleri artık Spot
+        // VE VİOP'ta kapanmış işlemlerin TAMAMINI birlikte değerlendiriyor —
+        // ikisi de aynı demo hesabın gerçek gerçekleşmiş K/Z'sini oluşturuyor.
+        const closed = portfolio.history.concat(portfolio.viopHistory || []).filter(h => h.type === 'CLOSE' && h.pnl !== null);
         const wins = closed.filter(h => h.pnl > 0);
         const losses = closed.filter(h => h.pnl < 0);
         const grossProfit = wins.reduce((s, h) => s + h.pnl, 0);
@@ -753,6 +831,48 @@ const TradingEngine = (() => {
         }
 
         return { closed, wins, losses, grossProfit, grossLoss, totalPnl, winRate, profitFactor, best, worst, bySymbol, sharpeRatio, maxDrawdownPct };
+    }
+
+    // (2 Ağustos 2026 — revize planı madde 12) "Örnek bir özet detay
+    // konulabilir" — aktif sembolün Günlük/Aylık/Yıllık aralığı içindeki
+    // konumunu basit çubuklarla gösterir. Ham hesaplama tradingChart.js'teki
+    // getDailyRangeSummary() içinde (state.dailyCandles üzerinden) yapılıyor;
+    // burada sadece render ediliyor.
+    function renderSummaryDetailTab() {
+        const body = byId('qt-summary-detail-body');
+        if (!body) return;
+        if (!state.activeSymbol || !window.TradingChart || !window.TradingChart.getDailyRangeSummary) {
+            body.innerHTML = '<div class="qt-summary-empty">Sembol seçin.</div>';
+            return;
+        }
+        const summary = window.TradingChart.getDailyRangeSummary();
+        if (!summary) {
+            body.innerHTML = '<div class="qt-summary-empty">Veri yükleniyor...</div>';
+            return;
+        }
+        const rows = [
+            { label: 'Günlük', range: summary.daily },
+            { label: 'Aylık', range: summary.monthly },
+            { label: 'Yıllık', range: summary.yearly }
+        ];
+        let html = `<div class="qt-summary-last">Son Fiyat: <b>₺${fmtPrice(summary.last)}</b></div>`;
+        rows.forEach(r => {
+            const { low, high } = r.range;
+            const span = high - low;
+            const pct = span > 0 ? Math.min(100, Math.max(0, ((summary.last - low) / span) * 100)) : 50;
+            html += `
+                <div class="qt-summary-row">
+                    <div class="qt-summary-row-label">${r.label}</div>
+                    <div class="qt-summary-slider-wrap">
+                        <span class="qt-summary-edge">₺${fmtPrice(low)}</span>
+                        <div class="qt-summary-slider">
+                            <div class="qt-summary-slider-dot" style="left:${pct}%"></div>
+                        </div>
+                        <span class="qt-summary-edge">₺${fmtPrice(high)}</span>
+                    </div>
+                </div>`;
+        });
+        body.innerHTML = html;
     }
 
     function renderPerformanceTab() {
@@ -2290,6 +2410,13 @@ const TradingEngine = (() => {
         const normalBtn = byId('qt-market-normal');
         const viopBtn = byId('qt-market-viop');
         const leverageGroup = byId('qt-leverage-group');
+        // (29 Temmuz 2026 — Madde 11) Aşağıdaki açık pozisyon / bekleyen OCO /
+        // son emirler listeleri artık BU aynı toggle ile birlikte değişiyor —
+        // Normal Seans seçiliyken Spot defteri, VİOP seçiliyken VİOP defteri
+        // görünür. Veriler her zaman ikisine de yazılıyor (bkz. book()),
+        // burada yalnızca GÖRÜNÜRLÜK değişiyor.
+        const spotScope = byId('qt-list-scope-spot');
+        const viopScope = byId('qt-list-scope-viop');
         if (!normalBtn || !viopBtn) return;
 
         function apply(mode) {
@@ -2297,6 +2424,8 @@ const TradingEngine = (() => {
             normalBtn.classList.toggle('active', state.market === 'NORMAL');
             viopBtn.classList.toggle('active', state.market === 'VIOP');
             if (leverageGroup) leverageGroup.style.display = state.market === 'VIOP' ? '' : 'none';
+            if (spotScope) spotScope.style.display = state.market === 'NORMAL' ? '' : 'none';
+            if (viopScope) viopScope.style.display = state.market === 'VIOP' ? '' : 'none';
 
             if (state.market === 'NORMAL') {
                 // Normal seansta kaldıraç kavramı yok — 1x'e sabitle ve
@@ -2563,7 +2692,11 @@ const TradingEngine = (() => {
             const usableMargin = portfolio.balance * (pct / 100);
             qty = Math.floor((usableMargin * leverage) / (price * (1 + (commissionPct / 100) * leverage)));
         } else {
-            const pos = portfolio.positions[state.activeSymbol];
+            // (29 Temmuz 2026 — Madde 11) Ticket şu an hangi moddaysa (Normal
+            // Seans/VİOP) o defterdeki pozisyona bakılıyor — aksi halde
+            // örneğin VİOP moduna geçilmişken Spot'taki bir LONG pozisyon
+            // yanlışlıkla "elimdeki miktar" olarak kullanılabilirdi.
+            const pos = book(state.market).positions[state.activeSymbol];
             if (pos && pos.side === 'LONG') {
                 qty = Math.floor(pos.qty * (pct / 100));
             } else {
@@ -2709,7 +2842,9 @@ const TradingEngine = (() => {
         // saklanan kaldıracı, avgPrice ile aynı şekilde adet-ağırlıklı
         // ortalamaya güncelleniyor; kullanıcı bunu ticket'ta önceden görsün
         // diye bilgilendirici bir not gösteriliyor.
-        const existingBeforeOrder = portfolio.positions[state.activeSymbol];
+        // (29 Temmuz 2026 — Madde 11) Ticket'ın seçili modu (state.market)
+        // hangi defterin kullanılacağını belirliyor — book() üzerinden.
+        const existingBeforeOrder = book(state.market).positions[state.activeSymbol];
         const intendedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
         if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage) {
             const blendedPreview = (existingBeforeOrder.leverage * existingBeforeOrder.qty + state.leverage * qty) / (existingBeforeOrder.qty + qty);
@@ -2725,7 +2860,7 @@ const TradingEngine = (() => {
             showTicketAlert(leverageNote, 'info');
         }
 
-        const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct, state.leverage);
+        const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct, state.leverage, state.market);
         if (!result.ok) {
             showToast(result.msg);
             showTicketAlert(result.msg, 'error');
@@ -2739,7 +2874,7 @@ const TradingEngine = (() => {
         const trailingPctInput = byId('qt-trailing-pct');
         const useTrailing = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
         if (slPrice !== null || tpPrice !== null || useTrailing) {
-            const pos = portfolio.positions[state.activeSymbol];
+            const pos = book(state.market).positions[state.activeSymbol];
             const expectedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
             if (pos && pos.side === expectedSide) {
                 if (useTrailing) {
@@ -2759,7 +2894,7 @@ const TradingEngine = (() => {
         renderPositions();
         renderOrders();
         renderAccountSummary();
-        showToast(`${state.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${qty} adet ${state.activeSymbol} @ ₺${fmtPrice(price)}`);
+        showToast(`[${state.market === 'VIOP' ? 'VİOP' : 'Spot'}] ${state.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${qty} adet ${state.activeSymbol} @ ₺${fmtPrice(price)}`);
         // Emir başarıyla gerçekleşti. Bu turda bir kaldıraç notu gösterildiyse
         // (leverageNote) onu ekranda bırakıyoruz — kullanıcının hâlâ görmesi
         // faydalı bir bilgi. Gösterilmediyse, ÖNCEKİ bir başarısız denemeden
@@ -2824,7 +2959,9 @@ const TradingEngine = (() => {
         // (güncel fiyat üzerinden) kullanılıyor; asıl kesin kontrol yine
         // tetiklenme anında placeOrder() içinde yapılıyor — bu sadece erken
         // bir uyarı katmanı.
-        const estimatedMargin = estimateOrderMarginRequirement(state.activeSymbol, state.side, qty, currentPrice, state.leverage);
+        // (29 Temmuz 2026 — Madde 11) Marj tahmini de OCO'nun kurulacağı
+        // modun (state.market) defterine bakmalı.
+        const estimatedMargin = estimateOrderMarginRequirement(state.activeSymbol, state.side, qty, currentPrice, state.leverage, state.market);
         const estimatedCommission = currentPrice * qty * (commissionPct / 100);
         const estimatedRequired = estimatedMargin + estimatedCommission;
         if (estimatedRequired > portfolio.balance) {
@@ -2834,8 +2971,12 @@ const TradingEngine = (() => {
             return;
         }
 
-        if (!portfolio.pendingOrders) portfolio.pendingOrders = [];
-        portfolio.pendingOrders.push({
+        // (29 Temmuz 2026 — Madde 11) OCO emri, kurulduğu andaki moda
+        // (state.market) ait bekleyen-emir defterine yazılıyor; emir nesnesi
+        // ayrıca kendi "market" alanını taşıyor ki tetiklendiğinde
+        // (checkPendingOcoOrders) doğru defterde gerçekleştirilebilsin.
+        const ocoBook = book(state.market);
+        ocoBook.pending.push({
             id: genId(),
             symbol: state.activeSymbol,
             qty,
@@ -2843,11 +2984,12 @@ const TradingEngine = (() => {
             lower,
             leverage: state.leverage,
             commissionPct,
+            market: state.market,
             createdAt: Date.now()
         });
         savePortfolio();
         renderPendingOcoOrders();
-        showToast(`OCO emri oluşturuldu: ${state.activeSymbol} · ${upper ? 'üst ₺' + fmtPrice(upper) : ''}${upper && lower ? ' / ' : ''}${lower ? 'alt ₺' + fmtPrice(lower) : ''}`);
+        showToast(`[${state.market === 'VIOP' ? 'VİOP' : 'Spot'}] OCO emri oluşturuldu: ${state.activeSymbol} · ${upper ? 'üst ₺' + fmtPrice(upper) : ''}${upper && lower ? ' / ' : ''}${lower ? 'alt ₺' + fmtPrice(lower) : ''}`);
 
         const qtyInput = byId('qt-qty');
         if (qtyInput) qtyInput.value = '';
@@ -2860,55 +3002,76 @@ const TradingEngine = (() => {
     // biri tetiklenince o yönde piyasa emri gerçekleştirilip TÜM emir (iki
     // tetikleyicisiyle birlikte) listeden kaldırılır — "diğerinin otomatik
     // iptali" bu şekilde sağlanıyor (aynı nesnenin tek kullanımlık olması).
+    // (29 Temmuz 2026 — Madde 11) Artık Spot VE VİOP'un kendi bekleyen OCO
+    // defterleri ayrı ayrı taranıyor — biri tetiklenirken diğerinin
+    // defterine hiç dokunmuyor.
     function checkPendingOcoOrders() {
-        if (!portfolio.pendingOrders || !portfolio.pendingOrders.length) return;
-        const stillPending = [];
-        let changed = false;
-        portfolio.pendingOrders.forEach(order => {
-            const price = getPrice(order.symbol);
-            if (!price) { stillPending.push(order); return; }
-            let triggeredSide = null;
-            if (order.upper !== null && price >= order.upper) triggeredSide = 'BUY';
-            else if (order.lower !== null && price <= order.lower) triggeredSide = 'SELL';
+        ['NORMAL', 'VIOP'].forEach(market => {
+            const b = book(market);
+            if (!b.pending || !b.pending.length) return;
+            const stillPending = [];
+            let changed = false;
+            b.pending.forEach(order => {
+                const price = getPrice(order.symbol);
+                if (!price) { stillPending.push(order); return; }
+                let triggeredSide = null;
+                if (order.upper !== null && price >= order.upper) triggeredSide = 'BUY';
+                else if (order.lower !== null && price <= order.lower) triggeredSide = 'SELL';
 
-            if (triggeredSide) {
-                changed = true;
-                const result = placeOrder(order.symbol, triggeredSide, order.qty, price, order.commissionPct, order.leverage);
-                if (result.ok) {
-                    showToast(`OCO tetiklendi: ${order.symbol} ${triggeredSide === 'BUY' ? 'AL' : 'AÇIĞA SAT'} @ ₺${fmtPrice(price)} — diğer tetikleyici iptal edildi.`);
-                    renderPositions();
-                    renderOrders();
+                if (triggeredSide) {
+                    changed = true;
+                    const result = placeOrder(order.symbol, triggeredSide, order.qty, price, order.commissionPct, order.leverage, market);
+                    if (result.ok) {
+                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] OCO tetiklendi: ${order.symbol} ${triggeredSide === 'BUY' ? 'AL' : 'AÇIĞA SAT'} @ ₺${fmtPrice(price)} — diğer tetikleyici iptal edildi.`);
+                        renderPositions();
+                        renderOrders();
+                    } else {
+                        showToast(`OCO tetiklendi ama emir başarısız: ${result.msg}`);
+                    }
+                    // Triggered (successfully or not) — either way this pending
+                    // order is consumed, matching real OCO semantics of a single
+                    // fill attempt rather than retrying every tick.
                 } else {
-                    showToast(`OCO tetiklendi ama emir başarısız: ${result.msg}`);
+                    stillPending.push(order);
                 }
-                // Triggered (successfully or not) — either way this pending
-                // order is consumed, matching real OCO semantics of a single
-                // fill attempt rather than retrying every tick.
-            } else {
-                stillPending.push(order);
+            });
+            if (changed) {
+                if (market === 'VIOP') portfolio.viopPendingOrders = stillPending;
+                else portfolio.pendingOrders = stillPending;
+                savePortfolio();
+                renderPendingOcoOrders();
+                renderAccountSummary();
             }
         });
-        if (changed) {
-            portfolio.pendingOrders = stillPending;
-            savePortfolio();
-            renderPendingOcoOrders();
-            renderAccountSummary();
-        }
     }
 
+    // (29 Temmuz 2026 — Madde 11) id'ler genId() ile üretiliyor (zaman damgası
+    // + rastgele parça), pratikte çakışma ihtimali yok — bu yüzden iptal
+    // ederken hangi deftere ait olduğunu ayrıca bilmeye gerek yok, ikisinde de
+    // aranıp bulunduğu defterden çıkarılıyor.
     function cancelOcoOrder(orderId) {
-        if (!portfolio.pendingOrders) return;
-        portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
+        let found = false;
+        if (portfolio.pendingOrders && portfolio.pendingOrders.some(o => o.id === orderId)) {
+            portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
+            found = true;
+        }
+        if (portfolio.viopPendingOrders && portfolio.viopPendingOrders.some(o => o.id === orderId)) {
+            portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => o.id !== orderId);
+            found = true;
+        }
+        if (!found) return;
         savePortfolio();
         renderPendingOcoOrders();
         showToast('OCO emri iptal edildi.');
     }
     window.__optipulseCancelOco = cancelOcoOrder; // used by inline onclick in rendered rows
 
-    function renderPendingOcoOrders() {
-        const body = byId('qt-pending-oco-body');
+    // (29 Temmuz 2026 — Madde 11) Spot ve VİOP'un kendi ayrı DOM
+    // konteynerlerine render eden ortak yardımcı — iki liste birbirinden
+    // tamamen bağımsız, aynı mantığın iki kez tekrarlanmasını önlüyor.
+    function renderOcoListInto(containerId, orders) {
+        const body = byId(containerId);
         if (!body) return;
-        const orders = portfolio.pendingOrders || [];
         if (!orders.length) {
             body.innerHTML = `<div class="qt-empty-state">Bekleyen OCO emri yok</div>`;
             return;
@@ -2926,6 +3089,11 @@ const TradingEngine = (() => {
                 </div>
             </div>
         `).join('');
+    }
+
+    function renderPendingOcoOrders() {
+        renderOcoListInto('qt-pending-oco-body', portfolio.pendingOrders || []);
+        renderOcoListInto('qt-pending-oco-body-viop', portfolio.viopPendingOrders || []);
     }
 
     // Kaldıraç/Marj modeli (17 Temmuz 2026, yedinci oturum): pozisyon açılırken
@@ -2969,14 +3137,16 @@ const TradingEngine = (() => {
     // açık bir pozisyon varsa önce onun kapanmasıyla serbest kalacak marjı da
     // hesaba katıyor, böylece "zaten açık bir SHORT'u kapatıp yeni bir LONG
     // açan" bir OCO emri de doğru şekilde değerlendiriliyor.
-    function estimateOrderMarginRequirement(symbol, side, qty, price, leverage) {
+    function estimateOrderMarginRequirement(symbol, side, qty, price, leverage, market) {
         qty = Math.floor(Number(qty));
         price = Number(price);
         if (!symbol || !qty || qty <= 0 || !price || price <= 0) return 0;
 
         let remainingQty = qty;
         let releasedMargin = 0;
-        const pos = portfolio.positions[symbol];
+        // (29 Temmuz 2026 — Madde 11) Hangi defterin (Spot/VİOP) kontrol
+        // edileceği çağıran tarafın belirttiği market'e göre seçiliyor.
+        const pos = book(market).positions[symbol];
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
             const posLeverage = pos.leverage || 1;
@@ -3000,17 +3170,29 @@ const TradingEngine = (() => {
     // sembol için GERÇEK işlem geçmişini okuyup grafikte ok işareti
     // çizebilmesi için salt-okunur bir kopya döndürür.
     function getTradeHistoryForSymbol(symbol) {
-        return portfolio.history.filter(h => h.symbol === symbol).map(h => ({ ...h }));
+        // (29 Temmuz 2026 — Madde 11) Grafikteki al/sat okları, o sembolde
+        // Spot VE VİOP'ta yapılmış TÜM gerçek işlemleri kapsıyor — ikisi de
+        // gerçek, kullanıcının bizzat yaptığı işlemler.
+        const spot = portfolio.history.filter(h => h.symbol === symbol);
+        const viop = (portfolio.viopHistory || []).filter(h => h.symbol === symbol);
+        return spot.concat(viop).map(h => ({ ...h }));
     }
 
-    function placeOrder(symbol, side, qty, price, commissionPct, leverage) {
+    function placeOrder(symbol, side, qty, price, commissionPct, leverage, market) {
         qty = Math.floor(Number(qty));
         price = Number(price);
         if (!qty || qty <= 0 || !price || price <= 0) return { ok: false, msg: 'Geçersiz miktar/fiyat' };
 
+        // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Emrin hangi deftere
+        // (Spot/VİOP) yazılacağı burada belirleniyor — bkz. book(). Geriye
+        // dönük uyumluluk için market belirtilmezse (eski çağrı kalıntısı
+        // olursa) NORMAL/Spot varsayılıyor.
+        market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
+        const b = book(market);
+
         const commissionTotal = price * qty * (commissionPct / 100);
         let remainingQty = qty;
-        const pos = portfolio.positions[symbol];
+        const pos = b.positions[symbol];
 
         // 1. Close/reduce an opposite-direction position first.
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
@@ -3029,9 +3211,9 @@ const TradingEngine = (() => {
 
             pos.qty -= closeQty;
             remainingQty -= closeQty;
-            if (pos.qty <= 0) delete portfolio.positions[symbol];
+            if (pos.qty <= 0) delete b.positions[symbol];
 
-            portfolio.history.unshift({
+            b.history.unshift({
                 id: genId(), ts: Date.now(), symbol, side, qty: closeQty, price,
                 type: 'CLOSE', commission: +closeCommission.toFixed(2), pnl: +realizedPnl.toFixed(2)
             });
@@ -3064,7 +3246,7 @@ const TradingEngine = (() => {
             // computeAccountSnapshot) hiç değişmeden doğru sonucu vermeye
             // devam ediyor, sadece "leverage" artık tek bir sabit değer
             // değil, gerçek ağırlıklı ortalama bir değer.
-            const existingPos = portfolio.positions[symbol];
+            const existingPos = b.positions[symbol];
             const requestedLeverage = Math.max(1, Number(leverage) || 1);
 
             const margin = (price * remainingQty) / requestedLeverage;
@@ -3078,7 +3260,7 @@ const TradingEngine = (() => {
             let effectiveLeverage;
             if (!existingPos) {
                 effectiveLeverage = requestedLeverage;
-                portfolio.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
+                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
             } else {
                 const p = existingPos;
                 const totalQty = p.qty + remainingQty;
@@ -3089,13 +3271,19 @@ const TradingEngine = (() => {
                 p.leverage = effectiveLeverage;
             }
 
-            portfolio.history.unshift({
+            b.history.unshift({
                 id: genId(), ts: Date.now(), symbol, side, qty: remainingQty, price,
                 type: 'OPEN', commission: +openCommission.toFixed(2), pnl: null, leverage: effectiveLeverage
             });
         }
 
-        portfolio.history = portfolio.history.slice(0, 50);
+        // (29 Temmuz 2026 — Madde 11) Son 50 kayıtla sınırlama artık HANGİ
+        // deftere yazıldıysa onun üzerinde yapılıyor (önceden her zaman
+        // portfolio.history'yi kırpıyordu — bir VİOP emrinde bu hem yanlış
+        // deftere dokunuyor hem de viopHistory'nin sınırsız büyümesine yol
+        // açıyordu). `.length` ile yerinde kırpma, b.history'nin (portfolio
+        // üzerindeki gerçek diziye) referansını bozmadan çalışır.
+        if (b.history.length > 50) b.history.length = 50;
         savePortfolio();
         // (29 Temmuz 2026 — Madde 18) Grafikte o an bu sembol gösteriliyorsa
         // yeni işlemin ok işaretinin sembol değiştirmeden hemen görünmesi
@@ -3106,13 +3294,18 @@ const TradingEngine = (() => {
         return { ok: true };
     }
 
-    function closePosition(symbol, reason) {
-        const pos = portfolio.positions[symbol];
+    function closePosition(symbol, reason, market) {
+        // (29 Temmuz 2026 — Madde 11) Hangi defterin (Spot/VİOP) kapatılacağı
+        // artık açıkça belirtiliyor — otomatik SL/TP/marj çağrısı kontrolleri
+        // pozisyonun bulunduğu deftere göre bunu geçiyor; manuel "Kapat"
+        // butonu da kartın ait olduğu moda göre (bkz. renderPositionsInto).
+        market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
+        const pos = book(market).positions[symbol];
         if (!pos) return;
         const price = getPrice(symbol);
         if (!price) return;
         const side = pos.side === 'LONG' ? 'SELL' : 'BUY';
-        const result = placeOrder(symbol, side, pos.qty, price, getCommissionPct());
+        const result = placeOrder(symbol, side, pos.qty, price, getCommissionPct(), pos.leverage || 1, market);
         if (result.ok) {
             renderPositions();
             renderOrders();
@@ -3137,38 +3330,44 @@ const TradingEngine = (() => {
        Stop-Loss / Take-Profit auto-execution
        ════════════════════════════════════════════════ */
 
+    // (29 Temmuz 2026 — Madde 11) Artık Spot VE VİOP defterlerinin ikisi de
+    // taranıyor — bir VİOP pozisyonunun SL/TP/Trailing Stop'u önceden hiç
+    // kontrol edilmiyordu (yalnızca portfolio.positions taranıyordu).
     function checkStopLossTakeProfit() {
-        Object.keys(portfolio.positions).forEach(symbol => {
-            const pos = portfolio.positions[symbol];
-            if (!pos.sl && !pos.tp && !pos.trailingPct) return;
-            const price = getPrice(symbol);
-            if (!price) return;
+        ['NORMAL', 'VIOP'].forEach(market => {
+            const positions = book(market).positions;
+            Object.keys(positions).forEach(symbol => {
+                const pos = positions[symbol];
+                if (!pos.sl && !pos.tp && !pos.trailingPct) return;
+                const price = getPrice(symbol);
+                if (!price) return;
 
-            // Trailing Stop (17 Temmuz 2026, yedinci oturum): fiyat lehte
-            // hareket ettikçe pos.trailingExtreme yeni bir en iyi seviyeye
-            // "kilitleniyor" (geri çekilmede asla geri gitmiyor), stop
-            // seviyesi her zaman o en iyi seviyeden trailingPct kadar geride
-            // hesaplanıyor. Sabit SL'nin aksine, fiyat lehte ilerledikçe
-            // kilitlenen kâr da artıyor.
-            if (pos.trailingPct) {
-                if (pos.side === 'LONG') {
-                    if (price > pos.trailingExtreme) pos.trailingExtreme = price;
-                    const stopPrice = pos.trailingExtreme * (1 - pos.trailingPct / 100);
-                    if (price <= stopPrice) { closePosition(symbol, 'TRAILING'); return; }
-                } else {
-                    if (price < pos.trailingExtreme) pos.trailingExtreme = price;
-                    const stopPrice = pos.trailingExtreme * (1 + pos.trailingPct / 100);
-                    if (price >= stopPrice) { closePosition(symbol, 'TRAILING'); return; }
+                // Trailing Stop (17 Temmuz 2026, yedinci oturum): fiyat lehte
+                // hareket ettikçe pos.trailingExtreme yeni bir en iyi seviyeye
+                // "kilitleniyor" (geri çekilmede asla geri gitmiyor), stop
+                // seviyesi her zaman o en iyi seviyeden trailingPct kadar geride
+                // hesaplanıyor. Sabit SL'nin aksine, fiyat lehte ilerledikçe
+                // kilitlenen kâr da artıyor.
+                if (pos.trailingPct) {
+                    if (pos.side === 'LONG') {
+                        if (price > pos.trailingExtreme) pos.trailingExtreme = price;
+                        const stopPrice = pos.trailingExtreme * (1 - pos.trailingPct / 100);
+                        if (price <= stopPrice) { closePosition(symbol, 'TRAILING', market); return; }
+                    } else {
+                        if (price < pos.trailingExtreme) pos.trailingExtreme = price;
+                        const stopPrice = pos.trailingExtreme * (1 + pos.trailingPct / 100);
+                        if (price >= stopPrice) { closePosition(symbol, 'TRAILING', market); return; }
+                    }
                 }
-            }
 
-            if (pos.side === 'LONG') {
-                if (pos.sl && price <= pos.sl) { closePosition(symbol, 'SL'); return; }
-                if (pos.tp && price >= pos.tp) { closePosition(symbol, 'TP'); return; }
-            } else {
-                if (pos.sl && price >= pos.sl) { closePosition(symbol, 'SL'); return; }
-                if (pos.tp && price <= pos.tp) { closePosition(symbol, 'TP'); return; }
-            }
+                if (pos.side === 'LONG') {
+                    if (pos.sl && price <= pos.sl) { closePosition(symbol, 'SL', market); return; }
+                    if (pos.tp && price >= pos.tp) { closePosition(symbol, 'TP', market); return; }
+                } else {
+                    if (pos.sl && price >= pos.sl) { closePosition(symbol, 'SL', market); return; }
+                    if (pos.tp && price <= pos.tp) { closePosition(symbol, 'TP', market); return; }
+                }
+            });
         });
     }
 
@@ -3181,25 +3380,31 @@ const TradingEngine = (() => {
     // pozisyonlar risk altında; leverage=1'de marj = tam nominal tutar
     // olduğundan zarar hiçbir zaman marjın %100'ünü geçemez (bir hissenin
     // fiyatı teorik olarak 0'a inebilir ama negatif olamaz).
+    // (29 Temmuz 2026 — Madde 11) Marj çağrısı kontrolü de artık Spot VE
+    // VİOP'un ikisini de tarıyor.
     function checkMarginCalls() {
-        Object.keys(portfolio.positions).forEach(symbol => {
-            const pos = portfolio.positions[symbol];
-            const leverage = pos.leverage || 1;
-            if (leverage <= 1) return;
-            const price = getPrice(symbol);
-            if (!price) return;
-            const margin = (pos.avgPrice * pos.qty) / leverage;
-            const unrealized = pos.side === 'LONG'
-                ? (price - pos.avgPrice) * pos.qty
-                : (pos.avgPrice - price) * pos.qty;
-            if (unrealized <= -margin * LIQUIDATION_MARGIN_LOSS_RATIO) {
-                closePosition(symbol, 'LIQUIDATION');
-            }
+        ['NORMAL', 'VIOP'].forEach(market => {
+            const positions = book(market).positions;
+            Object.keys(positions).forEach(symbol => {
+                const pos = positions[symbol];
+                const leverage = pos.leverage || 1;
+                if (leverage <= 1) return;
+                const price = getPrice(symbol);
+                if (!price) return;
+                const margin = (pos.avgPrice * pos.qty) / leverage;
+                const unrealized = pos.side === 'LONG'
+                    ? (price - pos.avgPrice) * pos.qty
+                    : (pos.avgPrice - price) * pos.qty;
+                if (unrealized <= -margin * LIQUIDATION_MARGIN_LOSS_RATIO) {
+                    closePosition(symbol, 'LIQUIDATION', market);
+                }
+            });
         });
     }
 
-    function setPositionSLTP(symbol, slPrice, tpPrice) {
-        const pos = portfolio.positions[symbol];
+    function setPositionSLTP(symbol, slPrice, tpPrice, market) {
+        market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
+        const pos = book(market).positions[symbol];
         if (!pos) return false;
         pos.sl = slPrice || null;
         pos.tp = tpPrice || null;
@@ -3227,13 +3432,19 @@ const TradingEngine = (() => {
         if (!backdrop) return;
 
         let editingSymbol = null;
+        // (29 Temmuz 2026 — Madde 11) Hangi defterin (Spot/VİOP) pozisyonu
+        // düzenlendiği ayrıca tutuluyor — aksi halde VİOP'ta açık bir
+        // pozisyonun SL/TP'si yanlışlıkla Spot defterinde aranırdı.
+        let editingMarket = 'NORMAL';
 
         const close = () => backdrop.classList.remove('open');
 
-        window.__optipulseOpenSltp = (symbol) => {
-            const pos = portfolio.positions[symbol];
+        window.__optipulseOpenSltp = (symbol, market) => {
+            market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
+            const pos = book(market).positions[symbol];
             if (!pos) return;
             editingSymbol = symbol;
+            editingMarket = market;
             const current = getPrice(symbol);
             if (symbolEl) symbolEl.textContent = symbol;
             if (infoEl) {
@@ -3257,7 +3468,7 @@ const TradingEngine = (() => {
         if (saveBtn) {
             saveBtn.addEventListener('click', () => {
                 if (!editingSymbol) return;
-                const pos = portfolio.positions[editingSymbol];
+                const pos = book(editingMarket).positions[editingSymbol];
                 if (!pos) { close(); return; }
                 const current = getPrice(editingSymbol);
                 const slVal = slInput && slInput.value ? Number(slInput.value) : null;
@@ -3272,7 +3483,7 @@ const TradingEngine = (() => {
                     if (invalid) { showToast(`Take-Profit fiyatı ${pos.side === 'LONG' ? 'güncel fiyatın üzerinde' : 'güncel fiyatın altında'} olmalı.`); return; }
                 }
 
-                setPositionSLTP(editingSymbol, slVal, tpVal);
+                setPositionSLTP(editingSymbol, slVal, tpVal, editingMarket);
                 showToast(`${editingSymbol} için SL/TP güncellendi.`);
                 close();
             });
@@ -3281,7 +3492,7 @@ const TradingEngine = (() => {
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
                 if (!editingSymbol) return;
-                setPositionSLTP(editingSymbol, null, null);
+                setPositionSLTP(editingSymbol, null, null, editingMarket);
                 if (slInput) slInput.value = '';
                 if (tpInput) tpInput.value = '';
                 showToast(`${editingSymbol} için SL/TP temizlendi.`);
@@ -3294,17 +3505,21 @@ const TradingEngine = (() => {
        Rendering: positions / orders / account
        ════════════════════════════════════════════════ */
 
-    function renderPositions() {
-        const body = byId('qt-positions-body');
+    // (29 Temmuz 2026 — Madde 11) Spot ve VİOP kartlarını aynı ortak
+    // fonksiyonla, kendi ayrı DOM konteynerlerine render eder. `market`
+    // parametresi yalnızca SL/TP ve Kapat butonlarının doğru deftere
+    // yönlenmesi için satır içi onclick'lere gömülüyor.
+    function renderPositionsInto(containerId, positions, market) {
+        const body = byId(containerId);
         if (!body) return;
-        const symbols = Object.keys(portfolio.positions);
+        const symbols = Object.keys(positions);
         if (symbols.length === 0) {
             body.innerHTML = `<div class="qt-empty-state">Açık pozisyon yok</div>`;
             return;
         }
         let html = '';
         symbols.forEach(symbol => {
-            const pos = portfolio.positions[symbol];
+            const pos = positions[symbol];
             const current = getPrice(symbol) || pos.avgPrice;
             const unrealized = pos.side === 'LONG'
                 ? (current - pos.avgPrice) * pos.qty
@@ -3334,8 +3549,8 @@ const TradingEngine = (() => {
                     <div class="pos-card-bottom">
                         <div class="pos-card-meta font-mono">${pos.qty} adet<span class="pos-card-dot">·</span>Ort. ₺${fmtPrice(pos.avgPrice)}</div>
                         <div class="pos-actions-cell">
-                            <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}')" title="Stop-Loss / Take-Profit">SL/TP</button>
-                            <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}')">Kapat</button>
+                            <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}', '${market}')" title="Stop-Loss / Take-Profit">SL/TP</button>
+                            <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>
                         </div>
                     </div>
                     ${sltpSub}
@@ -3345,17 +3560,20 @@ const TradingEngine = (() => {
         body.innerHTML = html;
     }
 
-    function renderOrders() {
-        const body = byId('qt-orders-body');
-        const csvBtn = byId('btn-export-history-csv');
-        if (csvBtn) csvBtn.disabled = !portfolio.history.length;
+    function renderPositions() {
+        renderPositionsInto('qt-positions-body', portfolio.positions, 'NORMAL');
+        renderPositionsInto('qt-positions-body-viop', portfolio.viopPositions, 'VIOP');
+    }
+
+    function renderOrdersInto(containerId, history) {
+        const body = byId(containerId);
         if (!body) return;
-        if (!portfolio.history.length) {
+        if (!history.length) {
             body.innerHTML = `<div class="qt-empty-state">Emir geçmişi yok</div>`;
             return;
         }
         let html = '';
-        portfolio.history.slice(0, 12).forEach(h => {
+        history.slice(0, 12).forEach(h => {
             const t = new Date(h.ts);
             const timeStr = t.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
             const sideClass = h.side === 'BUY' ? 'badge-long' : 'badge-short';
@@ -3377,6 +3595,15 @@ const TradingEngine = (() => {
         body.innerHTML = html;
     }
 
+    function renderOrders() {
+        const csvBtn = byId('btn-export-history-csv');
+        // (29 Temmuz 2026 — Madde 11) CSV butonu, Spot + VİOP'un ikisini de
+        // dışa aktardığı için ikisinden herhangi biri boş değilse aktif.
+        if (csvBtn) csvBtn.disabled = !(portfolio.history.length || (portfolio.viopHistory && portfolio.viopHistory.length));
+        renderOrdersInto('qt-orders-body', portfolio.history);
+        renderOrdersInto('qt-orders-body-viop', portfolio.viopHistory || []);
+    }
+
     /* ════════════════════════════════════════════════
        Trade history CSV export
        ════════════════════════════════════════════════ */
@@ -3387,14 +3614,21 @@ const TradingEngine = (() => {
     }
 
     function exportTradeHistoryCSV() {
-        if (!portfolio.history.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }
+        // (29 Temmuz 2026 — Madde 11) Artık Spot VE VİOP'un TÜM işlem
+        // geçmişini birlikte, hangi piyasada gerçekleştiğini belirten ayrı
+        // bir "Piyasa" sütunuyla dışa aktarıyor — böylece indirilen kayıt
+        // gerçekten TAM (eksiksiz) bir işlem geçmişi oluyor.
+        const combined = portfolio.history.map(h => ({ ...h, market: 'NORMAL' }))
+            .concat((portfolio.viopHistory || []).map(h => ({ ...h, market: 'VIOP' })));
+        if (!combined.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }
 
-        const headers = ['Tarih', 'Saat', 'Sembol', 'Yön', 'Tip', 'Adet', 'Fiyat (₺)', 'Komisyon (₺)', 'K/Z (₺)'];
-        const rows = portfolio.history.slice().reverse().map(h => { // chronological order, oldest first
+        const headers = ['Tarih', 'Saat', 'Piyasa', 'Sembol', 'Yön', 'Tip', 'Adet', 'Fiyat (₺)', 'Komisyon (₺)', 'K/Z (₺)'];
+        const rows = combined.slice().sort((a, b) => a.ts - b.ts).map(h => { // chronological order, oldest first
             const d = new Date(h.ts);
             return [
                 d.toLocaleDateString('tr-TR'),
                 d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                h.market === 'VIOP' ? 'VİOP' : 'Spot',
                 h.symbol,
                 h.side === 'BUY' ? 'AL' : 'SAT',
                 h.type === 'OPEN' ? 'AÇILIŞ' : 'KAPANIŞ',
@@ -3417,7 +3651,7 @@ const TradingEngine = (() => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast(`İşlem geçmişi CSV olarak indirildi (${portfolio.history.length} kayıt).`);
+        showToast(`İşlem geçmişi CSV olarak indirildi (${combined.length} kayıt).`);
     }
 
     function setupCsvExport() {
@@ -3601,25 +3835,35 @@ const TradingEngine = (() => {
     // yaklaşımla o pozisyon için yatırılan teminat (margin) kadarının
     // riskte olduğu varsayılıyor, ayrıca kaç pozisyonun korumasız olduğu
     // ayrıca sayılıyor ki uyarı metni bunu açıkça belirtebilsin.
+    // (29 Temmuz 2026 — Madde 11) Hesap özeti (özkaynak, kullanılan marj,
+    // açık K/Z, portföy risk uyarısı) artık Spot VE VİOP'un ikisini birden
+    // kapsıyor — ikisi de aynı demo bakiyeyi paylaşan GERÇEK açık
+    // pozisyonlar. Önceden yalnızca portfolio.positions (Spot) taranıyordu;
+    // bir VİOP pozisyonu açıkken header'daki Toplam Varlık/Kullanılan Marj
+    // ve portföy risk uyarısı o pozisyonu hiç görmüyordu.
     function computeAccountSnapshot() {
-        let usedMargin = 0, openPnl = 0, totalRisk = 0, positionsWithoutStopCount = 0;
-        Object.keys(portfolio.positions).forEach(symbol => {
-            const pos = portfolio.positions[symbol];
-            const current = getPrice(symbol) || pos.avgPrice;
-            const leverage = pos.leverage || 1;
-            const margin = (pos.avgPrice * pos.qty) / leverage;
-            usedMargin += margin;
-            if (pos.side === 'LONG') {
-                openPnl += (current - pos.avgPrice) * pos.qty;
-            } else {
-                openPnl += (pos.avgPrice - current) * pos.qty;
-            }
-            if (pos.sl) {
-                totalRisk += Math.abs(pos.avgPrice - pos.sl) * pos.qty;
-            } else {
-                totalRisk += margin;
-                positionsWithoutStopCount++;
-            }
+        let usedMargin = 0, openPnl = 0, totalRisk = 0, positionsWithoutStopCount = 0, positionsCount = 0;
+        ['NORMAL', 'VIOP'].forEach(market => {
+            const positions = book(market).positions;
+            Object.keys(positions).forEach(symbol => {
+                const pos = positions[symbol];
+                const current = getPrice(symbol) || pos.avgPrice;
+                const leverage = pos.leverage || 1;
+                const margin = (pos.avgPrice * pos.qty) / leverage;
+                usedMargin += margin;
+                if (pos.side === 'LONG') {
+                    openPnl += (current - pos.avgPrice) * pos.qty;
+                } else {
+                    openPnl += (pos.avgPrice - current) * pos.qty;
+                }
+                if (pos.sl) {
+                    totalRisk += Math.abs(pos.avgPrice - pos.sl) * pos.qty;
+                } else {
+                    totalRisk += margin;
+                    positionsWithoutStopCount++;
+                }
+                positionsCount++;
+            });
         });
         const equity = portfolio.balance + usedMargin + openPnl;
         return {
@@ -3627,7 +3871,7 @@ const TradingEngine = (() => {
             equity,
             openPnl,
             usedMargin,
-            positionsCount: Object.keys(portfolio.positions).length,
+            positionsCount,
             totalRisk,
             positionsWithoutStopCount
         };
@@ -3827,6 +4071,62 @@ const TradingEngine = (() => {
         ticketAlertTimer = setTimeout(() => { el.style.display = 'none'; }, kind === 'error' ? 5500 : 4000);
     }
 
+    /* (2 Ağustos 2026 — revize planı madde 10) "Hızlı hisse seçimi bulunmuyor" —
+       Hızlı Alım Satım panelindeki sembol başlığının yanına, sol taraftaki
+       İzleme Listesi aramasıyla AYNI BIST100 verisi üzerinde çalışan küçük bir
+       açılır arama penceresi eklendi. Bir sonuca tıklamak doğrudan
+       selectSymbol() çağırıp grafiği/bileti o sembole geçiriyor — izleme
+       listesine gitmeye gerek kalmıyor. */
+    function setupQuickTicketSymbolSearch() {
+        const btn = byId('btn-qt-symbol-search');
+        const popover = byId('qt-symbol-search-popover');
+        const input = byId('qt-symbol-search-input');
+        const results = byId('qt-symbol-search-results');
+        if (!btn || !popover || !input || !results) return;
+
+        const renderResults = () => {
+            const term = input.value.trim().toLowerCase();
+            const source = DC.BIST100 || [];
+            const list = (term
+                ? source.filter(({ symbol, name }) => symbol.toLowerCase().includes(term) || name.toLowerCase().includes(term))
+                : source
+            ).slice(0, 30);
+            if (!list.length) {
+                results.innerHTML = '<div class="qt-symbol-search-empty">Eşleşen sembol bulunamadı.</div>';
+                return;
+            }
+            results.innerHTML = list.map(({ symbol, name }) => (
+                '<div class="qt-symbol-search-row" data-symbol="' + symbol + '">' +
+                    '<span><span class="wl-symbol">' + symbol + '</span><span class="wl-name">' + name + '</span></span>' +
+                '</div>'
+            )).join('');
+        };
+
+        const open = () => {
+            popover.style.display = '';
+            input.value = '';
+            renderResults();
+            setTimeout(() => input.focus(), 20);
+        };
+        const close = () => { popover.style.display = 'none'; };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (popover.style.display === 'none') open(); else close();
+        });
+        input.addEventListener('input', renderResults);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+        results.addEventListener('click', (e) => {
+            const row = e.target.closest('.qt-symbol-search-row');
+            if (!row) return;
+            close();
+            selectSymbol(row.dataset.symbol);
+        });
+        document.addEventListener('click', (e) => {
+            if (popover.style.display !== 'none' && !popover.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+    }
+
     /* ────────── Exchange selector (BIST active, others "coming soon") ────────── */
     function setupExchangeSelector() {
         document.querySelectorAll('.exchange-btn').forEach(btn => {
@@ -3861,6 +4161,7 @@ const TradingEngine = (() => {
         renderWatchlistPrices();
         setupWatchlistSearch();
         setupTicket();
+        setupQuickTicketSymbolSearch();
         setupExchangeSelector();
         setupPanelSubtabs();
         setupAlertsModal();

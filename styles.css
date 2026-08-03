@@ -755,6 +755,30 @@ body {
     user-select: none;
 }
 
+/* (2 Ağustos 2026 — revize planı madde 7) Farklı periyotlu ikinci RSI paneli
+   ekleme satırı — checkbox listesinin içinde ama bir onay kutusu değil,
+   periyot girişi + "Ekle" düğmesi. */
+.osc-custom-period-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 6px 26px;
+    margin-top: -2px;
+}
+
+.osc-custom-period-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex: 1 1 auto;
+}
+
+.osc-custom-period-input {
+    width: 56px;
+    flex-shrink: 0;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
 .checkbox-label input {
     display: none;
 }
@@ -1920,6 +1944,39 @@ body {
     flex-direction: column;
     min-height: 0;
     margin-bottom: 0;
+}
+
+/* (2 Ağustos 2026 — revize planı madde 9) İzleme listesinden bir sembol
+   kaldırıldığında birkaç saniyeliğine görünen "Geri Al" bildirimi. */
+.watchlist-undo-toast {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gold-border);
+    background-color: rgba(212, 175, 55, 0.08);
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.watchlist-undo-toast #btn-watchlist-undo {
+    flex-shrink: 0;
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--gold);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+}
+
+.watchlist-undo-toast #btn-watchlist-undo:hover {
+    background-color: rgba(212, 175, 55, 0.15);
 }
 
 .watchlist-container {
@@ -4470,12 +4527,85 @@ body.compact-mode .status-item {
     border-radius: var(--radius-md);
     padding: 12px 14px;
     margin-bottom: 16px;
+    position: relative; /* qt-symbol-search-popover'ın konumlandığı referans */
+    gap: 8px;
 }
 
 .qt-symbol {
     font-size: 14px;
     font-weight: 700;
     color: var(--text-primary);
+}
+
+/* (2 Ağustos 2026 — revize planı madde 10) Hızlı Alım Satım panelindeki
+   hızlı sembol arama düğmesi ve açılır penceresi. */
+.qt-symbol-search-btn {
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.qt-symbol-search-btn:hover {
+    color: var(--gold);
+    border-color: var(--gold);
+}
+
+.qt-symbol-search-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 14px;
+    right: 14px;
+    z-index: 40;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    padding: 8px;
+}
+
+.qt-symbol-search-results {
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 6px;
+}
+
+.qt-symbol-search-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.qt-symbol-search-row:hover {
+    background-color: rgba(212, 175, 55, 0.1);
+}
+
+.qt-symbol-search-row .wl-symbol {
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-right: 6px;
+}
+
+.qt-symbol-search-row .wl-name {
+    color: var(--text-muted);
+}
+
+.qt-symbol-search-empty {
+    padding: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
 }
 
 .qt-price-row {
@@ -4756,6 +4886,88 @@ body.compact-mode .status-item {
     border-radius: 4px;
 }
 
+/* (2 Ağustos 2026 — revize planı madde 12) Özet Detay sekmesi — Günlük/
+   Aylık/Yıllık fiyat aralığı içinde son fiyatın konumunu gösteren basit
+   çubuklar (referans: Matriks mobil "Özet Detay" ekranı). */
+.qt-summary-detail-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 4px 2px;
+}
+
+.qt-summary-empty {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 20px 0;
+}
+
+.qt-summary-last {
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--gold-border);
+}
+
+.qt-summary-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.qt-summary-row-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.qt-summary-slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.qt-summary-edge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    min-width: 52px;
+}
+
+.qt-summary-edge:last-child {
+    text-align: right;
+}
+
+.qt-summary-slider {
+    position: relative;
+    flex: 1 1 auto;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(to right, var(--danger, #EF5350), var(--gold), var(--success, #26A69A));
+    opacity: 0.55;
+}
+
+.qt-summary-slider-fill {
+    display: none; /* arka plan zaten sürekli gradyan — ayrı bir dolgu gerekmiyor */
+}
+
+.qt-summary-slider-dot {
+    position: absolute;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--text-primary);
+    border: 2px solid var(--bg-panel);
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 1px var(--gold-border);
+}
+
 /* (23 Temmuz 2026 düzeltmesi — Normal Seans / VİOP ayrımı) Trade tab'ların
    hemen üstünde duran, hangi piyasada işlem yapıldığını seçen bar. Solda
    Normal Seans (varsayılan, kaldıraçsız/açığa satışsız), sağda VİOP
@@ -4794,6 +5006,16 @@ body.compact-mode .status-item {
 .market-mode-btn[data-market="VIOP"].active {
     background-color: rgba(255, 152, 0, 0.16);
     color: #FF9800;
+}
+
+/* (29 Temmuz 2026 — Madde 11: "VİOP ayrı panel") Normal Seans/VİOP
+   düğmelerinin altındaki kısa açıklama — aşağıdaki pozisyon/emir
+   listelerinin de artık moda göre ayrıldığını belirtiyor. */
+.qt-market-scope-hint {
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    margin: -4px 0 12px;
 }
 
 .trade-tabs {

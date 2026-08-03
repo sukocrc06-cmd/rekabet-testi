@@ -245,6 +245,15 @@
                      Geriye Dönük Test Ayarları panel below it is gone. -->
                 <div class="form-group watchlist-form-group">
                     <label>İzleme Listesi</label>
+                    <!-- (2 Ağustos 2026 — revize planı madde 9) Bir sembol
+                         kaldırıldığında birkaç saniyeliğine görünen "Geri Al"
+                         bildirimi — silinen hisselerin "kayboluyor" hissi
+                         vermemesi için. Bkz. tradingEngine.js
+                         removeFromWatchlist() / showWatchlistUndoToast(). -->
+                    <div class="watchlist-undo-toast" id="watchlist-undo-toast" style="display:none;">
+                        <span id="watchlist-undo-text"></span>
+                        <button type="button" id="btn-watchlist-undo">Geri Al</button>
+                    </div>
                     <div class="watchlist-container" id="watchlist-body">
                         <!-- Populated dynamically by tradingEngine.js -->
                     </div>
@@ -649,9 +658,23 @@
                 <!-- Active symbol + live price -->
                 <div class="qt-symbol-header">
                     <span id="qt-symbol" class="qt-symbol">Sembol seçin</span>
+                    <!-- (2 Ağustos 2026 — revize planı madde 10) "Hızlı hisse
+                         seçimi bulunmuyor" — Hızlı Alım Satım panelinde sembol
+                         değiştirmek için bugüne kadar sol taraftaki İzleme
+                         Listesi'ne gitmek gerekiyordu. Artık bu simge, sol
+                         paneldeki arama ile aynı BIST100 verisi üzerinde
+                         çalışan küçük bir hızlı arama açılır penceresi açıyor
+                         (bkz. tradingEngine.js setupQuickTicketSymbolSearch()). -->
+                    <button type="button" id="btn-qt-symbol-search" class="qt-symbol-search-btn" title="Hızlı sembol ara">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    </button>
                     <div class="qt-price-row">
                         <span id="qt-price" class="qt-price">--</span>
                         <span id="qt-change" class="qt-change"></span>
+                    </div>
+                    <div class="qt-symbol-search-popover" id="qt-symbol-search-popover" style="display:none;">
+                        <input type="text" id="qt-symbol-search-input" class="form-input" placeholder="Sembol veya şirket adı...">
+                        <div class="qt-symbol-search-results" id="qt-symbol-search-results"></div>
                     </div>
                 </div>
 
@@ -661,6 +684,11 @@
                     <button type="button" class="panel-subtab" data-panel-tab="orderbook">Emir Defteri</button>
                     <button type="button" class="panel-subtab" data-panel-tab="trades">Son İşlemler</button>
                     <button type="button" class="panel-subtab" data-panel-tab="performance">Performans</button>
+                    <!-- (2 Ağustos 2026 — revize planı madde 12) "Örnek bir özet
+                         detay konulabilir" — referans mobil uygulama ekran
+                         görüntüsündeki Günlük/Aylık/Yıllık aralık çubuklarının
+                         basitleştirilmiş bir sürümü. -->
+                    <button type="button" class="panel-subtab" data-panel-tab="summary">Özet Detay</button>
                 </div>
 
                 <div class="panel-subtab-content active" id="panel-tab-trade">
@@ -674,6 +702,14 @@
                         <button type="button" id="qt-market-normal" class="market-mode-btn active" data-market="NORMAL">Normal Seans</button>
                         <button type="button" id="qt-market-viop" class="market-mode-btn" data-market="VIOP" title="Vadeli İşlem ve Opsiyon Piyasası: kaldıraç ve açığa satış">VİOP</button>
                     </div>
+                    <!-- (29 Temmuz 2026 — Madde 11: "VİOP ayrı panel") Normal Seans ve
+                         VİOP artık yalnızca kaldıraç/açığa satış davranışını değil, AŞAĞIDAKİ
+                         açık pozisyon / bekleyen OCO / son emirler listelerini de ayırıyor —
+                         iki modun pozisyonları ve geçmişi hiç karışmıyor (bkz.
+                         tradingEngine.js: portfolio.viopPositions/viopHistory/
+                         viopPendingOrders, book() yardımcı fonksiyonu). Bakiye tek bir demo
+                         hesapta ortak kalıyor, yalnızca hangi "defter"e yazıldığı ayrılıyor. -->
+                    <div class="qt-market-scope-hint">Aşağıdaki pozisyon/emir listeleri seçili moda göre değişir — Normal Seans ve VİOP birbirine hiç karışmaz.</div>
 
                     <!-- Buy / Sell tabs -->
                     <div class="trade-tabs">
@@ -948,6 +984,16 @@
                     </div>
                 </div>
 
+                <!-- (2 Ağustos 2026 — revize planı madde 12) Özet Detay:
+                     aktif sembolün Günlük/Aylık/Yıllık fiyat aralığı içindeki
+                     konumu — bkz. tradingEngine.js renderSummaryDetailTab(),
+                     tradingChart.js getDailyRangeSummary(). -->
+                <div class="panel-subtab-content" id="panel-tab-summary">
+                    <div id="qt-summary-detail-body" class="qt-summary-detail-body">
+                        <div class="qt-summary-empty">Sembol seçin.</div>
+                    </div>
+                </div>
+
                 <!-- Account summary (balance now lives in the header only) -->
                 <div class="qt-account-summary qt-account-summary-2col">
                     <div class="acct-item">
@@ -986,33 +1032,69 @@
                      bir liste — bkz. renderPositions() (tradingEngine.js) ve
                      .pos-card kuralları (styles.css). Yatay kaydırma tamamen ortadan
                      kalkıyor, K/Z değeri artık tek satırda (white-space: nowrap). -->
-                <div class="form-group" style="margin-top: 20px;">
-                    <label>Açık Pozisyonlar</label>
-                    <div class="table-container qt-mini-table">
-                        <div id="qt-positions-body" class="qt-card-list"></div>
+                <!-- (29 Temmuz 2026 — Madde 11) Bu blok yalnızca Normal Seans
+                     modundaki (spot) defteri gösterir; VİOP defteri aşağıda ayrı,
+                     paralel bir blokta (id'lerin sonunda "-viop"). Görünürlük
+                     setupMarketModeSelector()'daki toggle ile kontrol ediliyor —
+                     veriler her zaman ikisine de yazılıyor, yalnızca hangisinin
+                     görüneceği moda göre değişiyor. -->
+                <div id="qt-list-scope-spot">
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Açık Pozisyonlar (Spot)</label>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-positions-body" class="qt-card-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum;
+                         23 Temmuz 2026 on üçüncü oturum devamında kart listesine çevrildi) -->
+                    <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
+                        <label>Bekleyen OCO Emirleri (Spot)</label>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-pending-oco-body" class="qt-card-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- Recent orders -->
+                    <div class="form-group" style="margin-top: 16px;">
+                        <div class="form-group-label-row">
+                            <label style="margin-bottom:0;">Son Emirler (Spot)</label>
+                            <button type="button" class="btn-csv-export" id="btn-export-history-csv" title="Tüm işlem geçmişini (Spot + VİOP) CSV olarak indir">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                CSV
+                            </button>
+                        </div>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-orders-body" class="qt-card-list"></div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum;
-                     23 Temmuz 2026 on üçüncü oturum devamında kart listesine çevrildi) -->
-                <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
-                    <label>Bekleyen OCO Emirleri</label>
-                    <div class="table-container qt-mini-table">
-                        <div id="qt-pending-oco-body" class="qt-card-list"></div>
+                <!-- (29 Temmuz 2026 — Madde 11) VİOP'a ait, Spot'la hiç karışmayan
+                     ayrı pozisyon/OCO/emir defteri. Yapısal olarak yukarıdakiyle
+                     birebir aynı, sadece kendi id'leri ve kendi verisiyle. -->
+                <div id="qt-list-scope-viop" style="display:none;">
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Açık Pozisyonlar (VİOP)</label>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-positions-body-viop" class="qt-card-list"></div>
+                        </div>
                     </div>
-                </div>
 
-                <!-- Recent orders -->
-                <div class="form-group" style="margin-top: 16px;">
-                    <div class="form-group-label-row">
-                        <label style="margin-bottom:0;">Son Emirler</label>
-                        <button type="button" class="btn-csv-export" id="btn-export-history-csv" title="Tüm işlem geçmişini CSV olarak indir">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                            CSV
-                        </button>
+                    <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group-viop">
+                        <label>Bekleyen OCO Emirleri (VİOP)</label>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-pending-oco-body-viop" class="qt-card-list"></div>
+                        </div>
                     </div>
-                    <div class="table-container qt-mini-table">
-                        <div id="qt-orders-body" class="qt-card-list"></div>
+
+                    <div class="form-group" style="margin-top: 16px;">
+                        <div class="form-group-label-row">
+                            <label style="margin-bottom:0;">Son Emirler (VİOP)</label>
+                        </div>
+                        <div class="table-container qt-mini-table">
+                            <div id="qt-orders-body-viop" class="qt-card-list"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -1150,6 +1232,17 @@
                             <span class="custom-checkbox"></span>
                             <span class="checkbox-text">RSI (14)</span>
                         </label>
+                        <!-- (2 Ağustos 2026 — revize planı madde 7) Kullanıcı geri
+                             bildirimi: "rsi 14 ama isteyen kullanıcı rsı 20 ayarlamak
+                             isteyebilir... iki farklı değerde rsi değerlerini
+                             görebilmek için güzel bir seçenek olabilir". Farklı bir
+                             periyotla İKİNCİ bir RSI paneli eklenebiliyor; eklenen
+                             panel kendi başlığındaki × ile normal şekilde kapatılır. -->
+                        <div class="osc-custom-period-row" data-search="rsi periyot custom özel">
+                            <span class="osc-custom-period-label">Farklı periyotlu RSI ekle:</span>
+                            <input type="number" id="rsi-custom-period-input" class="form-input osc-custom-period-input" min="2" max="200" value="20">
+                            <button type="button" id="btn-add-custom-rsi" class="btn-chip-action">Ekle</button>
+                        </div>
                         <label class="checkbox-label indicator-search-item" data-search="macd moving average convergence divergence">
                             <input type="checkbox" class="osc-checkbox" data-osc="macd">
                             <span class="custom-checkbox"></span>
@@ -1296,6 +1389,33 @@
                     <div class="indicator-modal-toolbar" style="margin-top:10px;">
                         <button type="button" class="btn-chip-action" id="btn-sltp-clear">Temizle</button>
                         <button type="button" class="btn-chip-action" id="btn-sltp-save">Kaydet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- (2 Ağustos 2026 — revize planı madde 8) Grafik notu (metin çizim aracı) modali —
+         eskiden çıplak window.prompt() kullanılıyordu, uygulamanın geri kalanıyla
+         tutarlı olması için diğer modallerle (SLTP, Alarm, vb.) aynı desende
+         özel bir modal'a taşındı. -->
+    <div class="indicator-modal-backdrop" id="chart-note-modal-backdrop">
+        <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Grafik Notu">
+            <div class="indicator-modal-header">
+                <h3>Grafik Notu</h3>
+                <button type="button" class="indicator-modal-close" id="btn-close-chart-note" aria-label="Kapat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="indicator-modal-body">
+                <div class="indicator-modal-category" data-category-label="not">
+                    <div class="qt-sltp-field">
+                        <label for="chart-note-input">Grafiğe eklenecek not</label>
+                        <input type="text" id="chart-note-input" class="form-input" maxlength="120" placeholder="Örn: Direnç bölgesi">
+                    </div>
+                    <div class="indicator-modal-toolbar" style="margin-top:10px;">
+                        <button type="button" class="btn-chip-action" id="btn-chart-note-cancel">İptal</button>
+                        <button type="button" class="btn-chip-action" id="btn-chart-note-save">Ekle</button>
                     </div>
                 </div>
             </div>

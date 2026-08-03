@@ -986,9 +986,22 @@ const DataController = (() => {
      * üzerinde createPriceLine() ile statik çizgiler olarak gösterilir
      * (RSI'nin 70/30 referans çizgileriyle aynı desen).
      */
-    function computePivotPoints(candles) {
-        if (!candles || candles.length < 2) return null;
-        const ref = candles[candles.length - 2]; // son tamamlanmış bar
+    function computePivotPoints(candles, dailyCandles) {
+        // (2 Ağustos 2026 — revize planı madde 4) Standart pivot noktaları HER ZAMAN
+        // bir önceki TAM TİCARET GÜNÜNÜN yüksek/düşük/kapanışına göre hesaplanır —
+        // grafikte hangi çözünürlük (5dk/15dk/1s/günlük) gösteriliyor olursa olsun
+        // aynı kalmaları gerekir. Eskiden bu fonksiyona doğrudan o anki ÇÖZÜNÜRLÜĞE
+        // göre türetilmiş `candles` (intraday barlar) veriliyordu ve referans bar
+        // `candles[candles.length-2]` — yani bir önceki 5/15 dakikalık bar — oluyordu.
+        // Kısa intraday barların high-low aralığı çok dar olduğundan (özellikle düşük
+        // volatilitede), P/R1/R2/R3/S1/S2/S3 hepsi neredeyse aynı değere denk geliyor,
+        // "tüm pivot seviyeleri aynı" şikayetine yol açıyordu. Düzeltme: `dailyCandles`
+        // (her zaman GÜNLÜK çözünürlükteki gerçek kaynak veri) verildiyse referans
+        // olarak SON TAMAMLANMIŞ GÜNLÜK barı kullan; verilmediyse (geriye dönük
+        // uyumluluk) eski davranışa (verilen `candles` dizisinin sondan ikincisi) düş.
+        const source = (Array.isArray(dailyCandles) && dailyCandles.length >= 2) ? dailyCandles : candles;
+        if (!source || source.length < 2) return null;
+        const ref = source[source.length - 2]; // son tamamlanmış gün
         const { high, low, close } = ref;
         const p = (high + low + close) / 3;
         const r1 = 2 * p - low;
@@ -1312,7 +1325,7 @@ const DataController = (() => {
      *   pivotPoints: {p, r1, r2, r3, s1, s2, s3}|null
      * }}
      */
-    function calculateIndicators(candles) {
+    function calculateIndicators(candles, dailyCandles) {
         const closes = candles.map(c => c.close);
 
         // --- Simple Moving Averages ---
@@ -1339,7 +1352,7 @@ const DataController = (() => {
         // --- Ichimoku Cloud / Parabolic SAR / Pivot Points (üçüncü tur — indikatör çeşitlendirme) ---
         const ichimoku = computeIchimoku(candles);
         const psar = computeParabolicSAR(candles);
-        const pivotPoints = computePivotPoints(candles);
+        const pivotPoints = computePivotPoints(candles, dailyCandles);
 
         // --- SuperTrend / CCI / Keltner / Donchian / MFI (dördüncü tur — indikatör çeşitlendirme) ---
         const supertrend = computeSuperTrend(candles);
@@ -1373,17 +1386,35 @@ const DataController = (() => {
             bollingerLower.push(+(mean - bbMult * stddev).toFixed(4));
         }
 
-        // --- Cumulative VWAP ---
+        // --- Cumulative VWAP (gün içi sıfırlamalı) ---
+        // (2 Ağustos 2026 — revize planı madde 5) VWAP tanımı gereği GÜN İÇİ bir
+        // göstergedir — her ticaret seansının başında (bar 0) sıfırdan başlayıp o
+        // seans içinde kümülatif olarak hesaplanması gerekir. Eskiden `cumTPV`/
+        // `cumVol` HİÇBİR ZAMAN sıfırlanmıyordu; state.candles'ta yüklü TÜM geçmiş
+        // (intraday çözünürlükte 750 güne kadar) boyunca tek bir kümülatif toplam
+        // birikiyordu. Bu durumda VWAP çizgisi zamanla neredeyse sabit bir "tüm
+        // zamanların ortalaması"na yakınsıyor, güncel fiyat hareketinden kopuk ve
+        // anlamsız bir seviyede donup kalıyordu. Düzeltme: her barın UTC tarihinden
+        // takvim günü anahtarı çıkarılıyor; gün değiştiğinde kümülatif toplamlar
+        // sıfırlanıp o günün VWAP hesabı yeniden başlıyor.
         const vwap = [];
-        let cumTPV = 0;   // cumulative (typicalPrice × volume)
-        let cumVol = 0;   // cumulative volume
+        let cumTPV = 0;   // cumulative (typicalPrice × volume) — gün içinde
+        let cumVol = 0;   // cumulative volume — gün içinde
+        let vwapDayKey = null;
 
         for (let i = 0; i < candles.length; i++) {
             const c = candles[i];
+            const d = new Date(c.date * 1000);
+            const dayKey = d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+            if (dayKey !== vwapDayKey) {
+                cumTPV = 0;
+                cumVol = 0;
+                vwapDayKey = dayKey;
+            }
             const tp = (c.high + c.low + c.close) / 3;
             cumTPV += tp * c.volume;
             cumVol += c.volume;
-            vwap.push(+(cumTPV / cumVol).toFixed(4));
+            vwap.push(+(cumTPV / (cumVol || 1)).toFixed(4));
         }
 
         return {
