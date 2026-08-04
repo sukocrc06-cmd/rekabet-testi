@@ -47,6 +47,7 @@
 
     var fsSharedDoc = null;
     var fsActivityDoc = null;
+    var fsPortfolioDoc = null;
 
     if (FIREBASE_ENABLED) {
         try {
@@ -56,6 +57,10 @@
             var fs = ftcApp.firestore();
             fsSharedDoc = fs.collection('finteclub').doc('shared_state');
             fsActivityDoc = fs.collection('finteclub').doc('oplab_activity');
+            // (Admin panel "Canlı İzleme" / "Kullanıcı Portföyleri" entegrasyonu)
+            // Doğrulanmış her yarışmacının anlık bakiye/özkaynak/açık pozisyon
+            // özetini bu belgeye periyodik olarak yazıyoruz — bkz. pushPortfolioSnapshot().
+            fsPortfolioDoc = fs.collection('finteclub').doc('oplab_live_portfolio');
         } catch (e) {
             console.warn('FinTeClub bağlantısı kurulamadı, doğrulama devre dışı bırakıldı.', e);
             FIREBASE_ENABLED = false;
@@ -64,9 +69,12 @@
 
     var VERIFY_CACHE_KEY = 'optipulselab_ftc_verify_v1';
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
+    var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
+    var PORTFOLIO_PUSH_INTERVAL_MS = 20000;
 
     var lastSharedData = null;
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
+    var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
 
     function byId(id) { return document.getElementById(id); }
 
@@ -139,6 +147,7 @@
             writeCachedVerify(null);
             setBadgeVisible(false);
             setVerifyStatus('', null);
+            verifiedApp = null;
             return;
         }
         if (!lastSharedData) {
@@ -155,11 +164,90 @@
             setVerifyStatus('✓ Doğrulandı — ' + match.name, 'ok');
             applyVerifiedProfile(match.name);
             logActivity(match);
+            verifiedApp = { id: match.id, name: match.name, email: match.email };
         } else {
             writeCachedVerify(null);
             setBadgeVisible(false);
             setVerifyStatus('Bu e-posta ile onaylı bir FinteLig başvurusu bulunamadı.', 'error');
+            verifiedApp = null;
         }
+    }
+
+    /* ── Admin panel "Canlı İzleme" / "Kullanıcı Portföyleri" için hafif
+       portföy özeti ── tradingEngine.js'e HİÇ dokunmuyoruz: sadece onun
+       zaten yazdığı localStorage anahtarını (PORTFOLIO_STORAGE_KEY) okuyup,
+       yine onun dışa açtığı window.TradingEngine.getPrice() ile aynı
+       özkaynak/K-Z formülünü (tradingEngine.js'teki computeAccountSnapshot
+       ile birebir aynı) burada bağımsızca yeniden hesaplıyoruz. */
+    function readLocalPortfolio() {
+        try {
+            var raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+    }
+
+    function computeLightPortfolioSnapshot() {
+        var portfolio = readLocalPortfolio();
+        if (!portfolio || typeof portfolio.balance !== 'number') return null;
+        if (typeof window.TradingEngine === 'undefined' || typeof window.TradingEngine.getPrice !== 'function') return null;
+
+        var usedMargin = 0, openPnl = 0, positionsCount = 0;
+        var positionsOut = [];
+        var books = [
+            { positions: portfolio.positions || {}, market: 'NORMAL' },
+            { positions: portfolio.viopPositions || {}, market: 'VIOP' }
+        ];
+        books.forEach(function (book) {
+            Object.keys(book.positions).forEach(function (symbol) {
+                var pos = book.positions[symbol];
+                if (!pos || !pos.qty) return;
+                var current = window.TradingEngine.getPrice(symbol) || pos.avgPrice;
+                var leverage = pos.leverage || 1;
+                var margin = (pos.avgPrice * pos.qty) / leverage;
+                usedMargin += margin;
+                var pnl = pos.side === 'LONG'
+                    ? (current - pos.avgPrice) * pos.qty
+                    : (pos.avgPrice - current) * pos.qty;
+                openPnl += pnl;
+                positionsCount++;
+                // Firestore belge boyutunu makul tutmak için sadece ilk 25
+                // pozisyon detaylı gönderilir (özet sayılar yine de tam).
+                if (positionsOut.length < 25) {
+                    positionsOut.push({
+                        symbol: symbol, market: book.market, side: pos.side,
+                        qty: pos.qty, avgPrice: pos.avgPrice, currentPrice: current, pnl: pnl
+                    });
+                }
+            });
+        });
+        var equity = portfolio.balance + usedMargin + openPnl;
+        return {
+            balance: portfolio.balance,
+            equity: equity,
+            openPnl: openPnl,
+            positionsCount: positionsCount,
+            positions: positionsOut
+        };
+    }
+
+    function pushPortfolioSnapshot() {
+        if (!fsPortfolioDoc || !verifiedApp || document.hidden) return;
+        var snap = computeLightPortfolioSnapshot();
+        if (!snap) return;
+        var payload = { competitors: {} };
+        payload.competitors[String(verifiedApp.id)] = {
+            name: verifiedApp.name || '',
+            email: verifiedApp.email || '',
+            balance: snap.balance,
+            equity: snap.equity,
+            openPnl: snap.openPnl,
+            positionsCount: snap.positionsCount,
+            positions: snap.positions,
+            updatedAt: new Date().toISOString()
+        };
+        fsPortfolioDoc.set(payload, { merge: true }).catch(function (e) {
+            console.warn('OPLab canlı portföy verisi Firestore\'a yazılamadı.', e);
+        });
     }
 
     function updateAccessGate() {
@@ -216,6 +304,13 @@
                 console.warn('FinTeClub verisi dinlenemedi.', err);
                 updateAccessGate();
             });
+            // Admin panelindeki Canlı İzleme / Kullanıcı Portföyleri sayfalarını
+            // beslemek için: sadece doğrulanmış bir yarışmacı varsa ve sekme
+            // görünürken periyodik olarak bakiye/özkaynak özetini gönder.
+            // İlk gönderim birkaç saniye gecikmeli — tradingEngine.js'in fiyat
+            // akışının (tickPrices) en az bir tur çalışmış olması için.
+            setTimeout(pushPortfolioSnapshot, 5000);
+            setInterval(pushPortfolioSnapshot, PORTFOLIO_PUSH_INTERVAL_MS);
         } else {
             // Firebase yok/engelli — kilit varsayılan AÇIK, canlı doğrulama pasif
             // (yalnızca yukarıdaki önbellekli/iyimser rozet gösterimi geçerli).
