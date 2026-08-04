@@ -92,8 +92,14 @@
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
     var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
-    var modalDecisionMade = false; // açılış modalını gösterip göstermeme kararı sadece BİR KEZ verilir
-    var MODAL_DISMISS_KEY = 'optipulselab_ftc_modal_dismissed_v1';
+    // (17 Ağustos 2026 düzeltmesi) Kullanıcının açık isteği: modal HER
+    // AÇILIŞTA gösterilsin — daha önce "devam et" denmiş olması ya da
+    // kullanıcının zaten oturum açmış olması modalı ATLAMASIN. Bu yüzden
+    // artık localStorage'a kalıcı bir "dismissed" bayrağı YAZILMIYOR;
+    // modalDecisionMade sadece AYNI sayfa yüklemesi içinde modalın birden
+    // fazla kez açılmasını (onAuthStateChanged birden çok tetiklenebilir)
+    // önlemek için var, sayfa yeniden yüklendiğinde her zaman false'tan başlar.
+    var modalDecisionMade = false;
 
     function byId(id) { return document.getElementById(id); }
 
@@ -152,17 +158,14 @@
     }
 
     /* ── Açılış giriş modalı (zorunlu değil) ──
-       Sayfa yüklendiğinde, giriş yapılmamışsa ve daha önce "giriş yapmadan
-       devam et" denmemişse bu modal gösterilir. Genel ziyaretçiler istedikleri
-       an kapatabilir; FinteLig yarışmacıları için giriş yapmayı kolay ve
-       görünür kılmak amacıyla eklendi (önceden sadece profil panelinde,
-       tıklanana kadar gizli bir formdaydı). */
-    function isModalDismissed() {
-        try { return localStorage.getItem(MODAL_DISMISS_KEY) === '1'; } catch (e) { return false; }
-    }
-    function dismissModalPermanently() {
-        try { localStorage.setItem(MODAL_DISMISS_KEY, '1'); } catch (e) { /* ignore */ }
-    }
+       Sayfa HER yüklendiğinde gösterilir (giriş yapılmış/daha önce "devam
+       et" denmiş olması fark etmez — bu davranış kullanıcının kendi
+       seçimiydi). Genel ziyaretçiler istedikleri an "giriş yapmadan devam
+       et" ile kapatabilir; bu sadece o anki sayfa görüntülemesi için
+       geçerlidir, bir sonraki açılışta modal yine görünür. Zaten giriş
+       yapmış bir yarışmacı için checkApplicationStatus() eşleşme bulduğunda
+       modalı kısa bir "✓ Hoşgeldin" mesajıyla değiştirip otomatik kapatır
+       (showModalWelcomeAndClose). */
     function showLoginModal() {
         var overlay = byId('ftc-login-modal-overlay');
         if (overlay) overlay.classList.remove('hidden');
@@ -188,7 +191,6 @@
             welcome.textContent = '✓ Hoşgeldin, ' + name + '!';
             welcome.classList.remove('hidden');
         }
-        dismissModalPermanently();
         setTimeout(function () {
             hideLoginModal();
             if (form) form.classList.remove('hidden');
@@ -385,7 +387,9 @@
         }
         if (modalSkipBtn) {
             modalSkipBtn.addEventListener('click', function () {
-                dismissModalPermanently();
+                // Kalıcı bir "bir daha gösterme" bayrağı YOK — bu sadece o anki
+                // görüntülemeyi kapatır, bir sonraki sayfa açılışında modal
+                // yine görünür (kullanıcının "her açılışta göster" seçimi).
                 hideLoginModal();
             });
         }
@@ -403,22 +407,27 @@
                 ftcAuth.onAuthStateChanged(function (user) {
                     currentAuthUser = user;
                     syncLoginUI();
+
+                    // (Modal her açılışta gösterilir) Bu karar, checkApplicationStatus()
+                    // ÇAĞRILMADAN ÖNCE verilir — zaten giriş yapmış bir yarışmacı için
+                    // showModalWelcomeAndClose() modalın AÇIK olmasını bekler; sıralama
+                    // ters olsaydı (önce checkApplicationStatus, sonra modal açılışı)
+                    // eşleşme bulunsa bile modal henüz kapalı olduğundan "Hoşgeldin"
+                    // mesajı hiç görünmezdi. modalDecisionMade sadece AYNI sayfa
+                    // yüklemesinde onAuthStateChanged birden fazla tetiklenirse modalın
+                    // tekrar tekrar açılmasını önler — sayfa yeniden yüklendiğinde
+                    // (F5 / siteyi kapat-aç) her zaman sıfırdan başlar.
+                    if (!modalDecisionMade) {
+                        modalDecisionMade = true;
+                        showLoginModal();
+                    }
+
                     if (user) {
                         checkApplicationStatus();
                     } else {
                         setBadgeVisible(false);
                         setVerifyStatus('', null);
                         verifiedApp = null;
-                    }
-                    // Açılış modalını gösterme kararı SADECE BİR KEZ verilir (ilk
-                    // onAuthStateChanged tetiklemesinde) — zaten giriş yapılmışsa
-                    // (kalıcı oturum) veya kullanıcı daha önce "devam et" dediyse
-                    // modal hiç gösterilmez.
-                    if (!modalDecisionMade) {
-                        modalDecisionMade = true;
-                        if (!user && !isModalDismissed()) {
-                            showLoginModal();
-                        }
                     }
                 });
             }
