@@ -22,6 +22,17 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- (FinTeClub entegrasyonu) Admin, FinTeClub panelinden erişimi kapatırsa
+         bu tam ekran uyarı platformun üstüne biner — bkz. finteclubBridge.js
+         updateAccessGate(). Firebase yüklenemezse (offline/engellenmiş) VARSAYILAN
+         olarak AÇIK kabul edilir, yani hiçbir zaman yanlışlıkla gerçek kullanıcıları
+         kilitlemez. -->
+    <div class="ftc-oplab-gate hidden" id="ftc-oplab-gate">
+        <div class="ftc-oplab-gate-box">
+            <div class="ftc-oplab-gate-title">Platform Geçici Olarak Kapalı</div>
+            <p>OPLab şu anda yönetici tarafından geçici olarak devre dışı bırakıldı. Lütfen daha sonra tekrar deneyin.</p>
+        </div>
+    </div>
     <div class="dashboard-container">
         <!-- HEADER -->
         <header class="dashboard-header" id="main-header">
@@ -163,6 +174,7 @@
                             <div class="profile-header-text">
                                 <div class="profile-name-display" id="profile-name-display">Kullanıcı</div>
                                 <div class="profile-header-sub">OptiPulseLab Demo Hesabı</div>
+                                <div class="ftc-badge hidden" id="ftc-badge">✓ FinteLig Yarışmacısı</div>
                             </div>
                         </div>
                         <div class="profile-panel-section">
@@ -187,6 +199,18 @@
                         <div class="profile-panel-section">
                             <label class="profile-settings-label" for="profile-name-input">Profil Ayarları — İsim</label>
                             <input type="text" id="profile-name-input" class="form-input profile-name-input" placeholder="İsminizi girin..." maxlength="40">
+                        </div>
+                        <!-- (FinTeClub entegrasyonu) FinteLig yarışmasına admin tarafından
+                             onaylanmış kullanıcılar, kayıt sırasında kullandıkları e-postayı
+                             burada girerek (ya da FinTeClub üzerinden ?ftc_email= parametresiyle
+                             otomatik) doğrulanır — bkz. finteclubBridge.js. Doğrulama, FinTeClub'ın
+                             kendi Firebase veritabanına karşı yapılır; sahte/uydurma bir e-posta
+                             ile rozet kazanılamaz. -->
+                        <div class="header-menu-divider"></div>
+                        <div class="profile-panel-section" id="ftc-verify-section">
+                            <label class="profile-settings-label" for="ftc-email-input">FinteLig Doğrulama — E-posta</label>
+                            <input type="email" id="ftc-email-input" class="form-input profile-name-input" placeholder="FinteLig'e kayıtlı e-postan...">
+                            <div class="ftc-verify-status" id="ftc-verify-status"></div>
                         </div>
                     </div>
                 </div>
@@ -1556,6 +1580,12 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- TradingView Lightweight Charts (used by the main trading chart) -->
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- FinTeClub entegrasyonu: FinteLig yarışmacı doğrulaması için Firebase
+         (opsiyonel — FIREBASE_CONFIG doldurulmadan/CDN engelliyken hiçbir şeyi
+         etkilemez, bkz. finteclubBridge.js). FinTeClub'ın (index.html/admin.html)
+         kullandığı AYNI Firebase projesine bağlanır. -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <!-- Data Controller -->
     <script src="config.js"></script>
     <script src="dataController.js"></script>
@@ -1575,6 +1605,8 @@
     <script src="tourGuide.js"></script>
     <!-- Application Controller -->
     <script src="app.js"></script>
+    <!-- FinTeClub entegrasyonu: FinteLig yarışmacı doğrulama + erişim kilidi -->
+    <script src="finteclubBridge.js"></script>
 
     <script>
         function safeGetElement(id) {
