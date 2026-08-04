@@ -92,6 +92,8 @@
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
     var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
+    var modalDecisionMade = false; // açılış modalını gösterip göstermeme kararı sadece BİR KEZ verilir
+    var MODAL_DISMISS_KEY = 'optipulselab_ftc_modal_dismissed_v1';
 
     function byId(id) { return document.getElementById(id); }
 
@@ -101,10 +103,15 @@
     }
 
     function setVerifyStatus(text, kind) {
-        var el = byId('ftc-verify-status');
-        if (!el) return;
-        el.textContent = text || '';
-        el.className = 'ftc-verify-status' + (kind ? ' ftc-status-' + kind : '');
+        // Aynı mesaj hem profil panelindeki formda hem de (açıksa) açılış
+        // modalındaki formda görünür — kullanıcı hangisiyle etkileşime
+        // girdiyse geri bildirimi orada görsün diye ikisi de güncellenir.
+        ['ftc-verify-status', 'ftc-modal-login-status'].forEach(function (id) {
+            var el = byId(id);
+            if (!el) return;
+            el.textContent = text || '';
+            el.className = 'ftc-verify-status' + (kind ? ' ftc-status-' + kind : '');
+        });
     }
 
     function applyVerifiedProfile(name) {
@@ -144,6 +151,51 @@
         });
     }
 
+    /* ── Açılış giriş modalı (zorunlu değil) ──
+       Sayfa yüklendiğinde, giriş yapılmamışsa ve daha önce "giriş yapmadan
+       devam et" denmemişse bu modal gösterilir. Genel ziyaretçiler istedikleri
+       an kapatabilir; FinteLig yarışmacıları için giriş yapmayı kolay ve
+       görünür kılmak amacıyla eklendi (önceden sadece profil panelinde,
+       tıklanana kadar gizli bir formdaydı). */
+    function isModalDismissed() {
+        try { return localStorage.getItem(MODAL_DISMISS_KEY) === '1'; } catch (e) { return false; }
+    }
+    function dismissModalPermanently() {
+        try { localStorage.setItem(MODAL_DISMISS_KEY, '1'); } catch (e) { /* ignore */ }
+    }
+    function showLoginModal() {
+        var overlay = byId('ftc-login-modal-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+    }
+    function hideLoginModal() {
+        var overlay = byId('ftc-login-modal-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+    function isLoginModalOpen() {
+        var overlay = byId('ftc-login-modal-overlay');
+        return !!overlay && !overlay.classList.contains('hidden');
+    }
+    // Modal açıkken başarılı bir giriş+onay eşleşmesi olursa formu "✓ Hoşgeldin"
+    // mesajıyla değiştirip kısa bir süre sonra modalı otomatik kapatır. Modal
+    // zaten kapalıysa (kullanıcı profil panelinden giriş yaptıysa) hiçbir şey
+    // yapmaz — panel zaten kendi durum mesajını gösteriyor.
+    function showModalWelcomeAndClose(name) {
+        if (!isLoginModalOpen()) return;
+        var form = byId('ftc-login-modal-form');
+        var welcome = byId('ftc-login-modal-welcome');
+        if (form) form.classList.add('hidden');
+        if (welcome) {
+            welcome.textContent = '✓ Hoşgeldin, ' + name + '!';
+            welcome.classList.remove('hidden');
+        }
+        dismissModalPermanently();
+        setTimeout(function () {
+            hideLoginModal();
+            if (form) form.classList.remove('hidden');
+            if (welcome) welcome.classList.add('hidden');
+        }, 1600);
+    }
+
     // Firebase Authentication girişi başarılı olduktan SONRA çalışır: o
     // e-postaya ait, admin onaylı bir FinteLig başvurusu var mı diye bakar.
     // Giriş yapmış olmak (kimlik doğru) ile onaylı olmak (yarışmaya erişim
@@ -166,6 +218,7 @@
             applyVerifiedProfile(match.name);
             logActivity(match);
             verifiedApp = { id: match.id, name: match.name, email: match.email };
+            showModalWelcomeAndClose(match.name);
         } else {
             setBadgeVisible(false);
             setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
@@ -298,6 +351,10 @@
         var logoutBtn = byId('ftc-logout-btn');
         var emailInput = byId('ftc-login-email');
         var pwInput = byId('ftc-login-password');
+        var modalLoginBtn = byId('ftc-modal-login-btn');
+        var modalEmailInput = byId('ftc-modal-login-email');
+        var modalPwInput = byId('ftc-modal-login-password');
+        var modalSkipBtn = byId('ftc-login-modal-skip');
 
         if (loginBtn) {
             loginBtn.addEventListener('click', function () {
@@ -312,6 +369,24 @@
         if (logoutBtn) {
             logoutBtn.addEventListener('click', function () {
                 if (ftcAuth) ftcAuth.signOut();
+            });
+        }
+        // Açılış modalındaki giriş formu — profil panelindeki formla AYNI
+        // attemptLogin()'i kullanır, sadece farklı input alanlarından okur.
+        if (modalLoginBtn) {
+            modalLoginBtn.addEventListener('click', function () {
+                attemptLogin(modalEmailInput ? modalEmailInput.value.trim() : '', modalPwInput ? modalPwInput.value : '');
+            });
+        }
+        if (modalPwInput) {
+            modalPwInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); if (modalLoginBtn) modalLoginBtn.click(); }
+            });
+        }
+        if (modalSkipBtn) {
+            modalSkipBtn.addEventListener('click', function () {
+                dismissModalPermanently();
+                hideLoginModal();
             });
         }
 
@@ -334,6 +409,16 @@
                         setBadgeVisible(false);
                         setVerifyStatus('', null);
                         verifiedApp = null;
+                    }
+                    // Açılış modalını gösterme kararı SADECE BİR KEZ verilir (ilk
+                    // onAuthStateChanged tetiklemesinde) — zaten giriş yapılmışsa
+                    // (kalıcı oturum) veya kullanıcı daha önce "devam et" dediyse
+                    // modal hiç gösterilmez.
+                    if (!modalDecisionMade) {
+                        modalDecisionMade = true;
+                        if (!user && !isModalDismissed()) {
+                            showLoginModal();
+                        }
                     }
                 });
             }

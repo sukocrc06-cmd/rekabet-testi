@@ -33,6 +33,27 @@
             <p>OPLab şu anda yönetici tarafından geçici olarak devre dışı bırakıldı. Lütfen daha sonra tekrar deneyin.</p>
         </div>
     </div>
+    <!-- (FinTeClub entegrasyonu — gerçek Firebase Authentication, 3. tur)
+         Sayfa açılışında görünen giriş modalı. ZORUNLU DEĞİLDİR: FinteLig
+         yarışmacısı olmayan genel ziyaretçiler "Giriş yapmadan devam et"
+         diyerek bunu kapatıp platformu olduğu gibi kullanabilir. Sadece
+         FinteLig rozeti/takibi isteyenler için — kayıt olurken belirlenen
+         e-posta/şifreyle giriş yapılır, eşleşirse "Hoşgeldin" mesajıyla
+         kapanır. bkz. finteclubBridge.js showLoginModal(). -->
+    <div class="ftc-login-modal-overlay hidden" id="ftc-login-modal-overlay">
+        <div class="ftc-login-modal-box">
+            <div class="ftc-login-modal-title">FinteLig Girişi</div>
+            <p class="ftc-login-modal-desc">FinteLig yarışmacısıysan, başvuruda belirlediğin e-posta ve şifreyle giriş yap. Yarışmacı değilsen giriş yapmadan da platformu kullanabilirsin.</p>
+            <div id="ftc-login-modal-form">
+                <input type="email" id="ftc-modal-login-email" class="form-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                <input type="password" id="ftc-modal-login-password" class="form-input" placeholder="Şifren..." autocomplete="current-password">
+                <button type="button" class="btn btn-primary" style="width:100%;margin-top:6px;" id="ftc-modal-login-btn">Giriş Yap</button>
+                <div class="ftc-verify-status" id="ftc-modal-login-status"></div>
+            </div>
+            <div id="ftc-login-modal-welcome" class="ftc-login-modal-welcome hidden"></div>
+            <button type="button" class="ftc-login-modal-skip" id="ftc-login-modal-skip">Giriş yapmadan devam et →</button>
+        </div>
+    </div>
     <div class="dashboard-container">
         <!-- HEADER -->
         <header class="dashboard-header" id="main-header">

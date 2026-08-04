@@ -570,6 +570,69 @@ body {
     line-height: 1.6;
 }
 
+/* --- FinTeClub Entegrasyonu: açılışta görünen giriş modalı ---
+   (Gerçek Firebase Authentication, 3. tur) Sayfa yüklendiğinde, giriş
+   yapılmamışsa ve daha önce "giriş yapmadan devam et" denmemişse bu modal
+   görünür. Zorunlu DEĞİLDİR — genel ziyaretçiler dilerse hiç giriş yapmadan
+   geçebilir; sadece FinteLig rozeti/takibi isteyenler için vardır.
+   bkz. finteclubBridge.js showLoginModal()/dismissModalPermanently(). */
+.ftc-login-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    background-color: rgba(10, 10, 10, 0.86);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.ftc-login-modal-box {
+    max-width: 400px;
+    width: 100%;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-lg);
+    padding: 30px 26px;
+    text-align: center;
+}
+.ftc-login-modal-title {
+    font-family: var(--font-sans);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 8px;
+}
+.ftc-login-modal-desc {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+.ftc-login-modal-box .form-input {
+    margin-bottom: 10px;
+    text-align: left;
+    width: 100%;
+}
+.ftc-login-modal-skip {
+    display: block;
+    width: 100%;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+}
+.ftc-login-modal-skip:hover { color: var(--text-secondary); }
+.ftc-login-modal-welcome {
+    color: var(--success);
+    font-size: 16px;
+    font-weight: 700;
+    padding: 18px 0;
+}
+
 /* --- Header Balance Pill (demo trading balance, top right) --- */
 .header-balance-pill {
     display: flex;
