@@ -7,21 +7,25 @@
    kullandığı AYNI Firebase Firestore veritabanına (finteclub/shared_state
    belgesi) karşı yapılır.
 
-   (Doğrulama sağlamlaştırması) İLK SÜRÜMDE doğrulama e-posta adresine karşı
-   yapılıyordu — bu, birinin e-postasını bilen/tahmin eden herkesin onun
-   rozetini "çalabilmesi" anlamına geliyordu (e-posta genelde gizli bir bilgi
-   değildir). Artık doğrulama, admin bir başvuruyu onayladığı ANDA üretilen
-   rastgele ve tahmin edilemez bir "verifyToken" değerine karşı yapılıyor —
-   e-posta artık bir doğrulama sırrı olarak KULLANILMIYOR, sadece görüntüleme/
-   aktivite kaydı amacıyla saklanıyor.
+   (Doğrulama sağlamlaştırması — 3. ve son tur) Sürüm geçmişi:
+   1) İLK SÜRÜM e-posta adresine karşı doğruluyordu — e-postayı bilen/tahmin
+      eden herkes rozeti çalabiliyordu.
+   2) İKİNCİ SÜRÜM tahmin edilemez bir "verifyToken"a karşı doğruluyordu —
+      ama bu kod, FinTeClub'ın herkese açık "Başvuru Durumu Sorgula"
+      sayfasında (sadece e-posta bilmek yeterli) gösterildiği için, sorun
+      aslında çözülmemiş, sadece bir seviye ötelenmişti.
+   3) ŞİMDİ: gerçek bir GİRİŞ EKRANI var. FinteLig başvuru formunda
+      belirlenen e-posta/şifreyle GERÇEK bir Firebase Authentication hesabı
+      oluşturuluyor (bkz. FinTeClub index.html pubBasvuruForm handler'ı).
+      Burada aynı e-posta/şifreyle giriş yapılıyor — şifre hiçbir yerde düz
+      metin olarak saklanmıyor/gösterilmiyor, doğrulama Firebase'in kendi
+      güvenli altyapısında yapılıyor (parola hash'leme, kaba kuvvet koruması
+      dahil). Giriş başarılıysa VE o e-postaya ait FinteLig başvurusu admin
+      tarafından onaylıysa ("status: 'onayli'") rozet kazanılıyor.
 
-   Nasıl tetiklenir:
-   1) FinTeClub'dan "OPLab'a Git" ile gelindiyse, doğrulama kodu URL'ye
-      otomatik eklenir (?ftc_token=...) ve doğrulama sayfa açılır açılmaz başlar.
-   2) Doğrudan/bookmark ile gelindiyse, kullanıcı profil panelindeki
-      "FinteLig Doğrulama — Kod" alanına FinTeClub'dan aldığı kodu yapıştırarak
-      kendi kendine doğrulayabilir.
-   Her iki yol da AYNI attemptVerification() fonksiyonundan geçer.
+   Oturum kalıcılığı Firebase Authentication'ın kendi mekanizmasıyla
+   sağlanıyor (varsayılan: tarayıcıda kalıcı) — özel bir localStorage
+   önbelleğine artık ihtiyaç yok.
 
    Ayrıca admin FinTeClub panelinden OPLab erişimini kapatırsa (oplabEnabled:
    false), bu dosya tam ekran bir "Platform Geçici Olarak Kapalı" kilidi
@@ -32,7 +36,9 @@
    Bu dosya, mevcut dev kod tabanına (tradingEngine.js vb.) hiç dokunmadan,
    tamamen ek/bağımsız olarak çalışacak şekilde tasarlandı; tek paylaştığı
    şey, tradingEngine.js'in zaten okuduğu 'optipulselab_profile_name_v1'
-   localStorage anahtarıdır (bkz. applyVerifiedProfile()).
+   localStorage anahtarıdır (bkz. applyVerifiedProfile()). Bu giriş ekranı
+   sadece "FinteLig Yarışmacısı" rozetini/takibini almak isteyenler için —
+   genel ziyaretçiler OPLab'ı hiç giriş yapmadan, olduğu gibi kullanabilir.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -54,6 +60,7 @@
     var fsSharedDoc = null;
     var fsActivityDoc = null;
     var fsPortfolioDoc = null;
+    var ftcAuth = null;
 
     if (FIREBASE_ENABLED) {
         try {
@@ -67,13 +74,16 @@
             // Doğrulanmış her yarışmacının anlık bakiye/özkaynak/açık pozisyon
             // özetini bu belgeye periyodik olarak yazıyoruz — bkz. pushPortfolioSnapshot().
             fsPortfolioDoc = fs.collection('finteclub').doc('oplab_live_portfolio');
+            // (Doğrulama sağlamlaştırması, 3. tur) Aynı 'ftcBridge' app instance'ı
+            // üzerinden Authentication — FinTeClub'ın başvuru formunda oluşturulan
+            // hesaplarla AYNI Firebase projesi/kullanıcı havuzuna bakıyor.
+            ftcAuth = ftcApp.auth();
         } catch (e) {
             console.warn('FinTeClub bağlantısı kurulamadı, doğrulama devre dışı bırakıldı.', e);
             FIREBASE_ENABLED = false;
         }
     }
 
-    var VERIFY_CACHE_KEY = 'optipulselab_ftc_verify_v1';
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_PUSH_INTERVAL_MS = 20000;
@@ -81,22 +91,9 @@
     var lastSharedData = null;
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
     var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
+    var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
 
     function byId(id) { return document.getElementById(id); }
-
-    function readCachedVerify() {
-        try {
-            var raw = localStorage.getItem(VERIFY_CACHE_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch (e) { return null; }
-    }
-
-    function writeCachedVerify(data) {
-        try {
-            if (data) localStorage.setItem(VERIFY_CACHE_KEY, JSON.stringify(data));
-            else localStorage.removeItem(VERIFY_CACHE_KEY);
-        } catch (e) { /* private mode / kota dolu — sorun değil, sonraki yüklemede tekrar doğrulanır */ }
-    }
 
     function setBadgeVisible(visible) {
         var badge = byId('ftc-badge');
@@ -147,42 +144,66 @@
         });
     }
 
-    // (Doğrulama sağlamlaştırması) Önceden burada e-posta karşılaştırılıyordu —
-    // e-posta genelde tahmin edilebilir/bilinebilir bir değer olduğu için,
-    // birinin e-postasını bilmek onun rozetini çalmaya yetiyordu. Artık admin
-    // onayı anında üretilen, tahmin edilemez bir verifyToken'a karşı
-    // doğrulama yapılıyor — token URL'de (?ftc_token=) veya kullanıcının elle
-    // yapıştırdığı "Doğrulama Kodu" alanında taşınır.
-    function attemptVerification(rawToken) {
-        var token = (rawToken || '').trim();
-        if (!token) {
-            writeCachedVerify(null);
-            setBadgeVisible(false);
-            setVerifyStatus('', null);
-            verifiedApp = null;
-            return;
-        }
+    // Firebase Authentication girişi başarılı olduktan SONRA çalışır: o
+    // e-postaya ait, admin onaylı bir FinteLig başvurusu var mı diye bakar.
+    // Giriş yapmış olmak (kimlik doğru) ile onaylı olmak (yarışmaya erişim
+    // hakkı) İKİ AYRI şeydir — biri Firebase'in işi, öteki FinTeClub admin
+    // panelinin işi; ikisi de burada birlikte kontrol ediliyor.
+    function checkApplicationStatus() {
+        if (!currentAuthUser) return;
         if (!lastSharedData) {
-            setVerifyStatus(FIREBASE_ENABLED ? 'Doğrulanıyor...' : 'Doğrulama şu anda kullanılamıyor (bağlantı yok).', 'pending');
+            setVerifyStatus('Doğrulanıyor...', 'pending');
             return;
         }
+        var email = (currentAuthUser.email || '').toLowerCase();
         var apps = lastSharedData.applications || [];
         var match = apps.filter(function (a) {
-            return a.verifyToken && a.verifyToken === token && a.status === 'onayli';
+            return (a.email || '').toLowerCase() === email && a.status === 'onayli';
         })[0];
         if (match) {
-            writeCachedVerify({ id: match.id, name: match.name, email: match.email, token: match.verifyToken });
             setBadgeVisible(true);
-            setVerifyStatus('✓ Doğrulandı — ' + match.name, 'ok');
+            setVerifyStatus('✓ Giriş başarılı — ' + match.name, 'ok');
             applyVerifiedProfile(match.name);
             logActivity(match);
             verifiedApp = { id: match.id, name: match.name, email: match.email };
         } else {
-            writeCachedVerify(null);
             setBadgeVisible(false);
-            setVerifyStatus('Bu kodla onaylı bir FinteLig başvurusu bulunamadı. Kodu FinTeClub “Başvuru Durumu Sorgula” sonucundan kopyaladığından emin ol.', 'error');
+            setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
             verifiedApp = null;
         }
+    }
+
+    function loginErrorMessage(err) {
+        switch (err && err.code) {
+            case 'auth/invalid-email': return 'Geçersiz e-posta adresi.';
+            case 'auth/user-disabled': return 'Bu hesap devre dışı bırakılmış.';
+            case 'auth/user-not-found':
+            case 'auth/wrong-password':
+            case 'auth/invalid-credential': return 'E-posta veya şifre hatalı.';
+            case 'auth/too-many-requests': return 'Çok fazla hatalı deneme yapıldı. Lütfen biraz sonra tekrar dene.';
+            case 'auth/network-request-failed': return 'Ağ bağlantısı hatası. İnternet bağlantını kontrol et.';
+            default: return 'Giriş başarısız. E-posta/şifreni kontrol edip tekrar dene.';
+        }
+    }
+
+    function attemptLogin(email, password) {
+        if (!ftcAuth) { setVerifyStatus('Giriş şu anda kullanılamıyor (bağlantı yok).', 'pending'); return; }
+        if (!email || !password) { setVerifyStatus('E-posta ve şifreni gir.', 'error'); return; }
+        setVerifyStatus('Giriş yapılıyor...', 'pending');
+        ftcAuth.signInWithEmailAndPassword(email, password).catch(function (err) {
+            setVerifyStatus(loginErrorMessage(err), 'error');
+        });
+        // Başarılı olursa onAuthStateChanged zaten tetiklenip checkApplicationStatus()'u çağıracak.
+    }
+
+    function syncLoginUI() {
+        var loginBtn = byId('ftc-login-btn'), logoutBtn = byId('ftc-logout-btn'),
+            emailInput = byId('ftc-login-email'), pwInput = byId('ftc-login-password');
+        var loggedIn = !!currentAuthUser;
+        if (loginBtn) loginBtn.classList.toggle('hidden', loggedIn);
+        if (logoutBtn) logoutBtn.classList.toggle('hidden', !loggedIn);
+        if (emailInput) emailInput.classList.toggle('hidden', loggedIn);
+        if (pwInput) pwInput.classList.toggle('hidden', loggedIn);
     }
 
     /* ── Admin panel "Canlı İzleme" / "Kullanıcı Portföyleri" için hafif
@@ -272,50 +293,50 @@
         gate.classList.toggle('hidden', enabled);
     }
 
-    function getUrlToken() {
-        try {
-            var params = new URLSearchParams(window.location.search);
-            return (params.get('ftc_token') || '').trim();
-        } catch (e) { return ''; }
-    }
-
     function init() {
-        var tokenInput = byId('ftc-email-input');
-        var cached = readCachedVerify();
-        var urlToken = getUrlToken();
-        var initialToken = urlToken || (cached && cached.token) || '';
+        var loginBtn = byId('ftc-login-btn');
+        var logoutBtn = byId('ftc-logout-btn');
+        var emailInput = byId('ftc-login-email');
+        var pwInput = byId('ftc-login-password');
 
-        if (tokenInput && initialToken) tokenInput.value = initialToken;
-
-        // İyimser UI: Firestore cevabı gelmeden önce, önceki oturumdan
-        // doğrulanmış bir durum varsa rozeti hemen göster (yanıp sönmeyi/
-        // gecikmeyi önler). Firestore cevabı gelince gerçek veriyle teyit
-        // edilir/güncellenir.
-        if (cached && cached.name) {
-            setBadgeVisible(true);
-            setVerifyStatus('✓ Doğrulandı — ' + cached.name, 'ok');
-            applyVerifiedProfile(cached.name);
+        if (loginBtn) {
+            loginBtn.addEventListener('click', function () {
+                attemptLogin(emailInput ? emailInput.value.trim() : '', pwInput ? pwInput.value : '');
+            });
         }
-
-        var debounceTimer = null;
-        function scheduleVerify() {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(function () {
-                attemptVerification(tokenInput ? tokenInput.value : '');
-            }, 500);
+        if (pwInput) {
+            pwInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); if (loginBtn) loginBtn.click(); }
+            });
         }
-        if (tokenInput) tokenInput.addEventListener('input', scheduleVerify);
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', function () {
+                if (ftcAuth) ftcAuth.signOut();
+            });
+        }
 
         if (FIREBASE_ENABLED && fsSharedDoc) {
             fsSharedDoc.onSnapshot(function (doc) {
                 lastSharedData = doc.exists ? doc.data() : null;
                 updateAccessGate();
-                var currentToken = tokenInput ? tokenInput.value : initialToken;
-                if (currentToken) attemptVerification(currentToken);
+                checkApplicationStatus();
             }, function (err) {
                 console.warn('FinTeClub verisi dinlenemedi.', err);
                 updateAccessGate();
             });
+            if (ftcAuth) {
+                ftcAuth.onAuthStateChanged(function (user) {
+                    currentAuthUser = user;
+                    syncLoginUI();
+                    if (user) {
+                        checkApplicationStatus();
+                    } else {
+                        setBadgeVisible(false);
+                        setVerifyStatus('', null);
+                        verifiedApp = null;
+                    }
+                });
+            }
             // Admin panelindeki Canlı İzleme / Kullanıcı Portföyleri sayfalarını
             // beslemek için: sadece doğrulanmış bir yarışmacı varsa ve sekme
             // görünürken periyodik olarak bakiye/özkaynak özetini gönder.
@@ -324,12 +345,9 @@
             setTimeout(pushPortfolioSnapshot, 5000);
             setInterval(pushPortfolioSnapshot, PORTFOLIO_PUSH_INTERVAL_MS);
         } else {
-            // Firebase yok/engelli — kilit varsayılan AÇIK, canlı doğrulama pasif
-            // (yalnızca yukarıdaki önbellekli/iyimser rozet gösterimi geçerli).
+            // Firebase yok/engelli — kilit varsayılan AÇIK, giriş pasif.
             updateAccessGate();
-            if (initialToken && !cached) {
-                setVerifyStatus('Doğrulama şu anda kullanılamıyor (bağlantı yok).', 'pending');
-            }
+            syncLoginUI();
         }
     }
 

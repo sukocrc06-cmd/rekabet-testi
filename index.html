@@ -200,16 +200,24 @@
                             <label class="profile-settings-label" for="profile-name-input">Profil Ayarları — İsim</label>
                             <input type="text" id="profile-name-input" class="form-input profile-name-input" placeholder="İsminizi girin..." maxlength="40">
                         </div>
-                        <!-- (FinTeClub entegrasyonu) FinteLig yarışmasına admin tarafından
-                             onaylanmış kullanıcılar, kayıt sırasında kullandıkları e-postayı
-                             burada girerek (ya da FinTeClub üzerinden ?ftc_email= parametresiyle
-                             otomatik) doğrulanır — bkz. finteclubBridge.js. Doğrulama, FinTeClub'ın
-                             kendi Firebase veritabanına karşı yapılır; sahte/uydurma bir e-posta
-                             ile rozet kazanılamaz. -->
+                        <!-- (FinTeClub entegrasyonu — doğrulama sağlamlaştırması, 3. tur)
+                             İLK sürüm e-posta adresine, İKİNCİ sürüm tahmin edilemez bir
+                             koda karşı doğruluyordu (koda karşı doğrulama, e-postayı
+                             bilen HERKESİN FinTeClub'ın "Durumu Sorgula" sayfasından kodu
+                             görebilmesi nedeniyle sağlam çıkmadı). Artık gerçek bir GİRİŞ
+                             var: FinteLig başvuru formunda belirlenen e-posta/şifre ile
+                             gerçek bir Firebase Authentication hesabı oluşturuluyor;
+                             burada aynı e-posta/şifreyle giriş yapılıyor. Şifre burada
+                             hiçbir zaman düz metin olarak saklanmıyor/gösterilmiyor —
+                             doğrulama Firebase'in kendi güvenli altyapısında yapılıyor.
+                             bkz. finteclubBridge.js attemptLogin(). -->
                         <div class="header-menu-divider"></div>
                         <div class="profile-panel-section" id="ftc-verify-section">
-                            <label class="profile-settings-label" for="ftc-email-input">FinteLig Doğrulama — E-posta</label>
-                            <input type="email" id="ftc-email-input" class="form-input profile-name-input" placeholder="FinteLig'e kayıtlı e-postan...">
+                            <label class="profile-settings-label" for="ftc-login-email">FinteLig Girişi</label>
+                            <input type="email" id="ftc-login-email" class="form-input profile-name-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                            <input type="password" id="ftc-login-password" class="form-input profile-name-input" placeholder="Şifren..." style="margin-top:8px;" autocomplete="current-password">
+                            <button type="button" id="ftc-login-btn" class="btn btn-primary" style="width:100%;margin-top:10px;">Giriş Yap</button>
+                            <button type="button" id="ftc-logout-btn" class="btn btn-secondary hidden" style="width:100%;margin-top:8px;">Çıkış Yap</button>
                             <div class="ftc-verify-status" id="ftc-verify-status"></div>
                         </div>
                     </div>
@@ -1586,6 +1594,7 @@
          kullandığı AYNI Firebase projesine bağlanır. -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <!-- Data Controller -->
     <script src="config.js"></script>
     <script src="dataController.js"></script>
