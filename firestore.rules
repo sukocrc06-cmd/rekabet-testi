@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── finteclub/shared_state ─────────────────────────────────────────
+    // Herkese açık site (index.html) buraya YAZMAK zorunda (başvuru/zirve
+    // kaydı gönderimi), bu yüzden tam "sadece admin yazabilir" kilidi
+    // uygulanamıyor. Bunun yerine gelen veriyi makul bir şekle zorluyoruz:
+    // aşırı büyük/bozuk belgeler (ör. binlerce sahte alan veya devasa bir
+    // applications/zirveRegistrations listesi) reddedilir. Belgeyi TAMAMEN
+    // silme yetkisi sadece gerçek admin girişi (Firebase Authentication)
+    // yapmış birine ait.
+    match /finteclub/shared_state {
+      allow read: if true;
+      allow create: if true;
+      allow update: if request.resource.data.size() < 60
+        && (!('applications' in request.resource.data) ||
+            (request.resource.data.applications is list && request.resource.data.applications.size() < 3000))
+        && (!('zirveRegistrations' in request.resource.data) ||
+            (request.resource.data.zirveRegistrations is list && request.resource.data.zirveRegistrations.size() < 3000));
+      allow delete: if request.auth != null;
+    }
+
+    // ── finteclub/oplab_activity, finteclub/oplab_live_portfolio ───────
+    // OptiPulseLab'daki doğrulanmış (verifyToken'ı geçerli) yarışmacılar bu
+    // belgelere kimlik doğrulaması olmadan yazıyor (OPLab tarafında admin
+    // girişi kavramı yok) — düşük hassasiyetli, kendi kendine bildirilen
+    // aktivite/portföy verisi. Yine de belge boyutunu makul tutuyoruz.
+    match /finteclub/oplab_activity {
+      allow read: if true;
+      allow write: if request.resource.data.size() < 20;
+      allow delete: if request.auth != null;
+    }
+    match /finteclub/oplab_live_portfolio {
+      allow read: if true;
+      allow write: if request.resource.data.size() < 20;
+      allow delete: if request.auth != null;
+    }
+
+    // ── finteclub/ altında tanımlı olmayan her şey ──────────────────────
+    // (Örn. biri konsoldan yeni, rastgele bir belge oluşturmaya çalışırsa.)
+    // Varsayılan olarak KAPALI — sadece admin girişi yapmış biri yazabilir.
+    match /finteclub/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Bu üç belge dışında finteclub koleksiyonunda (veya başka bir
+    // koleksiyonda) hiçbir şey yok; tanımsız her yol varsayılan olarak
+    // reddedilir (Firestore güvenlik kurallarının varsayılan davranışı).
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   NOT — BİLİNEN, KASITLI OLARAK KAPSAM DIŞI BIRAKILAN AÇIK
+   ════════════════════════════════════════════════════════════════════
+   Bu kurallar "applications" ve "zirveRegistrations" alanlarının İÇİNDEKİ
+   tek tek öğeleri (ör. bir başvurunun status'unu 'onayli' yapmak ya da
+   kendi verifyToken'ını uydurmak) doğrulayamıyor — Firestore güvenlik
+   kuralları, tek bir belge içindeki bir dizinin belirli bir öğesinin
+   değişip değişmediğini pratikte doğrulayamaz (dizi/liste alanları kural
+   motorunda "hepsi ya da hiçbiri" şeklinde değerlendirilir).
+
+   Yani teorik olarak biri tarayıcı konsolundan doğrudan Firestore'a yazıp
+   kendi sahte başvurusunu "onaylı" yapabilir ve kendi verifyToken'ını
+   seçebilir. Bunu TAMAMEN kapatmanın doğru/kalıcı yolu, başvuruları tek
+   bir paylaşılan belge içindeki bir diziden, her başvurunun kendi
+   belgesi olduğu bir ALT KOLEKSİYONA taşımaktır (finteclub_applications/
+   {applicationId}) — bu şekilde Firestore kuralları her belge için ayrı
+   ayrı "herkes OLUŞTURABİLİR ama sadece admin status/verifyToken
+   GÜNCELLEYEBİLİR" mantığını uygulayabilir. Bu, mevcut admin.html/
+   index.html'deki her applications erişimini (dizi → alt koleksiyon)
+   güncellemeyi gerektiren ayrı, daha büyük bir değişiklik olduğu için bu
+   turda kapsam dışı bırakıldı — istenirse ayrı bir adım olarak yapılabilir.
+   ════════════════════════════════════════════════════════════════════ */

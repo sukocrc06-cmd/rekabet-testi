@@ -5,15 +5,21 @@
    OPLab'a geldiklerinde profil panelinde "✓ FinteLig Yarışmacısı" rozetiyle
    görünmesini sağlar. Doğrulama, FinTeClub'ın (index.html/admin.html) zaten
    kullandığı AYNI Firebase Firestore veritabanına (finteclub/shared_state
-   belgesi) karşı yapılır — sahte bir e-posta veya URL parametresiyle rozet
-   kazanılamaz, admin panelinde gerçekten "onaylı" (status: 'onayli') bir
-   başvuru olması gerekir.
+   belgesi) karşı yapılır.
+
+   (Doğrulama sağlamlaştırması) İLK SÜRÜMDE doğrulama e-posta adresine karşı
+   yapılıyordu — bu, birinin e-postasını bilen/tahmin eden herkesin onun
+   rozetini "çalabilmesi" anlamına geliyordu (e-posta genelde gizli bir bilgi
+   değildir). Artık doğrulama, admin bir başvuruyu onayladığı ANDA üretilen
+   rastgele ve tahmin edilemez bir "verifyToken" değerine karşı yapılıyor —
+   e-posta artık bir doğrulama sırrı olarak KULLANILMIYOR, sadece görüntüleme/
+   aktivite kaydı amacıyla saklanıyor.
 
    Nasıl tetiklenir:
-   1) FinTeClub'dan "OPLab'a Git" ile gelindiyse, e-posta URL'ye otomatik
-      eklenir (?ftc_email=...) ve doğrulama sayfa açılır açılmaz başlar.
+   1) FinTeClub'dan "OPLab'a Git" ile gelindiyse, doğrulama kodu URL'ye
+      otomatik eklenir (?ftc_token=...) ve doğrulama sayfa açılır açılmaz başlar.
    2) Doğrudan/bookmark ile gelindiyse, kullanıcı profil panelindeki
-      "FinteLig Doğrulama — E-posta" alanına kendi e-postasını yazarak
+      "FinteLig Doğrulama — Kod" alanına FinTeClub'dan aldığı kodu yapıştırarak
       kendi kendine doğrulayabilir.
    Her iki yol da AYNI attemptVerification() fonksiyonundan geçer.
 
@@ -141,9 +147,15 @@
         });
     }
 
-    function attemptVerification(rawEmail) {
-        var email = (rawEmail || '').trim().toLowerCase();
-        if (!email) {
+    // (Doğrulama sağlamlaştırması) Önceden burada e-posta karşılaştırılıyordu —
+    // e-posta genelde tahmin edilebilir/bilinebilir bir değer olduğu için,
+    // birinin e-postasını bilmek onun rozetini çalmaya yetiyordu. Artık admin
+    // onayı anında üretilen, tahmin edilemez bir verifyToken'a karşı
+    // doğrulama yapılıyor — token URL'de (?ftc_token=) veya kullanıcının elle
+    // yapıştırdığı "Doğrulama Kodu" alanında taşınır.
+    function attemptVerification(rawToken) {
+        var token = (rawToken || '').trim();
+        if (!token) {
             writeCachedVerify(null);
             setBadgeVisible(false);
             setVerifyStatus('', null);
@@ -156,10 +168,10 @@
         }
         var apps = lastSharedData.applications || [];
         var match = apps.filter(function (a) {
-            return (a.email || '').toLowerCase() === email && a.status === 'onayli';
+            return a.verifyToken && a.verifyToken === token && a.status === 'onayli';
         })[0];
         if (match) {
-            writeCachedVerify({ id: match.id, name: match.name, email: match.email });
+            writeCachedVerify({ id: match.id, name: match.name, email: match.email, token: match.verifyToken });
             setBadgeVisible(true);
             setVerifyStatus('✓ Doğrulandı — ' + match.name, 'ok');
             applyVerifiedProfile(match.name);
@@ -168,7 +180,7 @@
         } else {
             writeCachedVerify(null);
             setBadgeVisible(false);
-            setVerifyStatus('Bu e-posta ile onaylı bir FinteLig başvurusu bulunamadı.', 'error');
+            setVerifyStatus('Bu kodla onaylı bir FinteLig başvurusu bulunamadı. Kodu FinTeClub “Başvuru Durumu Sorgula” sonucundan kopyaladığından emin ol.', 'error');
             verifiedApp = null;
         }
     }
@@ -260,20 +272,20 @@
         gate.classList.toggle('hidden', enabled);
     }
 
-    function getUrlEmail() {
+    function getUrlToken() {
         try {
             var params = new URLSearchParams(window.location.search);
-            return (params.get('ftc_email') || '').trim();
+            return (params.get('ftc_token') || '').trim();
         } catch (e) { return ''; }
     }
 
     function init() {
-        var emailInput = byId('ftc-email-input');
+        var tokenInput = byId('ftc-email-input');
         var cached = readCachedVerify();
-        var urlEmail = getUrlEmail();
-        var initialEmail = urlEmail || (cached && cached.email) || '';
+        var urlToken = getUrlToken();
+        var initialToken = urlToken || (cached && cached.token) || '';
 
-        if (emailInput && initialEmail) emailInput.value = initialEmail;
+        if (tokenInput && initialToken) tokenInput.value = initialToken;
 
         // İyimser UI: Firestore cevabı gelmeden önce, önceki oturumdan
         // doğrulanmış bir durum varsa rozeti hemen göster (yanıp sönmeyi/
@@ -289,17 +301,17 @@
         function scheduleVerify() {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(function () {
-                attemptVerification(emailInput ? emailInput.value : '');
+                attemptVerification(tokenInput ? tokenInput.value : '');
             }, 500);
         }
-        if (emailInput) emailInput.addEventListener('input', scheduleVerify);
+        if (tokenInput) tokenInput.addEventListener('input', scheduleVerify);
 
         if (FIREBASE_ENABLED && fsSharedDoc) {
             fsSharedDoc.onSnapshot(function (doc) {
                 lastSharedData = doc.exists ? doc.data() : null;
                 updateAccessGate();
-                var currentEmail = emailInput ? emailInput.value : initialEmail;
-                if (currentEmail) attemptVerification(currentEmail);
+                var currentToken = tokenInput ? tokenInput.value : initialToken;
+                if (currentToken) attemptVerification(currentToken);
             }, function (err) {
                 console.warn('FinTeClub verisi dinlenemedi.', err);
                 updateAccessGate();
@@ -315,7 +327,7 @@
             // Firebase yok/engelli — kilit varsayılan AÇIK, canlı doğrulama pasif
             // (yalnızca yukarıdaki önbellekli/iyimser rozet gösterimi geçerli).
             updateAccessGate();
-            if (initialEmail && !cached) {
+            if (initialToken && !cached) {
                 setVerifyStatus('Doğrulama şu anda kullanılamıyor (bağlantı yok).', 'pending');
             }
         }
