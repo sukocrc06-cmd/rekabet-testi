@@ -60,6 +60,7 @@
     var fsSharedDoc = null;
     var fsActivityDoc = null;
     var fsPortfolioDoc = null;
+    var fsUserPortfoliosDoc = null;
     var ftcAuth = null;
 
     if (FIREBASE_ENABLED) {
@@ -74,6 +75,16 @@
             // Doğrulanmış her yarışmacının anlık bakiye/özkaynak/açık pozisyon
             // özetini bu belgeye periyodik olarak yazıyoruz — bkz. pushPortfolioSnapshot().
             fsPortfolioDoc = fs.collection('finteclub').doc('oplab_live_portfolio');
+            // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) fsPortfolioDoc
+            // yukarısı SADECE admin panelinin izleme ekranı için hafif bir özet
+            // ("bakiye/özkaynak") — kimlik doğrulaması yapılmış bir kullanıcının
+            // GERÇEK portföyünü (bakiye/pozisyonlar/geçmiş) hiçbir yerde
+            // saklamıyordu, o SADECE o cihazın localStorage'ındaydı. Bu belge
+            // artık kimlik (verifiedApp.id) bazında TAM portföyün TEK doğru
+            // kaynağı — bir yarışmacı telefonda işlem yapıp PC'de açtığında
+            // bakiyesinin 100.000'e "sıfırlanmış" görünmesinin kök nedeni
+            // buydu (bkz. hydratePortfolioFromCloudIfNeeded/pushFullPortfolioToCloud).
+            fsUserPortfoliosDoc = fs.collection('finteclub').doc('oplab_user_portfolios');
             // (Doğrulama sağlamlaştırması, 3. tur) Aynı 'ftcBridge' app instance'ı
             // üzerinden Authentication — FinTeClub'ın başvuru formunda oluşturulan
             // hesaplarla AYNI Firebase projesi/kullanıcı havuzuna bakıyor.
@@ -110,11 +121,22 @@
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_PUSH_INTERVAL_MS = 20000;
+    // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) DEVICE_ID_KEY:
+    // bu tarayıcıyı/cihazı kalıcı olarak tanımlayan rastgele bir id — bir
+    // cihazın bulutta gördüğü son kaydın KENDİ gönderdiği kayıt olup
+    // olmadığını anlamak için (öyleyse kendi verisini kendine geri
+    // yükleyip gereksiz sayfa yenilemesi yapmaması gerekir).
+    // PORTFOLIO_CLOUD_SYNC_KEY: bu cihaza en son UYGULANAN bulut sürümünün
+    // zaman damgası — aynı sürümü tekrar tekrar uygulayıp durmadan
+    // (reload döngüsü) emin olmak için.
+    var DEVICE_ID_KEY = 'optipulselab_device_id_v1';
+    var PORTFOLIO_CLOUD_SYNC_KEY = 'optipulselab_portfolio_cloud_sync_v1';
 
     var lastSharedData = null;
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
     var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
+    var hydrationCheckedThisSession = false; // bulut->yerel kontrolü sayfa yüklemesi başına SADECE BİR KEZ yapılır
     // (17 Ağustos 2026 düzeltmesi) Kullanıcının açık isteği: modal HER
     // AÇILIŞTA gösterilsin — daha önce "devam et" denmiş olması ya da
     // kullanıcının zaten oturum açmış olması modalı ATLAMASIN. Bu yüzden
@@ -244,6 +266,16 @@
             logActivity(match);
             verifiedApp = { id: match.id, name: match.name, email: match.email };
             showModalWelcomeAndClose(match.name);
+            // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) Bu
+            // kimlik için bulutta bu cihazdan FARKLI/daha güncel bir portföy
+            // var mı diye SADECE bu sayfa yüklemesinde bir kez kontrol et —
+            // checkApplicationStatus() birden çok tetiklenebildiği için
+            // (bkz. hydrationCheckedThisSession tanımı) tekrar tekrar kontrol
+            // edip gereksiz yenileme döngüsüne girmeyelim.
+            if (!hydrationCheckedThisSession) {
+                hydrationCheckedThisSession = true;
+                hydratePortfolioFromCloudIfNeeded();
+            }
         } else {
             setBadgeVisible(false);
             setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
@@ -358,6 +390,101 @@
         };
         fsPortfolioDoc.set(payload, { merge: true }).catch(function (e) {
             console.warn('OPLab canlı portföy verisi Firestore\'a yazılamadı.', e);
+        });
+
+        // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) Yukarısı
+        // SADECE admin'in izlemesi için özet gönderiyor — asıl kalıcı/gerçek
+        // portföyü (bakiye/pozisyonlar/geçmiş) de AYNI anda kimlik bazlı
+        // bulut kaydına yazıyoruz, böylece başka bir cihaz bunu okuyup
+        // kendine uygulayabilir.
+        pushFullPortfolioToCloud();
+    }
+
+    // Bu cihazı kalıcı olarak tanımlayan rastgele bir id — bkz. DEVICE_ID_KEY
+    // yorumundaki açıklama.
+    function getDeviceId() {
+        try {
+            var id = localStorage.getItem(DEVICE_ID_KEY);
+            if (!id) {
+                id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem(DEVICE_ID_KEY, id);
+            }
+            return id;
+        } catch (e) { return 'dev_unknown_' + Math.random().toString(36).slice(2, 10); }
+    }
+
+    // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) tradingEngine.js'in
+    // localStorage'da tuttuğu TAM portföyü (bakiye/pozisyonlar/geçmiş —
+    // computeLightPortfolioSnapshot'ın admin için ürettiği hafif özetten
+    // FARKLI olarak burada hiçbir alan atlanmıyor/kısaltılmıyor, tradingEngine.js
+    // sayfa yeniden yüklendiğinde bunu doğrudan geri yükleyebilsin) kimlik
+    // bazlı ayrı bir belgeye yazar. Bu, "bir yarışmacı telefonda işlem
+    // yapıyor ama PC'de açınca bakiyesi 100.000'e sıfırlanmış görünüyor"
+    // hatasının kök çözümü — artık TEK doğru kaynak bu belge, localStorage
+    // sadece hızlı yerel önbellek.
+    function pushFullPortfolioToCloud() {
+        if (!fsUserPortfoliosDoc || !verifiedApp) return;
+        var portfolio = readLocalPortfolio();
+        if (!portfolio || typeof portfolio.balance !== 'number') return;
+        var nowIso = new Date().toISOString();
+        var payload = { users: {} };
+        payload.users[String(verifiedApp.id)] = {
+            name: verifiedApp.name || '',
+            email: verifiedApp.email || '',
+            portfolio: portfolio,
+            deviceId: getDeviceId(),
+            updatedAt: nowIso
+        };
+        return fsUserPortfoliosDoc.set(payload, { merge: true }).then(function () {
+            try { localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, nowIso); } catch (e) { /* private mode */ }
+        }).catch(function (e) {
+            console.warn('Portföy bulut senkronizasyonu başarısız (oplab_user_portfolios).', e);
+        });
+    }
+
+    // Bir yarışmacı doğrulandığında (bu sayfa yüklemesinde İLK KEZ) bulutta
+    // bu kimlik için gerçekten daha güncel/farklı bir portföy var mı diye
+    // bakar. Varsa VE bu kaydı gönderen cihaz bu cihazın kendisi DEĞİLSE,
+    // yerel localStorage'ı bulut sürümüyle değiştirip sayfayı yeniler —
+    // tradingEngine.js bir sonraki init()'inde doğru/gerçek portföyü
+    // (bakiye dahil) yükler. Bulutta hiç kayıt yoksa (bu kullanıcı için
+    // hiçbir cihazda henüz push olmadı), yereldekini bulut için başlangıç
+    // kaydı olarak gönderir.
+    //
+    // BİLİNEN SINIR: aynı hesap AYNI ANDA iki cihazda açıksa (örn. hem
+    // telefon hem PC canlı işlem yapıyor), gerçek zamanlı çakışma çözümü
+    // yapılmıyor — hangi cihaz en son push ederse o kazanır. Yarışma
+    // sırasında her yarışmacının TEK cihazdan işlem yapması önerilir; bu
+    // düzeltme asıl bildirilen hatayı (yeni cihazda açınca sıfırlanmış
+    // görünmesi) ve bundan kaynaklanan "değerler rastgele değişiyor" (iki
+    // farklı cihazın birbirinin üstüne yazması) belirtisini çözüyor.
+    function hydratePortfolioFromCloudIfNeeded() {
+        if (!fsUserPortfoliosDoc || !verifiedApp) return;
+        return fsUserPortfoliosDoc.get().then(function (doc) {
+            if (!doc.exists) { return pushFullPortfolioToCloud(); }
+            var data = doc.data() || {};
+            var record = (data.users || {})[String(verifiedApp.id)];
+            if (!record || !record.portfolio) { return pushFullPortfolioToCloud(); }
+
+            // Bulut kaydı bu cihazın kendi son gönderdiği kayıtsa yapacak
+            // bir şey yok.
+            if (record.deviceId === getDeviceId()) return;
+
+            var lastApplied = null;
+            try { lastApplied = localStorage.getItem(PORTFOLIO_CLOUD_SYNC_KEY); } catch (e) { /* private mode */ }
+            if (lastApplied && record.updatedAt && lastApplied === record.updatedAt) return;
+
+            try {
+                localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(record.portfolio));
+                if (record.updatedAt) localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, record.updatedAt);
+            } catch (e) { return; /* private mode / quota — güvenle vazgeç, yerelde kalsın */ }
+
+            if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
+                window.TradingEngine.showToast('Portföyün başka bir cihazdan senkronize edildi, sayfa yenileniyor...');
+            }
+            setTimeout(function () { location.reload(); }, 900);
+        }).catch(function (e) {
+            console.warn('Bulut portföy verisi okunamadı, yerel veriyle devam ediliyor.', e);
         });
     }
 
@@ -478,4 +605,16 @@
     } else {
         init();
     }
+
+    // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) tradingEngine.js'teki
+    // debugGet*/debugIs* ailesiyle AYNI amaç: hiçbir üretim kodu bunlara
+    // bağımlı değil, sadece Playwright testlerinde çok-cihazlı senkronizasyonu
+    // (bulut<->yerel) gerçek zamanlayıcıları/reload'ı beklemeden doğrudan
+    // tetikleyip doğrulamak için.
+    window.__ftcBridgeDebug = {
+        pushFullPortfolioToCloud: function () { return pushFullPortfolioToCloud(); },
+        hydratePortfolioFromCloudIfNeeded: function () { return hydratePortfolioFromCloudIfNeeded(); },
+        getDeviceId: function () { return getDeviceId(); },
+        getVerifiedApp: function () { return verifiedApp; }
+    };
 })();
