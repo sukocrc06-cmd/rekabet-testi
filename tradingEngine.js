@@ -38,6 +38,27 @@ const TradingEngine = (() => {
     let DC = null;
     let priceProfiles = {};
     let portfolio = null;
+
+    /* (5 Ağustos 2026 — "giriş yapmadan önce bakiye hep 0 olsun, sadece
+       gezebilsin; giriş yapanların gerçek bakiyesi gözüksün") FinTeClub
+       girişi (finteclubBridge.js) yapılmadan bu demo portföyün bakiyesi
+       her yerde (header, risk hesaplayıcı, pozisyon açma marjı kontrolü)
+       0 olarak GÖRÜNÜR ve KULLANILIR — gerçek portfolio.balance
+       localStorage'da olduğu gibi korunur, sadece giriş yapılana kadar
+       erişilemez/görünmez olur. Giriş yapılınca gerçek değer anında
+       geri döner. finteclubBridge.js hiç yüklenemezse (CDN engeli vb.)
+       kapı devre dışı kalır ve eski davranışa (bakiye her zaman gerçek)
+       sessizce dönülür — bir altyapı sorunu gerçek kullanıcıyı asla
+       kilitlememeli. */
+    function isFtcGateActive() {
+        return !!(window.FTC_AUTH_STATE && window.FTC_AUTH_STATE.available);
+    }
+    function isFtcLoggedIn() {
+        return !isFtcGateActive() || !!window.FTC_AUTH_STATE.loggedIn;
+    }
+    function effectiveBalance() {
+        return isFtcLoggedIn() ? portfolio.balance : 0;
+    }
     // Set<string> — kullanıcının izleme listesindeki semboller. İlk çalıştırmada
     // (localStorage'da hiç kayıt yoksa) TÜM BIST100 ile başlatılıyor, böylece
     // mevcut kullanıcılar için görünüm ANINDA değişmiyor — yalnızca bundan sonra
@@ -664,7 +685,7 @@ const TradingEngine = (() => {
                 else shortValue += pos.qty * current;
             });
         });
-        return portfolio.balance + longValue - shortValue;
+        return effectiveBalance() + longValue - shortValue;
     }
 
     function sampleEquity() {
@@ -2416,12 +2437,12 @@ const TradingEngine = (() => {
             return;
         }
 
-        const riskAmount = portfolio.balance * (riskPct / 100);
+        const riskAmount = effectiveBalance() * (riskPct / 100);
         let qty = Math.floor(riskAmount / perShareRisk);
 
         const leverage = Math.max(1, Number(state.leverage) || 1);
         const commissionPct = getCommissionPct();
-        const maxQtyByMargin = Math.floor(portfolio.balance / (price * ((1 / leverage) + (commissionPct / 100))));
+        const maxQtyByMargin = Math.floor(effectiveBalance() / (price * ((1 / leverage) + (commissionPct / 100))));
         let clamped = false;
         if (qty > maxQtyByMargin) {
             qty = Math.max(0, maxQtyByMargin);
@@ -2479,14 +2500,14 @@ const TradingEngine = (() => {
         const slPrice = slInput && slInput.value ? Number(slInput.value) : null;
         const price = effectivePrice();
 
-        if (!qty || qty <= 0 || !slPrice || slPrice <= 0 || !price || price <= 0 || !portfolio.balance) {
+        if (!qty || qty <= 0 || !slPrice || slPrice <= 0 || !price || price <= 0 || !effectiveBalance()) {
             previewEl.style.display = 'none';
             return;
         }
 
         const perShareRisk = Math.abs(price - slPrice);
         const riskAmount = perShareRisk * qty;
-        const riskPct = (riskAmount / portfolio.balance) * 100;
+        const riskPct = (riskAmount / effectiveBalance()) * 100;
 
         previewEl.style.display = '';
         previewEl.textContent = `Bu işlemde bakiyenizin yaklaşık %${riskPct.toFixed(2)}'sini (${fmtTRY(riskAmount)}) riske ediyorsunuz.`;
@@ -2611,7 +2632,7 @@ const TradingEngine = (() => {
             // Bakiyenin %pct'i kadarını TEMİNAT olarak kullan — kaldıraç
             // sayesinde aynı teminatla `leverage` katı kadar nominal
             // pozisyon açılabiliyor.
-            const usableMargin = portfolio.balance * (pct / 100);
+            const usableMargin = effectiveBalance() * (pct / 100);
             qty = Math.floor((usableMargin * leverage) / (price * (1 + (commissionPct / 100) * leverage)));
         } else {
             // (29 Temmuz 2026 — Madde 11) Ticket şu an hangi moddaysa (Normal
@@ -2622,7 +2643,7 @@ const TradingEngine = (() => {
             if (pos && pos.side === 'LONG') {
                 qty = Math.floor(pos.qty * (pct / 100));
             } else {
-                const usableMargin = portfolio.balance * (pct / 100);
+                const usableMargin = effectiveBalance() * (pct / 100);
                 qty = Math.floor((usableMargin * leverage) / price);
             }
         }
@@ -2886,7 +2907,7 @@ const TradingEngine = (() => {
         const estimatedMargin = estimateOrderMarginRequirement(state.activeSymbol, state.side, qty, currentPrice, state.leverage, state.market);
         const estimatedCommission = currentPrice * qty * (commissionPct / 100);
         const estimatedRequired = estimatedMargin + estimatedCommission;
-        if (estimatedRequired > portfolio.balance) {
+        if (estimatedRequired > effectiveBalance()) {
             const m = 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').';
             showToast(m);
             showTicketAlert(m, 'error');
@@ -3173,9 +3194,12 @@ const TradingEngine = (() => {
 
             const margin = (price * remainingQty) / requestedLeverage;
             const requiredBalance = margin + openCommission;
-            if (portfolio.balance < requiredBalance) {
+            if (effectiveBalance() < requiredBalance) {
                 savePortfolio();
-                return { ok: false, msg: 'Yetersiz demo bakiye (gereken teminat: ' + fmtTRY(requiredBalance) + ').' };
+                const msg = isFtcLoggedIn()
+                    ? 'Yetersiz demo bakiye (gereken teminat: ' + fmtTRY(requiredBalance) + ').'
+                    : 'İşlem açmak için önce FinteLig girişi yapmalısın (profil panelinden).';
+                return { ok: false, msg: msg };
             }
             portfolio.balance -= requiredBalance;
 
@@ -3787,9 +3811,9 @@ const TradingEngine = (() => {
                 positionsCount++;
             });
         });
-        const equity = portfolio.balance + usedMargin + openPnl;
+        const equity = effectiveBalance() + usedMargin + openPnl;
         return {
-            balance: portfolio.balance,
+            balance: effectiveBalance(),
             equity,
             openPnl,
             usedMargin,
@@ -3841,7 +3865,16 @@ const TradingEngine = (() => {
         const pnlEl = byId('qt-openpnl');
         const usedMarginEl = byId('qt-used-margin');
         const marginLevelEl = byId('qt-margin-level');
-        if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
+        if (headerBalEl) headerBalEl.textContent = fmtTRY(effectiveBalance());
+        // (5 Ağustos 2026) Giriş yapılmadan bakiye 0 görünüyor — sebepsiz
+        // "neden 0" kafa karışıklığını önlemek için pill'e açıklayıcı bir
+        // tooltip ekleniyor, sadece kapı aktifken ve giriş yapılmamışken.
+        const balancePillEl = byId('header-balance-pill');
+        if (balancePillEl) {
+            balancePillEl.title = (isFtcGateActive() && !isFtcLoggedIn())
+                ? 'Gerçek demo bakiyeni görmek ve işlem açmak için profil panelinden FinteLig girişi yap. Giriş yapmadan sadece gezinebilirsin.'
+                : '';
+        }
         // (29 Temmuz 2026 — Madde 8) Header'daki Toplam Varlık, bu fonksiyon
         // her çağrıldığında (işlem sonrası, fiyat tick'inde, SL/TP
         // değişiminde vb. — bkz. yukarıdaki çağrı noktaları) otomatik
@@ -4104,6 +4137,15 @@ const TradingEngine = (() => {
         renderPendingOcoOrders();
         updateAlertBadge();
         sampleEquity();
+
+        // (5 Ağustos 2026 — FinTeClub giriş kapısı) finteclubBridge.js'in
+        // giriş durumu ASENKRON belli oluyor (Firebase); giriş/çıkış
+        // gerçekleştiğinde ya da sayfa yüklenirken oturum bilgisi az sonra
+        // gelince bakiye/özkaynak gösterimi hemen buna göre güncellensin.
+        window.addEventListener('ftc-auth-changed', () => {
+            renderAccountSummary();
+            updateRiskPreview();
+        });
 
         setInterval(tickPrices, TICK_MS);
         setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);

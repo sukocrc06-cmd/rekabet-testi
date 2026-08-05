@@ -84,6 +84,29 @@
         }
     }
 
+    /* (5 Ağustos 2026 — "giriş yapmadan önce bakiye hep 0 olsun, sadece
+       gezebilsin; giriş yapanların gerçek bakiyesi gözüksün") tradingEngine.js
+       artık demo bakiyeyi/işlem yapma iznini burada tutulan GERÇEK giriş
+       durumuna göre kapı gibi kullanıyor. Bu obje BİLEREK script parse
+       edilir edilmez (DOMContentLoaded'dan, hatta init()'ten bile önce)
+       tanımlanıyor — script sırası yüzünden tradingEngine.js'in ilk
+       render'ı bu durumu okumadan önce çalışırsa, varsayılan "giriş
+       yapılmamış" (bakiye 0) kabul edilsin; gerçek durum (Firebase
+       kullanılamıyorsa YA DA az sonra onAuthStateChanged gelince) hemen
+       ardından 'ftc-auth-changed' event'iyle düzeltilir.
+       - available:false  → giriş sistemi hiç çalışmıyor (CDN engelli vb.)
+         Bu durumda tradingEngine.js ESKİ davranışa döner (bakiye her zaman
+         gerçek/kullanılabilir) — bir altyapı sorunu gerçek kullanıcıyı
+         asla yanlışlıkla kilitlememeli.
+       - available:true, loggedIn:false → giriş sistemi çalışıyor ama bu
+         ziyaretçi henüz giriş yapmadı → bakiye 0, sadece gezinebilir.
+       - available:true, loggedIn:true  → gerçek bakiye kullanılabilir. */
+    window.FTC_AUTH_STATE = {
+        available: !!(FIREBASE_ENABLED && ftcAuth),
+        loggedIn: false,
+        email: null
+    };
+
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_PUSH_INTERVAL_MS = 20000;
@@ -406,6 +429,11 @@
             if (ftcAuth) {
                 ftcAuth.onAuthStateChanged(function (user) {
                     currentAuthUser = user;
+                    // (bkz. yukarıdaki FTC_AUTH_STATE tanımı) tradingEngine.js'in
+                    // bakiye kapısını gerçek zamanlı güncellemesi için.
+                    window.FTC_AUTH_STATE.loggedIn = !!user;
+                    window.FTC_AUTH_STATE.email = user ? user.email : null;
+                    window.dispatchEvent(new CustomEvent('ftc-auth-changed', { detail: window.FTC_AUTH_STATE }));
                     syncLoginUI();
 
                     // (Modal her açılışta gösterilir) Bu karar, checkApplicationStatus()
