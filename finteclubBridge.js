@@ -61,6 +61,7 @@
     var fsActivityDoc = null;
     var fsPortfolioDoc = null;
     var fsUserPortfoliosDoc = null;
+    var fsBalanceCommandsDoc = null;
     var ftcAuth = null;
 
     if (FIREBASE_ENABLED) {
@@ -85,6 +86,14 @@
             // bakiyesinin 100.000'e "sıfırlanmış" görünmesinin kök nedeni
             // buydu (bkz. hydratePortfolioFromCloudIfNeeded/pushFullPortfolioToCloud).
             fsUserPortfoliosDoc = fs.collection('finteclub').doc('oplab_user_portfolios');
+            // (8 Ağustos 2026 — admin panelinden bakiye ayarlama) Admin panelinin
+            // "Kullanıcı Portföyleri" sayfasından bir yarışmacının bakiyesini
+            // manuel değiştirebilmesi için tek yönlü bir komut kanalı: admin
+            // buraya {commands: {<userId>: {newBalance, requestedAt}}} yazar,
+            // bu dosya gerçek zamanlı dinleyip (bkz. listenForBalanceCommands)
+            // kendi kimliğine ait bir komut görürse yerel bakiyeyi günceller ve
+            // uygulandığını (appliedAt) aynı belgeye geri yazar.
+            fsBalanceCommandsDoc = fs.collection('finteclub').doc('oplab_balance_commands');
             // (Doğrulama sağlamlaştırması, 3. tur) Aynı 'ftcBridge' app instance'ı
             // üzerinden Authentication — FinTeClub'ın başvuru formunda oluşturulan
             // hesaplarla AYNI Firebase projesi/kullanıcı havuzuna bakıyor.
@@ -120,7 +129,11 @@
 
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
-    var PORTFOLIO_PUSH_INTERVAL_MS = 20000;
+    // (8 Ağustos 2026 — "admin panelinde anlık/canlı veri istiyorum") önceden
+    // 20000ms'di; admin panelinin gerçekten "anlık" hissettirmesi için 5
+    // saniyeye düşürüldü. Firestore yazma maliyeti düşük (tek belge, merge)
+    // ve yarışmacı sayısı sınırlı olduğundan bu aralık güvenle desteklenir.
+    var PORTFOLIO_PUSH_INTERVAL_MS = 5000;
     // (6 Ağustos 2026 — çok cihazlı senkronizasyon düzeltmesi) DEVICE_ID_KEY:
     // bu tarayıcıyı/cihazı kalıcı olarak tanımlayan rastgele bir id — bir
     // cihazın bulutta gördüğü son kaydın KENDİ gönderdiği kayıt olup
@@ -131,12 +144,18 @@
     // (reload döngüsü) emin olmak için.
     var DEVICE_ID_KEY = 'optipulselab_device_id_v1';
     var PORTFOLIO_CLOUD_SYNC_KEY = 'optipulselab_portfolio_cloud_sync_v1';
+    // (8 Ağustos 2026 — admin panelinden bakiye ayarlama) bu cihaza en son
+    // UYGULANAN bakiye komutunun requestedAt zaman damgası — aynı komutu
+    // tekrar tekrar uygulayıp durmadan (reload sonrası onSnapshot yeniden
+    // tetiklenebilir) emin olmak için.
+    var BALANCE_CMD_APPLIED_KEY = 'optipulselab_balance_cmd_applied_v1';
 
     var lastSharedData = null;
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
     var verifiedApp = null; // { id, name, email } — doğrulama başarılı olduğunda dolar, portföy push'u bunu kullanır
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
     var hydrationCheckedThisSession = false; // bulut->yerel kontrolü sayfa yüklemesi başına SADECE BİR KEZ yapılır
+    var balanceListenerAttached = false; // oplab_balance_commands dinleyicisi sadece bir kez bağlanır
     // (17 Ağustos 2026 düzeltmesi) Kullanıcının açık isteği: modal HER
     // AÇILIŞTA gösterilsin — daha önce "devam et" denmiş olması ya da
     // kullanıcının zaten oturum açmış olması modalı ATLAMASIN. Bu yüzden
@@ -276,6 +295,7 @@
                 hydrationCheckedThisSession = true;
                 hydratePortfolioFromCloudIfNeeded();
             }
+            listenForBalanceCommands();
         } else {
             setBadgeVisible(false);
             setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
@@ -364,17 +384,42 @@
             });
         });
         var equity = portfolio.balance + usedMargin + openPnl;
+
+        // (8 Ağustos 2026 — "admin panelinde herşeyi görebilmem") admin artık
+        // sadece açık pozisyonları değil, bekleyen (OCO) emirleri ve en son
+        // kapanmış/açılmış işlemleri de görebiliyor — belge boyutu için her
+        // ikisi de son 10 kayıtla sınırlı (asıl/tam veri zaten localStorage'da
+        // ve pushFullPortfolioToCloud() ile oplab_user_portfolios'ta duruyor,
+        // burası SADECE admin'in canlı izleme ekranı için özet).
+        var pendingOut = (portfolio.pendingOrders || []).slice(0, 10).map(function (o) {
+            return { symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'NORMAL' };
+        }).concat((portfolio.viopPendingOrders || []).slice(0, 10).map(function (o) {
+            return { symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'VIOP' };
+        }));
+        var histOut = (portfolio.history || []).slice(0, 10).map(function (h) {
+            return { symbol: h.symbol, side: h.side, qty: h.qty, price: h.price, type: h.type, pnl: h.pnl, ts: h.ts, market: 'NORMAL' };
+        }).concat((portfolio.viopHistory || []).slice(0, 10).map(function (h) {
+            return { symbol: h.symbol, side: h.side, qty: h.qty, price: h.price, type: h.type, pnl: h.pnl, ts: h.ts, market: 'VIOP' };
+        })).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }).slice(0, 10);
+
         return {
             balance: portfolio.balance,
             equity: equity,
             openPnl: openPnl,
             positionsCount: positionsCount,
-            positions: positionsOut
+            positions: positionsOut,
+            pendingOrders: pendingOut,
+            recentTrades: histOut
         };
     }
 
     function pushPortfolioSnapshot() {
-        if (!fsPortfolioDoc || !verifiedApp || document.hidden) return;
+        // (8 Ağustos 2026 — "admin panelinde anlık/canlı veri istiyorum") daha
+        // önce sekme arka plandaysa (document.hidden) push atlanıyordu — bu,
+        // bir yarışmacı sekmeyi arka planda bıraktığında admin ekranının
+        // "donması" ve tekrar öne gelince aniden zıplaması gibi görünüyordu.
+        // Artık sekme arka planda da olsa periyodik push devam ediyor.
+        if (!fsPortfolioDoc || !verifiedApp) return;
         var snap = computeLightPortfolioSnapshot();
         if (!snap) return;
         var payload = { competitors: {} };
@@ -386,6 +431,8 @@
             openPnl: snap.openPnl,
             positionsCount: snap.positionsCount,
             positions: snap.positions,
+            pendingOrders: snap.pendingOrders,
+            recentTrades: snap.recentTrades,
             updatedAt: new Date().toISOString()
         };
         fsPortfolioDoc.set(payload, { merge: true }).catch(function (e) {
@@ -485,6 +532,64 @@
             setTimeout(function () { location.reload(); }, 900);
         }).catch(function (e) {
             console.warn('Bulut portföy verisi okunamadı, yerel veriyle devam ediliyor.', e);
+        });
+    }
+
+    // (8 Ağustos 2026 — "herkesin bakiyesini ayarlayabileyim") Admin panelinin
+    // Kullanıcı Portföyleri sayfasından gönderdiği bir bakiye-güncelleme
+    // komutunu yereldeki gerçek portföye uygular. tradingEngine.js'in kendi
+    // hesapladığı özkaynak/marj mantığına HİÇ dokunmuyoruz — sadece onun
+    // localStorage'da tuttuğu portföyün "balance" (nakit) alanını değiştirip
+    // sayfayı yeniliyoruz, tradingEngine.js bir sonraki init()'inde bunu
+    // doğrudan gerçek/güncel bakiye olarak okur.
+    function applyBalanceCommand(newBalance, requestedAt) {
+        var portfolio = readLocalPortfolio();
+        if (!portfolio) return;
+        portfolio.balance = newBalance;
+        try {
+            localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(portfolio));
+            localStorage.setItem(BALANCE_CMD_APPLIED_KEY, requestedAt);
+        } catch (e) { return; /* private mode / quota — güvenle vazgeç */ }
+
+        // Admin'e "uygulandı" bilgisini geri yaz — aynı komut kaydına
+        // merge:true ile appliedAt eklenir, newBalance/requestedAt SİLİNMEZ
+        // (Firestore'un iç içe alan birleştirme davranışı, bu dosyadaki diğer
+        // tüm push fonksiyonlarında da aynı şekilde kullanılıyor).
+        if (fsBalanceCommandsDoc && verifiedApp) {
+            var ack = { commands: {} };
+            ack.commands[String(verifiedApp.id)] = { appliedAt: new Date().toISOString(), appliedDeviceId: getDeviceId() };
+            fsBalanceCommandsDoc.set(ack, { merge: true }).catch(function (e) {
+                console.warn('Bakiye güncellemesi onaylanamadı (appliedAt yazılamadı).', e);
+            });
+        }
+        // Admin'in canlı izleme ekranı yeni bakiyeyi sayfa yenilenmeden ÖNCE
+        // görsün diye hemen bir özet daha gönderiyoruz.
+        pushFullPortfolioToCloud();
+
+        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
+            window.TradingEngine.showToast('Bakiyeniz yönetici tarafından güncellendi, sayfa yenileniyor...');
+        }
+        setTimeout(function () { location.reload(); }, 900);
+    }
+
+    // Doğrulanmış kimlik bilindiği anda (ve sadece bir kez) oplab_balance_commands
+    // belgesini GERÇEK ZAMANLI dinlemeye başlar — hydratePortfolioFromCloudIfNeeded
+    // gibi tek seferlik bir kontrol DEĞİL, çünkü admin bakiyeyi kullanıcı
+    // sayfadayken HERHANGİ bir anda değiştirebilir.
+    function listenForBalanceCommands() {
+        if (!fsBalanceCommandsDoc || !verifiedApp || balanceListenerAttached) return;
+        balanceListenerAttached = true;
+        fsBalanceCommandsDoc.onSnapshot(function (doc) {
+            if (!doc.exists || !verifiedApp) return;
+            var data = doc.data() || {};
+            var cmd = (data.commands || {})[String(verifiedApp.id)];
+            if (!cmd || typeof cmd.newBalance !== 'number' || !cmd.requestedAt) return;
+            var lastApplied = null;
+            try { lastApplied = localStorage.getItem(BALANCE_CMD_APPLIED_KEY); } catch (e) { /* private mode */ }
+            if (lastApplied === cmd.requestedAt) return; // bu komut zaten uygulandı
+            applyBalanceCommand(cmd.newBalance, cmd.requestedAt);
+        }, function (e) {
+            console.warn('Bakiye komut kanalı dinlenemedi.', e);
         });
     }
 
@@ -615,6 +720,10 @@
         pushFullPortfolioToCloud: function () { return pushFullPortfolioToCloud(); },
         hydratePortfolioFromCloudIfNeeded: function () { return hydratePortfolioFromCloudIfNeeded(); },
         getDeviceId: function () { return getDeviceId(); },
-        getVerifiedApp: function () { return verifiedApp; }
+        getVerifiedApp: function () { return verifiedApp; },
+        applyBalanceCommand: function (newBalance, requestedAt) { return applyBalanceCommand(newBalance, requestedAt); },
+        listenForBalanceCommands: function () { return listenForBalanceCommands(); },
+        pushPortfolioSnapshot: function () { return pushPortfolioSnapshot(); },
+        computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); }
     };
 })();
