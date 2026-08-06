@@ -535,26 +535,56 @@
         });
     }
 
-    // (8 Ağustos 2026 — "herkesin bakiyesini ayarlayabileyim") Admin panelinin
-    // Kullanıcı Portföyleri sayfasından gönderdiği bir bakiye-güncelleme
-    // komutunu yereldeki gerçek portföye uygular. tradingEngine.js'in kendi
-    // hesapladığı özkaynak/marj mantığına HİÇ dokunmuyoruz — sadece onun
-    // localStorage'da tuttuğu portföyün "balance" (nakit) alanını değiştirip
-    // sayfayı yeniliyoruz, tradingEngine.js bir sonraki init()'inde bunu
-    // doğrudan gerçek/güncel bakiye olarak okur.
-    function applyBalanceCommand(newBalance, requestedAt) {
-        var portfolio = readLocalPortfolio();
-        if (!portfolio) return;
-        portfolio.balance = newBalance;
-        try {
-            localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(portfolio));
-            localStorage.setItem(BALANCE_CMD_APPLIED_KEY, requestedAt);
-        } catch (e) { return; /* private mode / quota — güvenle vazgeç */ }
+    // (8 Ağustos 2026 — "anında olsun, sayfa yenilenmeden") Admin panelinin
+    // Kullanıcı Portföyleri sayfasından gönderdiği bir bakiye-güncelleme YA DA
+    // portföy-sıfırlama komutunu uygular. ÖNCEKİ tasarım localStorage'ı
+    // doğrudan yazıp sayfayı yeniliyordu — bu her zaman görünür bir gecikme/
+    // "flash" yaratıyordu ("bir iki saniye içinde olacak" şikayeti buydu).
+    // Artık tradingEngine.js'in kendi dışa açtığı (ve zaten var olan "Sıfırla"
+    // butonunun da kullandığı, test edilmiş) setBalance()/resetPortfolio()
+    // fonksiyonlarını DOĞRUDAN çağırıyoruz — bunlar SENKRON çalışır, anında
+    // ekranı güncelleyip kaydeder, sayfa yenilemeye hiç gerek kalmaz.
+    // window.TradingEngine her zaman bu dosyadan ÖNCE yüklendiği için (bkz.
+    // index.html script sırası) normalde hep mevcuttur; olağanüstü bir
+    // durumda (script sırası bozulursa) yine de veri kaybolmasın diye eski
+    // localStorage+reload yoluna güvenle geri dönülür.
+    function applyBalanceCommand(cmd, requestedAt) {
+        var applied = false;
+        if (cmd.reset === true) {
+            if (window.TradingEngine && typeof window.TradingEngine.resetPortfolio === 'function') {
+                window.TradingEngine.resetPortfolio();
+                applied = true;
+            }
+        } else if (typeof cmd.newBalance === 'number') {
+            if (window.TradingEngine && typeof window.TradingEngine.setBalance === 'function') {
+                applied = window.TradingEngine.setBalance(cmd.newBalance) !== false;
+            }
+        }
+
+        if (!applied) {
+            // Yedek yol: tradingEngine.js henüz yüklenmemiş/API'si yoksa,
+            // eski (localStorage + reload) yöntemle uygula — hiçbir zaman
+            // sessizce vazgeçme.
+            var portfolio = readLocalPortfolio();
+            if (!portfolio) return;
+            if (cmd.reset === true) {
+                portfolio = { balance: 100000, positions: {}, history: [], pendingOrders: [], viopPositions: {}, viopHistory: [], viopPendingOrders: [] };
+            } else if (typeof cmd.newBalance === 'number') {
+                portfolio.balance = cmd.newBalance;
+            } else {
+                return;
+            }
+            try { localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(portfolio)); } catch (e) { return; }
+            setTimeout(function () { location.reload(); }, 300);
+        }
+
+        try { localStorage.setItem(BALANCE_CMD_APPLIED_KEY, requestedAt); } catch (e) { /* private mode */ }
 
         // Admin'e "uygulandı" bilgisini geri yaz — aynı komut kaydına
-        // merge:true ile appliedAt eklenir, newBalance/requestedAt SİLİNMEZ
-        // (Firestore'un iç içe alan birleştirme davranışı, bu dosyadaki diğer
-        // tüm push fonksiyonlarında da aynı şekilde kullanılıyor).
+        // merge:true ile appliedAt eklenir, newBalance/reset/requestedAt
+        // SİLİNMEZ (Firestore'un iç içe alan birleştirme davranışı, bu
+        // dosyadaki diğer tüm push fonksiyonlarında da aynı şekilde
+        // kullanılıyor).
         if (fsBalanceCommandsDoc && verifiedApp) {
             var ack = { commands: {} };
             ack.commands[String(verifiedApp.id)] = { appliedAt: new Date().toISOString(), appliedDeviceId: getDeviceId() };
@@ -562,14 +592,9 @@
                 console.warn('Bakiye güncellemesi onaylanamadı (appliedAt yazılamadı).', e);
             });
         }
-        // Admin'in canlı izleme ekranı yeni bakiyeyi sayfa yenilenmeden ÖNCE
-        // görsün diye hemen bir özet daha gönderiyoruz.
+        // Admin'in canlı izleme ekranı yeni bakiyeyi/sıfırlanmış portföyü
+        // HEMEN görsün diye anında bir özet daha gönderiyoruz.
         pushFullPortfolioToCloud();
-
-        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
-            window.TradingEngine.showToast('Bakiyeniz yönetici tarafından güncellendi, sayfa yenileniyor...');
-        }
-        setTimeout(function () { location.reload(); }, 900);
     }
 
     // Doğrulanmış kimlik bilindiği anda (ve sadece bir kez) oplab_balance_commands
@@ -583,11 +608,12 @@
             if (!doc.exists || !verifiedApp) return;
             var data = doc.data() || {};
             var cmd = (data.commands || {})[String(verifiedApp.id)];
-            if (!cmd || typeof cmd.newBalance !== 'number' || !cmd.requestedAt) return;
+            if (!cmd || !cmd.requestedAt) return;
+            if (cmd.reset !== true && typeof cmd.newBalance !== 'number') return;
             var lastApplied = null;
             try { lastApplied = localStorage.getItem(BALANCE_CMD_APPLIED_KEY); } catch (e) { /* private mode */ }
             if (lastApplied === cmd.requestedAt) return; // bu komut zaten uygulandı
-            applyBalanceCommand(cmd.newBalance, cmd.requestedAt);
+            applyBalanceCommand(cmd, cmd.requestedAt);
         }, function (e) {
             console.warn('Bakiye komut kanalı dinlenemedi.', e);
         });
@@ -721,7 +747,7 @@
         hydratePortfolioFromCloudIfNeeded: function () { return hydratePortfolioFromCloudIfNeeded(); },
         getDeviceId: function () { return getDeviceId(); },
         getVerifiedApp: function () { return verifiedApp; },
-        applyBalanceCommand: function (newBalance, requestedAt) { return applyBalanceCommand(newBalance, requestedAt); },
+        applyBalanceCommand: function (cmd, requestedAt) { return applyBalanceCommand(cmd, requestedAt); },
         listenForBalanceCommands: function () { return listenForBalanceCommands(); },
         pushPortfolioSnapshot: function () { return pushPortfolioSnapshot(); },
         computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); }

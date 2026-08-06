@@ -253,6 +253,25 @@ const TradingEngine = (() => {
         showToast('Portföy sıfırlandı: ' + fmtTRY(DEFAULT_BALANCE));
     }
 
+    // (8 Ağustos 2026 — admin panelinden ANLIK bakiye ayarlama) resetPortfolio()
+    // ile AYNI güvenli desen: sadece portfolio.balance'ı (nakit) değiştirir,
+    // pozisyonlara/geçmişe DOKUNMAZ, kaydeder ve ekranı hemen yeniden çizer.
+    // finteclubBridge.js bunu doğrudan çağırır — böylece admin'in bakiye
+    // komutu sayfa YENİDEN YÜKLENMEDEN, senkron olarak anında uygulanır
+    // (önceki tasarımda localStorage'a yazıp sayfayı yenilemek gerekiyordu,
+    // bu da her zaman görünür bir gecikme/"flash" yaratıyordu).
+    function setBalance(amount) {
+        const n = Number(amount);
+        if (!isFinite(n) || n < 0) return false;
+        portfolio.balance = n;
+        savePortfolio();
+        renderAccountSummary();
+        renderPerformanceTab();
+        sampleEquity();
+        showToast('Bakiyeniz yönetici tarafından güncellendi: ' + fmtTRY(n));
+        return true;
+    }
+
     // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Hocanın geri bildirimi:
     // VİOP'un kendi kaldıraç/açığa satış davranışı zaten vardı (23 Temmuz
     // düzeltmesi, state.market toggle'ı) ama pozisyonlar/emirler/geçmiş TEK
@@ -4177,6 +4196,7 @@ const TradingEngine = (() => {
         syncPriceAnchor,
         closePosition,
         resetPortfolio,
+        setBalance,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
         // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
         // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki
