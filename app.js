@@ -48,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = (sel) => document.querySelector(sel);
 
     const el = {
-        btnReset: $('#btn-reset-params'),
         engineStatus: $('#engine-status'),
         marketTime: $('#market-time'),
         marketStatusVal: $('#market-status-val'),
@@ -56,21 +55,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     /* ────────────── Reset ──────────────
-     * This used to reset the (now-removed) Geriye Dönük Test Ayarları form
-     * fields — start/end date, initial capital, commission, engine choice —
-     * none of which exist in the DOM anymore. In a live trading terminal
-     * "Reset" most usefully means resetting the paper-trading account, so it
-     * now delegates to that instead of leaving a dead button behind. */
-    if (el.btnReset) {
-        el.btnReset.addEventListener('click', () => {
-            if (window.TradingEngine && typeof window.TradingEngine.resetPortfolio === 'function') {
-                window.TradingEngine.resetPortfolio();
-            } else {
-                const portfolioResetBtn = document.getElementById('qt-reset-portfolio');
-                if (portfolioResetBtn) portfolioResetBtn.click();
-            }
-        });
-    }
+     * (6 Ağustos 2026 — "portföy sıfırlama artık sadece admin yapabilsin")
+     * Bu, header'daki "Reset" butonuna bağlıydı ve yarışmacının kendi
+     * portföyünü TEK TIKLA (hiçbir onay sormadan) sıfırlamasına izin
+     * veriyordu. Buton index.html'den kaldırıldı, bu wiring de onunla
+     * birlikte kaldırıldı — sıfırlama artık SADECE admin panelinden
+     * (finteclubBridge.js'in dinlediği komut kanalı üzerinden) yapılabiliyor.
+     * window.TradingEngine.resetPortfolio() fonksiyonunun kendisi hâlâ
+     * mevcut ve donmuş genel API'de duruyor — sadece buradaki kullanıcı
+     * tetikleyicisi kaldırıldı. */
 
     /* ────────────── Mobil/Dar Ekran Kayar (Drawer) Paneller ──────────────
      * 980px altında sidebar (Piyasa) ve işlem paneli artık sabit sütun

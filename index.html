@@ -171,11 +171,10 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="8" x2="21" y2="8"></line><line x1="3" y1="16" x2="21" y2="16"></line></svg>
                             <span class="btn-label" id="btn-toggle-compact-label">Kompakt Görünüm</span>
                         </button>
-                        <div class="header-menu-divider"></div>
-                        <button class="btn btn-secondary" id="btn-reset-params">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
-                            <span class="btn-label">Reset</span>
-                        </button>
+                        <!-- (6 Ağustos 2026 — "portföy sıfırlama artık sadece admin
+                             yapabilsin") Buradaki "Reset" başlık butonu, tek tıkla (hiçbir
+                             onay istemeden) doğrudan resetPortfolio() çağırıyordu — BİLEREK
+                             kaldırıldı. Sıfırlama artık sadece admin panelinden yapılabiliyor. -->
                     </div>
                 </div>
                 <!-- (22 Temmuz 2026, on ikinci oturum, ikinci tur — kullanıcı isteği)
@@ -1084,7 +1083,7 @@
                     <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum;
                          23 Temmuz 2026 on üçüncü oturum devamında kart listesine çevrildi) -->
                     <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
-                        <label>Bekleyen Emirler — OCO/Limit (Spot)</label>
+                        <label>Bekleyen OCO Emirleri (Spot)</label>
                         <div class="table-container qt-mini-table">
                             <div id="qt-pending-oco-body" class="qt-card-list"></div>
                         </div>
@@ -1117,7 +1116,7 @@
                     </div>
 
                     <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group-viop">
-                        <label>Bekleyen Emirler — OCO/Limit (VİOP)</label>
+                        <label>Bekleyen OCO Emirleri (VİOP)</label>
                         <div class="table-container qt-mini-table">
                             <div id="qt-pending-oco-body-viop" class="qt-card-list"></div>
                         </div>
@@ -1133,7 +1132,14 @@
                     </div>
                 </div>
 
-                <button type="button" id="qt-reset-portfolio" class="btn btn-secondary" style="margin-top: 16px; width: 100%; justify-content: center;">Portföyü Sıfırla</button>
+                <!-- (6 Ağustos 2026 — "portföy sıfırlama artık sadece admin yapabilsin")
+                     Yarışmacının kendi portföyünü sıfırlayabildiği "Portföyü Sıfırla"
+                     butonu BİLEREK kaldırıldı. Sıfırlama artık SADECE admin panelinden,
+                     finteclubBridge.js'in dinlediği komut kanalı üzerinden yapılabiliyor
+                     (bkz. tradingEngine.js: window.TradingEngine.resetPortfolio() hâlâ
+                     mevcut ve donmuş genel API'de duruyor — sadece buraya bağlı UI
+                     tetikleyicisi kaldırıldı, fonksiyonun kendisi admin komutu için
+                     gerekli). -->
                 <div class="qt-disclaimer">Bu bir simülasyondur (sandbox / non-live). Gerçek emir gönderilmez.</div>
             </aside>
         </div>
@@ -1424,32 +1430,6 @@
                     <div class="indicator-modal-toolbar" style="margin-top:10px;">
                         <button type="button" class="btn-chip-action" id="btn-sltp-clear">Temizle</button>
                         <button type="button" class="btn-chip-action" id="btn-sltp-save">Kaydet</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- (6 Ağustos 2026 — Ali İhsan Hocam'ın isteği) Alım/satım onay penceresi —
-         AL/SAT tuşuna basınca emir DOĞRUDAN gerçekleşmez, önce bu modal emrin
-         özetini (adet, sembol, fiyat, kaldıraç, gereken teminat) gösterir ve
-         kullanıcı "Onayla" demeden hiçbir pozisyon/bakiye değişmez. Hem Spot
-         hem VİOP, hem Piyasa hem Limit emir tipleri için kullanılır. -->
-    <div class="indicator-modal-backdrop" id="order-confirm-modal-backdrop">
-        <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Emir Onayı">
-            <div class="indicator-modal-header">
-                <h3 id="order-confirm-title">Emir Onayı</h3>
-                <button type="button" class="indicator-modal-close" id="btn-close-order-confirm" aria-label="Kapat">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-            </div>
-            <div class="indicator-modal-body">
-                <div class="indicator-modal-category" data-category-label="özet">
-                    <p class="order-confirm-question" id="order-confirm-question">--</p>
-                    <div class="order-confirm-summary" id="order-confirm-summary"></div>
-                    <div class="indicator-modal-toolbar" style="margin-top:14px;">
-                        <button type="button" class="btn-chip-action" id="btn-order-confirm-cancel">Vazgeç</button>
-                        <button type="button" class="btn-chip-action btn-order-confirm-submit" id="btn-order-confirm-submit">Onayla</button>
                     </div>
                 </div>
             </div>
