@@ -636,9 +636,19 @@
                 console.warn('Bakiye güncellemesi onaylanamadı (appliedAt yazılamadı).', e);
             });
         }
-        // Admin'in canlı izleme ekranı yeni bakiyeyi/sıfırlanmış portföyü
-        // HEMEN görsün diye anında bir özet daha gönderiyoruz.
-        pushFullPortfolioToCloud();
+        // Admin'in canlı izleme ekranı (oplab_live_portfolio/fsPortfolioDoc)
+        // yeni bakiyeyi/sıfırlanmış portföyü HEMEN görsün diye anında bir
+        // özet daha gönderiyoruz. (6 Ağustos 2026 — genel entegrasyon
+        // taraması) Burada önceden SADECE pushFullPortfolioToCloud()
+        // çağrılıyordu — o fonksiyon SADECE oplab_user_portfolios'a (cihazlar
+        // arası senkron belgesi) yazar, admin'in izlediği oplab_live_portfolio
+        // belgesine HİÇ dokunmaz. Yani bu yorumun vaat ettiği "anında"
+        // bilgi hiçbir zaman admin'e ulaşmıyordu — admin en fazla bir sonraki
+        // periyodik 5 saniyelik pushPortfolioSnapshot() turunda görüyordu.
+        // pushPortfolioSnapshot() zaten pushFullPortfolioToCloud()'u da
+        // kendi içinde çağırıyor, o yüzden onu çağırmak HER İKİ belgeyi de
+        // gerçekten anında günceller.
+        pushPortfolioSnapshot();
     }
 
     // Doğrulanmış kimlik bilindiği anda (ve sadece bir kez) oplab_balance_commands
