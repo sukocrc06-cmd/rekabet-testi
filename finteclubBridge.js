@@ -156,6 +156,7 @@
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
     var hydrationCheckedThisSession = false; // bulut->yerel kontrolü sayfa yüklemesi başına SADECE BİR KEZ yapılır
     var balanceListenerAttached = false; // oplab_balance_commands dinleyicisi sadece bir kez bağlanır
+    var portfolioListenerAttached = false; // oplab_user_portfolios dinleyicisi (çok cihazlı canlı senkron) sadece bir kez bağlanır
     // (17 Ağustos 2026 düzeltmesi) Kullanıcının açık isteği: modal HER
     // AÇILIŞTA gösterilsin — daha önce "devam et" denmiş olması ya da
     // kullanıcının zaten oturum açmış olması modalı ATLAMASIN. Bu yüzden
@@ -296,6 +297,11 @@
                 hydratePortfolioFromCloudIfNeeded();
             }
             listenForBalanceCommands();
+            // (9 Ağustos 2026 — "kökten çöz") tek seferlik hydratePortfolioFromCloudIfNeeded()
+            // ile YARIŞ HALİNDE değil: ikisi de aynı applyCloudPortfolioRecordIfNewer()
+            // guard'larını (kendi deviceId'si / zaten uygulanmış updatedAt) paylaşıyor,
+            // bu yüzden aynı anda tetiklenseler bile en fazla BİR kez uygulanır.
+            listenForPortfolioSync();
         } else {
             setBadgeVisible(false);
             setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
@@ -489,22 +495,55 @@
         });
     }
 
-    // Bir yarışmacı doğrulandığında (bu sayfa yüklemesinde İLK KEZ) bulutta
-    // bu kimlik için gerçekten daha güncel/farklı bir portföy var mı diye
-    // bakar. Varsa VE bu kaydı gönderen cihaz bu cihazın kendisi DEĞİLSE,
-    // yerel localStorage'ı bulut sürümüyle değiştirip sayfayı yeniler —
-    // tradingEngine.js bir sonraki init()'inde doğru/gerçek portföyü
-    // (bakiye dahil) yükler. Bulutta hiç kayıt yoksa (bu kullanıcı için
-    // hiçbir cihazda henüz push olmadı), yereldekini bulut için başlangıç
-    // kaydı olarak gönderir.
+    // (6 Ağustos 2026 sürümü: SADECE sayfa yüklemesinde bir kez .get() ile
+    // kontrol ediyordu. 9 Ağustos 2026 — "kökten çöz, telefon/PC/tablet
+    // nerede girilirse aynı bakiye/durum olsun" düzeltmesi: bu, "PC sekmesi
+    // zaten açıkken telefonda işlem yapılırsa PC hiç haberdar olmuyor,
+    // ancak sayfa YENİDEN yüklenirse düzeliyordu" boşluğunu bırakıyordu —
+    // asıl şikayetin kökü buydu. Ortak uygulama mantığı artık
+    // applyCloudPortfolioRecordIfNewer()'a taşındı; hem bu tek-seferlik
+    // ilk kontrol hem de aşağıdaki GERÇEK ZAMANLI listenForPortfolioSync()
+    // aynı fonksiyonu kullanıyor.)
+    //
+    // Bulutta bu kimlik için gerçekten daha güncel/farklı bir portföy var mı
+    // diye bakar. Varsa VE bu kaydı gönderen cihaz bu cihazın kendisi
+    // DEĞİLSE, yerel localStorage'ı bulut sürümüyle değiştirip sayfayı
+    // yeniler — tradingEngine.js bir sonraki init()'inde doğru/gerçek
+    // portföyü (bakiye dahil) yükler. Bulutta hiç kayıt yoksa (bu kullanıcı
+    // için hiçbir cihazda henüz push olmadı), yereldekini bulut için
+    // başlangıç kaydı olarak gönderir.
     //
     // BİLİNEN SINIR: aynı hesap AYNI ANDA iki cihazda açıksa (örn. hem
     // telefon hem PC canlı işlem yapıyor), gerçek zamanlı çakışma çözümü
     // yapılmıyor — hangi cihaz en son push ederse o kazanır. Yarışma
-    // sırasında her yarışmacının TEK cihazdan işlem yapması önerilir; bu
-    // düzeltme asıl bildirilen hatayı (yeni cihazda açınca sıfırlanmış
-    // görünmesi) ve bundan kaynaklanan "değerler rastgele değişiyor" (iki
-    // farklı cihazın birbirinin üstüne yazması) belirtisini çözüyor.
+    // sırasında her yarışmacının TEK cihazdan aktif işlem yapması önerilir;
+    // bu düzeltme "başka bir cihaza geçince görünmeyen/eski veri" sorununu
+    // (artık sayfa yenilemeden de) çözüyor — iki cihazın AYNI ANDA aktif
+    // trade yapmasını değil (bu, çok daha büyük bir çakışma-çözümleme
+    // projesi gerektirir).
+    function applyCloudPortfolioRecordIfNewer(record) {
+        if (!record || !record.portfolio) return false;
+
+        // Bulut kaydı bu cihazın kendi son gönderdiği kayıtsa yapacak
+        // bir şey yok.
+        if (record.deviceId === getDeviceId()) return false;
+
+        var lastApplied = null;
+        try { lastApplied = localStorage.getItem(PORTFOLIO_CLOUD_SYNC_KEY); } catch (e) { /* private mode */ }
+        if (lastApplied && record.updatedAt && lastApplied === record.updatedAt) return false;
+
+        try {
+            localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(record.portfolio));
+            if (record.updatedAt) localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, record.updatedAt);
+        } catch (e) { return false; /* private mode / quota — güvenle vazgeç, yerelde kalsın */ }
+
+        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
+            window.TradingEngine.showToast('Portföyün başka bir cihazdan senkronize edildi, sayfa yenileniyor...');
+        }
+        setTimeout(function () { location.reload(); }, 900);
+        return true;
+    }
+
     function hydratePortfolioFromCloudIfNeeded() {
         if (!fsUserPortfoliosDoc || !verifiedApp) return;
         return fsUserPortfoliosDoc.get().then(function (doc) {
@@ -512,26 +551,31 @@
             var data = doc.data() || {};
             var record = (data.users || {})[String(verifiedApp.id)];
             if (!record || !record.portfolio) { return pushFullPortfolioToCloud(); }
-
-            // Bulut kaydı bu cihazın kendi son gönderdiği kayıtsa yapacak
-            // bir şey yok.
-            if (record.deviceId === getDeviceId()) return;
-
-            var lastApplied = null;
-            try { lastApplied = localStorage.getItem(PORTFOLIO_CLOUD_SYNC_KEY); } catch (e) { /* private mode */ }
-            if (lastApplied && record.updatedAt && lastApplied === record.updatedAt) return;
-
-            try {
-                localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(record.portfolio));
-                if (record.updatedAt) localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, record.updatedAt);
-            } catch (e) { return; /* private mode / quota — güvenle vazgeç, yerelde kalsın */ }
-
-            if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
-                window.TradingEngine.showToast('Portföyün başka bir cihazdan senkronize edildi, sayfa yenileniyor...');
-            }
-            setTimeout(function () { location.reload(); }, 900);
+            applyCloudPortfolioRecordIfNewer(record);
         }).catch(function (e) {
             console.warn('Bulut portföy verisi okunamadı, yerel veriyle devam ediliyor.', e);
+        });
+    }
+
+    // (9 Ağustos 2026 — "kökten çöz") hydratePortfolioFromCloudIfNeeded()
+    // sadece sayfa AÇILIRKEN bir kez bakıyordu. Bu, tabletini/PC'ni sabah
+    // açıp sekmeyi kapatmadan bütün gün öylece bırakan, arada telefondan
+    // işlem yapan biri için hiç yeterli değildi: PC sekmesi hiçbir zaman
+    // yeniden yüklenmediği için telefonun yaptığı değişiklikleri asla
+    // görmüyordu. Bu fonksiyon, kimlik doğrulandığı anda (bir kez) bulut
+    // kaydını GERÇEK ZAMANLI dinlemeye başlar — artık hangi cihaz ne zaman
+    // trade yapsa, DİĞER açık cihaz(lar) sayfa yenilenmeden, birkaç saniye
+    // içinde otomatik yakalar ve kendini günceller (bkz. applyCloudPortfolioRecordIfNewer).
+    function listenForPortfolioSync() {
+        if (!fsUserPortfoliosDoc || !verifiedApp || portfolioListenerAttached) return;
+        portfolioListenerAttached = true;
+        fsUserPortfoliosDoc.onSnapshot(function (doc) {
+            if (!doc.exists || !verifiedApp) return;
+            var data = doc.data() || {};
+            var record = (data.users || {})[String(verifiedApp.id)];
+            if (record) applyCloudPortfolioRecordIfNewer(record);
+        }, function (e) {
+            console.warn('Portföy senkronizasyon kanalı dinlenemedi.', e);
         });
     }
 
@@ -750,6 +794,7 @@
         applyBalanceCommand: function (cmd, requestedAt) { return applyBalanceCommand(cmd, requestedAt); },
         listenForBalanceCommands: function () { return listenForBalanceCommands(); },
         pushPortfolioSnapshot: function () { return pushPortfolioSnapshot(); },
-        computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); }
+        computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); },
+        listenForPortfolioSync: function () { return listenForPortfolioSync(); }
     };
 })();
