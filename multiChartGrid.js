@@ -33,9 +33,27 @@ const MultiChartGrid = (() => {
 
     const THEME_CHART_COLORS = {
         dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
-        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' }
+        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' },
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // bkz. tradingChart.js'teki aynı not — FinTeClub admin panelinin
+        // --bg-soft (#0a1020) zemini ile aynı.
+        fintech: { bg: '#0a1020', text: '#8b93ab', grid: 'rgba(255,255,255,0.04)', border: 'rgba(61,111,238,0.20)' }
     };
     const COLORS = { up: '#D4AF37', down: '#555555', wickUp: '#D4AF37', wickDown: '#777777', sma20: '#42A5F5', ema9: '#26C6DA', bbLine: '#AB47BC', draw: '#D4AF37' };
+    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+    // tradingChart.js'teki AYNI desen (bkz. o dosyadaki
+    // applyChartColorPaletteForTheme() yorumu), burada daha basit bir
+    // haliyle: bu ızgara "her açılışta yeniden oluşturuluyor" (bkz. dosya
+    // başındaki mimari not), o yüzden canlı bir setTheme() senkronuna gerek
+    // yok — openGridView() her çağrıldığında COLORS'un altın'a bağlı
+    // anahtarları o anki temaya göre güncellenir. Renkler FinTeClub admin
+    // panelinin kendi --green/--red/--blue paletinden birebir alındı.
+    const GOLD_DEFAULT_GRID_COLORS = { up: COLORS.up, down: COLORS.down, wickUp: COLORS.wickUp, wickDown: COLORS.wickDown, draw: COLORS.draw };
+    const FINTECH_GRID_OVERRIDES = { up: '#22c55e', down: '#ef4444', wickUp: '#22c55e', wickDown: '#ef4444', draw: '#3d6fee' };
+    function applyGridColorPaletteForTheme() {
+        const source = currentTheme() === 'fintech' ? FINTECH_GRID_OVERRIDES : GOLD_DEFAULT_GRID_COLORS;
+        Object.keys(source).forEach(k => { COLORS[k] = source[k]; });
+    }
 
     // (18 Temmuz 2026, onuncu oturum, üçüncü tur → 22 Temmuz 2026, on ikinci
     // oturum'da genişletildi) Her hücreye sade bir gösterge seçimi eklendi —
@@ -73,7 +91,8 @@ const MultiChartGrid = (() => {
     function byId(id) { return document.getElementById(id); }
 
     function currentTheme() {
-        return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const v = document.documentElement.getAttribute('data-theme');
+        return (v === 'light' || v === 'fintech') ? v : 'dark';
     }
 
     function loadCellSymbols() {
@@ -430,6 +449,7 @@ const MultiChartGrid = (() => {
 
     function openGridView() {
         active = true;
+        applyGridColorPaletteForTheme();
         const single = byId('tv-chart-area-single');
         const gridView = byId('tv-grid-view');
         const resBar = byId('tv-resolution-bar');

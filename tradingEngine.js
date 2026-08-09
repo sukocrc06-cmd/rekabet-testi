@@ -4178,7 +4178,27 @@ const TradingEngine = (() => {
         if (window.TradingChart && window.TradingChart.setTheme) window.TradingChart.setTheme(theme);
     }
 
+    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+    // Kullanıcının kendi Koyu/Açık kişisel tercihi bilerek İKİLİ (2 seçenekli)
+    // kalıyor — bu YENİ üçüncü "Kurumsal Mavi" şablonu kullanıcının kendi
+    // döngüsüne HİÇ eklenmiyor, kullanıcı onu kendi başına seçemiyor. Onun
+    // yerine SADECE FinTeClub admin paneli (finteclub/shared_state.
+    // oplabFintechTheme alanı → finteclubBridge.js → aşağıdaki
+    // setAdminForcedTheme()) tüm kullanıcılara AYNI ANDA zorunlu kılabiliyor
+    // — kullanıcının kendi Koyu/Açık tercihinin ÜZERİNE geçici olarak biniyor,
+    // admin kapatınca kullanıcı otomatik olarak kendi kayıtlı tercihine geri
+    // dönüyor. Bu, kullanıcının kendisinin daha önce tam olarak istemediğini
+    // belirttiği bir tema deneyimini (bkz. proje geçmişi) artık kullanıcıya
+    // DAYATMIYOR — sadece admin'in bilinçli kararıyla, marka/kampanya
+    // tutarlılığı için devreye giriyor.
+    let adminForcedFintechTheme = false;
+
     function toggleTheme() {
+        // Admin zorunlu temayı aktif ettiyse kullanıcının kendi butonu/kısayolu
+        // (klavye 'T', komut paleti) bunu değiştiremez — buton zaten
+        // setAdminForcedTheme() içinde disabled yapılıyor, bu ekstra bir
+        // güvenlik önlemi.
+        if (adminForcedFintechTheme) return;
         applyTheme(getCurrentTheme() === 'light' ? 'dark' : 'light');
     }
 
@@ -4188,6 +4208,34 @@ const TradingEngine = (() => {
         // (it runs before any other JS to avoid a dark/light flash on load).
         applyTheme(getCurrentTheme());
         if (btn) btn.addEventListener('click', toggleTheme);
+    }
+
+    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+    // finteclubBridge.js'in shared_state dinleyicisinden çağrılır. active
+    // true olduğunda kullanıcının tercihinden BAĞIMSIZ olarak "fintech"
+    // temasını doğrudan uygular ve tema butonunu devre dışı bırakır; false
+    // olduğunda (admin kapattığında YA DA Firebase'e hiç ulaşılamadığında)
+    // kullanıcının kendi kayıtlı Koyu/Açık tercihine sorunsuzca geri döner.
+    function setAdminForcedTheme(active) {
+        adminForcedFintechTheme = !!active;
+        const btn = byId('btn-theme-toggle');
+        if (adminForcedFintechTheme) {
+            document.documentElement.setAttribute('data-theme', 'fintech');
+            if (window.TradingChart && window.TradingChart.setTheme) window.TradingChart.setTheme('fintech');
+            if (btn) {
+                btn.disabled = true;
+                btn.title = 'Tema yönetici tarafından "Kurumsal Mavi" olarak ayarlandı.';
+            }
+        } else {
+            if (btn) {
+                btn.disabled = false;
+                btn.title = 'Koyu / Açık Tema (T)';
+            }
+            // Zorunlu tema kaldırıldığında kullanıcının kendi (localStorage'da
+            // saklı) tercihine geri dön — applyTheme zaten ikon/grafik
+            // senkronunu da hallediyor.
+            applyTheme(getCurrentTheme());
+        }
     }
 
     /* ════════════════════════════════════════════════
@@ -4769,7 +4817,10 @@ const TradingEngine = (() => {
         // belirsizleştiriyor. Bekleyen emir tetikleme mantığını piyasa
         // saatlerinden bağımsız test edebilmek için ayrı bir QA girişi.
         debugCheckPendingOrdersNow: () => checkPendingOcoOrders(),
-        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; } }
+        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; } },
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // finteclubBridge.js'in shared_state dinleyicisi tarafından çağrılır.
+        setAdminForcedTheme
     });
 })();
 

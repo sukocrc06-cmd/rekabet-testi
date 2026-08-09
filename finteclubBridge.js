@@ -844,6 +844,23 @@
         window.FTC_TRADING_STATE.halted = !!(lastSharedData && lastSharedData.tradingHalted === true);
     }
 
+    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+    // finteclub/shared_state.oplabFintechTheme — admin.html'deki "Tema
+    // (Kurumsal Mavi)" anahtarından yazılır. AYNI felsefe: Firebase'e hiç
+    // ulaşılamazsa (lastSharedData null) varsayılan olarak KAPALI kabul
+    // edilir — bir altyapı sorunu asla kullanıcıya istemediği bir görsel
+    // deneyimi dayatmamalı. tradingEngine.js henüz init() edilmemişse
+    // (script sırası/DOMContentLoaded zamanlaması) window.TradingEngine
+    // tanımlı olsa bile setAdminForcedTheme henüz DOM'daki butonu bulamayabilir
+    // — bu durumda applyTheme zaten sayfa yüklendiğinde tekrar çağrılıyor
+    // olduğundan bir sonraki snapshot/tekrar denemede kendiliğinden düzelir.
+    function updateForcedThemeState() {
+        var forced = !!(lastSharedData && lastSharedData.oplabFintechTheme === true);
+        if (window.TradingEngine && typeof window.TradingEngine.setAdminForcedTheme === 'function') {
+            window.TradingEngine.setAdminForcedTheme(forced);
+        }
+    }
+
     function updateAccessGate() {
         var gate = byId('ftc-oplab-gate');
         if (!gate) return;
@@ -905,11 +922,13 @@
                 lastSharedData = doc.exists ? doc.data() : null;
                 updateAccessGate();
                 updateTradingHaltState();
+                updateForcedThemeState();
                 checkApplicationStatus();
             }, function (err) {
                 console.warn('FinTeClub verisi dinlenemedi.', err);
                 updateAccessGate();
                 updateTradingHaltState();
+                updateForcedThemeState();
             });
             if (ftcAuth) {
                 ftcAuth.onAuthStateChanged(function (user) {
@@ -955,6 +974,7 @@
             // Firebase yok/engelli — kilit varsayılan AÇIK, giriş pasif.
             updateAccessGate();
             updateTradingHaltState();
+            updateForcedThemeState();
             syncLoginUI();
         }
     }

@@ -126,6 +126,55 @@
     box-shadow: 0 1px 3px rgba(20, 22, 28, 0.08);
 }
 
+/* --- "Kurumsal Mavi" (fintech) tema override'ları (uygulanma şekli
+   [data-theme="fintech"] on <html>) ---
+   (9 Ağustos 2026 — admin panelinden kontrol) Kullanıcının kendi Koyu/Açık
+   tercihinin YERİNE geçen, SADECE FinTeClub admin panelinden (finteclub/
+   shared_state.oplabFintechTheme alanı → finteclubBridge.js →
+   tradingEngine.js setAdminForcedTheme()) tüm kullanıcılara aynı anda
+   zorunlu kılınabilen TEK bir şablon. Kullanıcının kendi tema butonundan
+   ERİŞİLEMEZ — bilinçli olarak öyle tasarlandı (kullanıcı isteği: "sadece
+   koyu mavi finteclub renk modalı ile aynı şablon, tek şablon, herkese
+   anında zorunlu uygula").
+   Renkler İCAT EDİLMEDİ — admin.html/index.html (FinTeClub)'ın kendi
+   :root renk paletinden (--bg/--bg-soft/--card-bg/--blue/--blue-dark/
+   --green/--red) BİREBİR alındı, ki "aynı şablon" hissi gerçekten doğru
+   olsun. --success/--danger/--warning BİLEREK dokunulmuyor (zaten FinTeClub
+   ile aynı kırmızı/yeşil, ayrıca değiştirmeye gerek yok). Tint ve glass-bg
+   değişkenleri de override EDİLMİYOR — :root'un beyaz-alfa overlay'leri koyu
+   lacivert zeminde de doğru görünür. Grafik canvas'ının kendi ayrı renk
+   mutasyonu var — bkz. tradingChart.js applyChartColorPaletteForTheme() ve
+   multiChartGrid.js applyGridColorPaletteForTheme(). */
+[data-theme="fintech"] {
+    --bg-main: #060913;      /* FinTeClub --bg */
+    --bg-panel: #0a1020;     /* FinTeClub --bg-soft */
+    --bg-sidebar: #080c18;   /* FinTeClub --sidebar-bg */
+    --bg-card: #111a2e;      /* FinTeClub --card-bg */
+    --bg-input: #0d1526;     /* FinTeClub --card-bg-2 */
+
+    --gold: #3d6fee;         /* FinTeClub --blue */
+    --gold-light: #7ea3ff;   /* FinTeClub gradient/accent-text mavi tonu */
+    --gold-dark: #1c2f5e;    /* FinTeClub --blue-dark */
+    --gold-glow: rgba(61, 111, 238, 0.30);   /* FinTeClub --blue-glow */
+    --gold-dim: rgba(61, 111, 238, 0.12);
+    --gold-border: rgba(61, 111, 238, 0.24);
+
+    --text-primary: #f3f5fa;    /* FinTeClub --text */
+    --text-secondary: #8b93ab;  /* FinTeClub --text-dim */
+    --text-muted: #575f75;      /* FinTeClub --text-dimmer */
+    --text-dark: #0a1020;
+}
+
+[data-theme="fintech"] body {
+    background-color: var(--bg-main);
+}
+
+[data-theme="fintech"] .content-card,
+[data-theme="fintech"] .sidebar-panel,
+[data-theme="fintech"] .trading-panel {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
 /* --- Document Resets & Base Styles --- */
 *, *::before, *::after {
     box-sizing: border-box;

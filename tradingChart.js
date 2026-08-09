@@ -53,8 +53,41 @@ const TradingChart = (() => {
         supertrendUp: '#26A69A',
         supertrendDown: '#EF5350',
         keltnerLine: 'rgba(255, 167, 38, 0.55)',
-        donchianLine: 'rgba(126, 87, 194, 0.55)'
+        donchianLine: 'rgba(126, 87, 194, 0.55)',
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // RSI/MACD/Stochastic tek çizgili osilatörlerinin rengi — önceden bu
+        // üç seri oluşturma noktasında (bkz. ensureOscillatorPane()) DOĞRUDAN
+        // '#D4AF37' literal olarak yazılıydı, COLORS'tan hiç okumuyordu;
+        // temaya duyarlı olabilmesi için buraya taşındı (bkz.
+        // applyChartColorPaletteForTheme()).
+        oscillatorAccent: '#D4AF37'
     };
+
+    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+    // COLORS SABİT bir değişken ama İÇERİĞİ (bir obje) değiştirilebilir — bu
+    // yüzden yeni temayı eklemenin en düşük riskli yolu, COLORS'un altın'a
+    // bağlı birkaç anahtarını ÇALIŞMA ZAMANINDA (tema değiştiğinde) yerinde
+    // güncellemek, dosya genelinde COLORS.xxx okuyan onlarca yeri (mum/hacim/
+    // gösterge serileri, çizim aracı, fibonacci/pivot çizgileri) TEK TEK
+    // bulup değiştirmemek. Koyu/Açık (gold) temalar HİÇ dokunulmadan aynen
+    // kalıyor — GOLD_DEFAULT_CHART_COLORS, herhangi bir mutasyondan ÖNCE
+    // orijinal altın değerlerinin bir anlık görüntüsü, "fintech" temasından
+    // geri dönüldüğünde tam olarak eski haline dönmeyi garanti ediyor.
+    // Renkler FinTeClub admin panelinin KENDİ marka paletinden (--blue
+    // #3d6fee, --green #22c55e, --red #ef4444) BİREBİR alındı.
+    const FINTECH_CHART_OVERRIDES = {
+        up: '#22c55e', down: '#ef4444', wickUp: '#22c55e', wickDown: '#ef4444',
+        draw: '#3d6fee', fibLine: 'rgba(61, 111, 238, 0.5)',
+        volUp: 'rgba(34, 197, 94, 0.45)', volDown: 'rgba(239, 68, 68, 0.35)',
+        baselineTop: '#22c55e', pivot: 'rgba(61, 111, 238, 0.7)',
+        oscillatorAccent: '#3d6fee'
+    };
+    const GOLD_DEFAULT_CHART_COLORS = {};
+    Object.keys(FINTECH_CHART_OVERRIDES).forEach(k => { GOLD_DEFAULT_CHART_COLORS[k] = COLORS[k]; });
+    function applyChartColorPaletteForTheme() {
+        const source = currentTheme === 'fintech' ? FINTECH_CHART_OVERRIDES : GOLD_DEFAULT_CHART_COLORS;
+        Object.keys(source).forEach(k => { COLORS[k] = source[k]; });
+    }
 
     // Tier-1 chart type catalog (TradingView "Çubuklar" menu parity). Each
     // entry drives both the dropdown UI (label/icon) and applyChartType().
@@ -112,9 +145,16 @@ const TradingChart = (() => {
     // setTheme() whenever the user toggles the theme).
     const THEME_CHART_COLORS = {
         dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
-        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' }
+        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' },
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // FinTeClub admin panelinin --bg-soft (#0a1020) zeminiyle, kenarlık
+        // FinTeClub --blue'suyla eşleşiyor.
+        fintech: { bg: '#0a1020', text: '#8b93ab', grid: 'rgba(255,255,255,0.04)', border: 'rgba(61,111,238,0.20)' }
     };
-    let currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    function resolveThemeName(v) {
+        return (v === 'light' || v === 'fintech') ? v : 'dark';
+    }
+    let currentTheme = resolveThemeName(document.documentElement.getAttribute('data-theme'));
 
     let chart = null;
     let candleSeries = null;      // always-present OHLC series; the price-scale anchor
@@ -330,6 +370,15 @@ const TradingChart = (() => {
             return;
         }
 
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // setTheme() finteclubBridge.js'in ilk snapshot'ında (async, sayfa
+        // yüklendikten biraz sonra) ya da tradingEngine.js'in kendi
+        // kurulumunda (setupThemeToggle) çağrılıyor olsa da, HANGİSİNİN önce
+        // çalışacağı script yükleme sırasına bağlı — COLORS'un candleSeries
+        // oluşturulmadan ÖNCE doğru temaya göre ayarlandığından emin olmak
+        // için burada da (ayrıca, zararsızca) uygulanıyor.
+        applyChartColorPaletteForTheme();
+
         chartContainer = byId('tv-main-chart');
         if (!chartContainer) {
             console.error('[TradingChart] Chart mount points not found in DOM.');
@@ -403,6 +452,12 @@ const TradingChart = (() => {
 
     function baseChartOptions(container, isSub) {
         const c = THEME_CHART_COLORS[currentTheme];
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // Çapraz imleç rengi önceden altın olarak sabitti; artık COLORS.draw'a
+        // bağlı (aynı applyChartColorPaletteForTheme() mutasyonu bunu da
+        // günceller).
+        const crosshairColor = currentTheme === 'fintech' ? 'rgba(61,111,238,0.35)' : 'rgba(212,175,55,0.35)';
+        const crosshairLabelBg = COLORS.draw;
         return {
             width: container.clientWidth,
             height: container.clientHeight,
@@ -417,8 +472,8 @@ const TradingChart = (() => {
             },
             crosshair: {
                 mode: LightweightCharts.CrosshairMode.Normal,
-                vertLine: { color: 'rgba(212,175,55,0.35)', width: 1, style: 3, labelBackgroundColor: '#D4AF37' },
-                horzLine: { color: 'rgba(212,175,55,0.35)', width: 1, style: 3, labelBackgroundColor: '#D4AF37' }
+                vertLine: { color: crosshairColor, width: 1, style: 3, labelBackgroundColor: crosshairLabelBg },
+                horzLine: { color: crosshairColor, width: 1, style: 3, labelBackgroundColor: crosshairLabelBg }
             },
             rightPriceScale: {
                 borderColor: c.border,
@@ -2669,7 +2724,7 @@ const TradingChart = (() => {
             const rsiValues = parsed.period
                 ? (window.DataController.computeRSI(state.candles.map(c => c.close), parsed.period))
                 : ind.rsi14;
-            series.rsi = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.rsi = paneChart.addLineSeries({ color: COLORS.oscillatorAccent, lineWidth: 1.5, priceLineVisible: false });
             series.rsi.setData(seriesFromValues(dates, rsiValues));
             series.rsi.createPriceLine({ price: 70, color: 'rgba(244,67,54,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '70' });
             series.rsi.createPriceLine({ price: 30, color: 'rgba(76,175,80,0.4)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '30' });
@@ -2678,12 +2733,12 @@ const TradingChart = (() => {
             series.hist.setData(seriesFromValues(dates, ind.macd.histogram).map(p => ({
                 time: p.time, value: p.value, color: p.value >= 0 ? 'rgba(76,175,80,0.55)' : 'rgba(244,67,54,0.55)'
             })));
-            series.macd = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.macd = paneChart.addLineSeries({ color: COLORS.oscillatorAccent, lineWidth: 1.5, priceLineVisible: false });
             series.macd.setData(seriesFromValues(dates, ind.macd.macdLine));
             series.signal = paneChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
             series.signal.setData(seriesFromValues(dates, ind.macd.signalLine));
         } else if (type === 'stoch') {
-            series.k = paneChart.addLineSeries({ color: '#D4AF37', lineWidth: 1.5, priceLineVisible: false });
+            series.k = paneChart.addLineSeries({ color: COLORS.oscillatorAccent, lineWidth: 1.5, priceLineVisible: false });
             series.k.setData(seriesFromValues(dates, ind.stochastic.k));
             series.d = paneChart.addLineSeries({ color: '#42A5F5', lineWidth: 1.5, priceLineVisible: false });
             series.d.setData(seriesFromValues(dates, ind.stochastic.d));
@@ -4699,16 +4754,42 @@ const TradingChart = (() => {
     /* ────────── Public API ────────── */
 
     function setTheme(theme) {
-        currentTheme = theme === 'light' ? 'light' : 'dark';
+        currentTheme = resolveThemeName(theme);
+        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
+        // Altın'a bağlı COLORS anahtarlarını (mum/hacim/gösterge/çizim
+        // renkleri) yerinde günceller — bkz. applyChartColorPaletteForTheme()
+        // yorumu. Koyu/Açık temalar arasında geçişte bu her zaman
+        // GOLD_DEFAULT_CHART_COLORS'a (orijinal altın değerler) geri döner,
+        // hiçbir şeyi bozmaz.
+        applyChartColorPaletteForTheme();
+
         const c = THEME_CHART_COLORS[currentTheme];
+        const crosshairColor = currentTheme === 'fintech' ? 'rgba(61,111,238,0.35)' : 'rgba(212,175,55,0.35)';
         const opts = {
             layout: { background: { color: c.bg }, textColor: c.text },
             grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
             rightPriceScale: { borderColor: c.border },
-            timeScale: { borderColor: c.border }
+            timeScale: { borderColor: c.border },
+            crosshair: {
+                vertLine: { color: crosshairColor, labelBackgroundColor: COLORS.draw },
+                horzLine: { color: crosshairColor, labelBackgroundColor: COLORS.draw }
+            }
         };
         if (chart) chart.applyOptions(opts);
         Object.values(oscillatorPanes).forEach(p => { if (p.chart) p.chart.applyOptions(opts); });
+        if (dualChart) dualChart.applyOptions(opts);
+
+        // Zaten oluşturulmuş serileri de yeniden boyarız — aksi halde admin
+        // temayı değiştirdiğinde, o an ekranda açık olan mumlar/hacim
+        // çubukları bir sonraki sembol yüklemesine kadar eski renkte kalırdı.
+        const candleColors = {
+            upColor: COLORS.up, downColor: COLORS.down,
+            borderUpColor: COLORS.up, borderDownColor: COLORS.down,
+            wickUpColor: COLORS.wickUp, wickDownColor: COLORS.wickDown
+        };
+        if (candleSeries) candleSeries.applyOptions(candleColors);
+        if (dualSeries) dualSeries.applyOptions(candleColors);
+        if (typeof applyVolumeVisibility === 'function') applyVolumeVisibility();
     }
 
     // (2 Ağustos 2026 — revize planı madde 12) "Örnek bir özet detay
