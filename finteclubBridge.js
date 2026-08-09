@@ -136,6 +136,19 @@
         email: null
     };
 
+    // (9 Ağustos 2026 — Madde: piyasa saatlerinden bağımsız admin durdurma)
+    // finteclub/shared_state belgesindeki yeni `tradingHalted` alanı — admin
+    // FinTeClub panelindeki "OPLab (Alım-Satım Sitesi) Kontrolü" sayfasından
+    // bunu AÇIK/KAPALI (oplabEnabled — tüm siteyi kilitler) anahtarından
+    // AYRI, daha hafif bir "Alım-Satım Durumu" anahtarıyla ayarlar: site
+    // görüntülenmeye devam eder, sadece YENİ emir gönderimi engellenir.
+    // tradingEngine.js bunu doğrudan okur (bkz. isTradingHaltedByAdmin()).
+    // Firebase'e hiç ulaşılamazsa (CDN engelli/offline) varsayılan olarak
+    // false (durdurulmamış) kabul edilir — bir altyapı sorunu gerçek
+    // kullanıcıları asla yanlışlıkla kilitlememeli (updateAccessGate()
+    // ile AYNI felsefe).
+    window.FTC_TRADING_STATE = { halted: false };
+
     var PROFILE_NAME_KEY = 'optipulselab_profile_name_v1'; // tradingEngine.js ile AYNI anahtar
     var PORTFOLIO_STORAGE_KEY = 'optipulselab_paper_portfolio_v1'; // tradingEngine.js ile AYNI anahtar
     // (8 Ağustos 2026 — "admin panelinde anlık/canlı veri istiyorum") önceden
@@ -823,6 +836,14 @@
         });
     }
 
+    // (9 Ağustos 2026) window.FTC_TRADING_STATE.halted'i güncel tutar —
+    // updateAccessGate() ile HER ZAMAN birlikte çağrılır (aynı lastSharedData
+    // kaynağından besleniyor), ama TAM EKRAN kilit YERİNE tradingEngine.js'in
+    // kendi qt-submit buton/uyarı mantığını tetikler.
+    function updateTradingHaltState() {
+        window.FTC_TRADING_STATE.halted = !!(lastSharedData && lastSharedData.tradingHalted === true);
+    }
+
     function updateAccessGate() {
         var gate = byId('ftc-oplab-gate');
         if (!gate) return;
@@ -883,10 +904,12 @@
             fsSharedDoc.onSnapshot(function (doc) {
                 lastSharedData = doc.exists ? doc.data() : null;
                 updateAccessGate();
+                updateTradingHaltState();
                 checkApplicationStatus();
             }, function (err) {
                 console.warn('FinTeClub verisi dinlenemedi.', err);
                 updateAccessGate();
+                updateTradingHaltState();
             });
             if (ftcAuth) {
                 ftcAuth.onAuthStateChanged(function (user) {
@@ -931,6 +954,7 @@
         } else {
             // Firebase yok/engelli — kilit varsayılan AÇIK, giriş pasif.
             updateAccessGate();
+            updateTradingHaltState();
             syncLoginUI();
         }
     }

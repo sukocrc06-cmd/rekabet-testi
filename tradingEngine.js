@@ -56,6 +56,57 @@ const TradingEngine = (() => {
     function isFtcLoggedIn() {
         return !isFtcGateActive() || !!window.FTC_AUTH_STATE.loggedIn;
     }
+    // (9 Ağustos 2026 — kullanıcı bildirimi: "hafta sonu piyasa kapalıyken
+    // alım yapabildim") Önceden submitOrder() hiçbir piyasa-saati kontrolü
+    // yapmıyordu — sadece tickPrices() (fiyat simülasyonu) ve grafik/çoklu
+    // ızgara ticking'i DC.isMarketOpenNow() ile korunuyordu, emir gönderimi
+    // korunmuyordu. Aynı DC.isMarketOpenNow() (dataController.js'teki TEK
+    // gerçek kaynak) burada da kullanılıyor ki header rozetiyle, fiyat
+    // ticking'iyle ve emir engelleme mantığıyla ASLA çelişmesin.
+    function isMarketOpenForTrading() {
+        return !DC || !DC.isMarketOpenNow || DC.isMarketOpenNow();
+    }
+    // Admin, FinTeClub panelinden piyasa saatlerinden BAĞIMSIZ olarak da
+    // alım-satımı anında durdurabilir (bkz. finteclubBridge.js'teki
+    // window.FTC_TRADING_STATE ataması, finteclub/shared_state belgesindeki
+    // yeni tradingHalted alanından besleniyor). Bu, tam platform kilidinden
+    // (oplabEnabled/FTC_AUTH_STATE ile ilgisiz — o TÜM siteyi kilitler) daha
+    // hafif bir araç: kullanıcılar grafik/portföylerini görmeye devam eder,
+    // sadece YENİ emir gönderemezler.
+    function isTradingHaltedByAdmin() {
+        return !!(window.FTC_TRADING_STATE && window.FTC_TRADING_STATE.halted);
+    }
+    function isTradingAllowedNow() {
+        return isMarketOpenForTrading() && !isTradingHaltedByAdmin();
+    }
+    function tradingBlockedReason() {
+        if (isTradingHaltedByAdmin()) return 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu.';
+        if (!isMarketOpenForTrading()) return 'Piyasa şu anda kapalı — BIST seans saatleri: hafta içi 09:55–18:00 (TRT). Emir gönderilemez.';
+        return '';
+    }
+    // qt-submit butonunun etkin/pasif durumunu VE üstündeki kalıcı uyarı
+    // kutusunu (qt-trading-status-notice) günceller. tickPrices() piyasa
+    // kapalıyken erken çıktığı için (bkz. o fonksiyondaki DC.isMarketOpenNow()
+    // koruması) bu fonksiyon KENDİ setInterval'ında ayrıca çalıştırılır —
+    // aksi halde piyasa kapanış/açılış anında buton durumu F5 atılmadan
+    // güncellenmezdi (header rozetindeki aynı köklü hatanın bir benzeri).
+    function updateTradeAvailabilityUI() {
+        const submitBtn = byId('qt-submit');
+        const notice = byId('qt-trading-status-notice');
+        const allowed = isTradingAllowedNow();
+        if (submitBtn) {
+            submitBtn.disabled = !allowed;
+            submitBtn.title = allowed ? '' : tradingBlockedReason();
+        }
+        if (notice) {
+            if (allowed) {
+                notice.style.display = 'none';
+            } else {
+                notice.textContent = '⛔ ' + tradingBlockedReason();
+                notice.style.display = '';
+            }
+        }
+    }
     function effectiveBalance() {
         return isFtcLoggedIn() ? portfolio.balance : 0;
     }
@@ -383,6 +434,11 @@ const TradingEngine = (() => {
     }
 
     function tickPrices() {
+        // (9 Ağustos 2026) Emir bileti buton/uyarı durumu, aşağıdaki erken
+        // çıkıştan ETKİLENMEMELİ — piyasa kapalıyken de (özellikle piyasa TAM
+        // O AN kapandığında) buton anında pasif hale gelmeli.
+        updateTradeAvailabilityUI();
+
         // BIST kapalıyken (hafta sonu veya 09:55-18:00 TRT seans dışında)
         // fiyatlar simüle edilmeyi durdurur — son kapanış fiyatında donuk kalır,
         // tıpkı gerçek bir borsa gibi. Aksi halde mumlar piyasa kapalıyken de
@@ -2881,6 +2937,16 @@ const TradingEngine = (() => {
     // ASELS 0,01 TL'den almak istediğinize emin misiniz?" gibi bir özeti
     // görünce hatayı fark edebilir).
     function submitOrder() {
+        // (9 Ağustos 2026 — piyasa kapalıyken/admin durdurunca emir engelleme)
+        // Bu, tek gerçek koruma DEĞİL — buton da updateTradeAvailabilityUI()
+        // ile pasif hale getiriliyor — ama olası bir yarış durumuna (ör.
+        // buton disabled olmadan hemen önce tıklanması) veya klavye/programatik
+        // tetiklemeye karşı asıl, atlanamaz kontrol burası.
+        if (!isTradingAllowedNow()) {
+            const m = tradingBlockedReason();
+            showToast(m); showTicketAlert(m, 'error');
+            return;
+        }
         if (!state.activeSymbol) { showToast('Önce bir sembol seçin.'); showTicketAlert('Önce bir sembol seçin.', 'error'); return; }
         const qtyInput = byId('qt-qty');
         const qty = qtyInput ? Math.floor(Number(qtyInput.value)) : 0;
@@ -4629,6 +4695,10 @@ const TradingEngine = (() => {
             updateRiskPreview();
         });
 
+        // Sayfa yüklendiğinde ilk 2 saniyelik tickPrices() beklemeden emir
+        // butonunun doğru (etkin/pasif) durumda başlaması için tek seferlik
+        // erken çağrı — bkz. updateTradeAvailabilityUI() yorumu.
+        updateTradeAvailabilityUI();
         setInterval(tickPrices, TICK_MS);
         setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);
         // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve

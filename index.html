@@ -960,6 +960,13 @@
                          tradingEngine.js showTicketAlert()). -->
                     <div class="qt-ticket-alert" id="qt-ticket-alert" style="display:none;" role="alert"></div>
 
+                    <!-- (9 Ağustos 2026 — piyasa kapalıyken/admin durdurunca emir
+                         engelleme) qt-ticket-alert'ten FARKLI: bu, geçici bir hata
+                         mesajı değil, "şu an emir gönderilemez" durumunu KALICI
+                         olarak gösteren bir uyarı — updateTradeAvailabilityUI()
+                         tarafından yönetilir, otomatik gizlenmez (zamanlayıcısı yok). -->
+                    <div class="qt-ticket-alert qt-alert-info" id="qt-trading-status-notice" style="display:none;" role="status"></div>
+
                     <button type="button" id="qt-submit" class="btn-trade-submit btn-buy">AL (BUY)</button>
                 </div>
 

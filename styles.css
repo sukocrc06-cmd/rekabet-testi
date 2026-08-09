@@ -5172,6 +5172,18 @@ body.compact-mode .status-item {
     color: var(--text-primary);
 }
 
+.btn-trade-submit:disabled {
+    /* (9 Ağustos 2026 — piyasa kapalıyken/admin durdurunca emir engelleme)
+       Piyasa kapalı veya admin alım-satımı durdurmuşken buton disabled
+       oluyor (bkz. tradingEngine.js updateTradeAvailabilityUI()) — bunun
+       AÇIK/kullanılabilir bir buton gibi görünmemesi için. */
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.6);
+    box-shadow: none !important;
+    transform: none !important;
+}
+
 .btn-trade-submit {
     width: 100%;
     padding: 14px 0;

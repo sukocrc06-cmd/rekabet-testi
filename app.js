@@ -263,4 +263,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     checkMarketStatus();
+    // (9 Ağustos 2026 — kullanıcı bildirimi: "market kapanmasına rağmen OPEN
+    // yazıyor, F5 atınca CLOSED dönüyor") Bu kontrol önceden sayfa açıldığında
+    // BİR KEZ çalışıp bir daha asla tekrar çalıştırılmıyordu — piyasa
+    // açık/kapalı geçiş anında sayfada zaten açık olan biri, kendisi
+    // yenilemeden rozetin güncellendiğini asla göremezdi. updateClock()
+    // (saniyede bir) ve checkBackendHeartbeat() (8 saniyede bir) ile AYNI
+    // desen: 30 saniyede bir yeniden kontrol, dakika hassasiyetli bir sınır
+    // için yeterli, gereksiz sıklıkta da değil.
+    setInterval(checkMarketStatus, 30000);
 });
