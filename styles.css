@@ -126,6 +126,64 @@
     box-shadow: 0 1px 3px rgba(20, 22, 28, 0.08);
 }
 
+/* --- "Kurumsal Mavi" (fintech) theme overrides (applied via
+   [data-theme="fintech"] on <html>) ---
+   (9 Ağustos 2026) Üçüncü bir marka teması: beyaz zemin + mavi vurgular,
+   klasik bankacılık/fintech görünümü. [data-theme="light"] ile BİREBİR AYNI
+   yapıyı (aynı değişken adları) kullanıyor — sadece altın (--gold ailesi)
+   maviyle değiştirildi. --success/--danger/--warning (kâr-zarar, al-sat)
+   BİLEREK dokunulmadı — zaten kırmızı/yeşil, marka rengiyle karışmamalı.
+   Grafik canvas'ının (candle/hacim/gösterge/çizgi) kendi ayrı renk
+   mutasyonu var — bkz. tradingChart.js applyChartColorPaletteForTheme() ve
+   multiChartGrid.js applyGridColorPaletteForTheme(). */
+[data-theme="fintech"] {
+    --bg-main: #F4F7FB;
+    --bg-panel: #FFFFFF;
+    --bg-sidebar: #F8FAFD;
+    --bg-card: #FFFFFF;
+    --bg-input: #EEF3FA;
+
+    --gold: #0057D8;
+    --gold-light: #3B82F6;
+    --gold-dark: #003F9E;
+    --gold-glow: rgba(0, 87, 216, 0.30);
+    --gold-dim: rgba(0, 87, 216, 0.10);
+    --gold-border: rgba(0, 87, 216, 0.24);
+
+    --text-primary: #10131A;
+    --text-secondary: #4B5563;
+    --text-muted: #8A94A3;
+    --text-dark: #10131A;
+
+    --success: #1E7D32;
+    --danger: #C62828;
+    --warning: #B15C00;
+
+    --tint-02: rgba(20, 22, 28, 0.03);
+    --tint-025: rgba(20, 22, 28, 0.035);
+    --tint-03: rgba(20, 22, 28, 0.045);
+    --tint-04: rgba(20, 22, 28, 0.055);
+    --tint-05: rgba(20, 22, 28, 0.07);
+    --tint-06: rgba(20, 22, 28, 0.09);
+    --tint-08: rgba(20, 22, 28, 0.11);
+    --tint-14: rgba(20, 22, 28, 0.18);
+    --tint-25: rgba(20, 22, 28, 0.32);
+
+    --glass-bg-1: rgba(255, 255, 255, 0.85);
+    --glass-bg-2: rgba(255, 255, 255, 0.92);
+    --glass-bg-3: rgba(255, 255, 255, 0.82);
+}
+
+[data-theme="fintech"] body {
+    background-color: var(--bg-main);
+}
+
+[data-theme="fintech"] .content-card,
+[data-theme="fintech"] .sidebar-panel,
+[data-theme="fintech"] .trading-panel {
+    box-shadow: 0 1px 3px rgba(20, 22, 28, 0.08);
+}
+
 /* --- Document Resets & Base Styles --- */
 *, *::before, *::after {
     box-sizing: border-box;

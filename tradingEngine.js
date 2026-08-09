@@ -1631,7 +1631,7 @@ const TradingEngine = (() => {
         if (!backdrop || !input || !resultsEl) return;
 
         const ACTIONS = [
-            { label: 'Tema Değiştir (Koyu / Açık)', sub: 'Görünüm', hint: 'T', keywords: 'tema tema değiştir dark light aydınlık koyu görünüm', run: () => byId('btn-theme-toggle')?.click() },
+            { label: 'Tema Değiştir (Koyu / Açık / Kurumsal Mavi)', sub: 'Görünüm', hint: 'T', keywords: 'tema tema değiştir dark light fintech mavi aydınlık koyu kurumsal görünüm', run: () => byId('btn-theme-toggle')?.click() },
             { label: 'Sesli Bildirimleri Aç/Kapat', sub: 'Görünüm', keywords: 'ses mute sessiz bildirim', run: () => byId('btn-mute-toggle')?.click() },
             { label: 'Kompakt Görünümü Aç/Kapat', sub: 'Görünüm', keywords: 'kompakt compact sıkı dar görünüm', run: () => byId('btn-toggle-compact')?.click() },
             { label: 'Göstergeler Panelini Aç', sub: 'Grafik', hint: 'G', keywords: 'gösterge indicator rsi macd ekle overlay osilatör supertrend', run: () => byId('btn-open-indicators')?.click() },
@@ -4157,14 +4157,20 @@ const TradingEngine = (() => {
        ════════════════════════════════════════════════ */
 
     const THEME_STORAGE_KEY = 'optipulselab_theme';
+    // (9 Ağustos 2026 — "Kurumsal Mavi" fintech teması) İkiden (Koyu/Açık)
+    // üçe (Koyu/Açık/Kurumsal Mavi) çıkarıldı. Sıra kasıtlı: mevcut
+    // kullanıcıların bugüne kadar alıştığı Koyu→Açık geçişi AYNEN korunuyor,
+    // yeni tema döngünün sonuna ekleniyor — hiçbir mevcut davranış bozulmuyor.
+    const THEME_CYCLE = ['dark', 'light', 'fintech'];
 
     function getCurrentTheme() {
-        return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const v = document.documentElement.getAttribute('data-theme');
+        return (v === 'light' || v === 'fintech') ? v : 'dark';
     }
 
     function applyTheme(theme) {
-        if (theme === 'light') {
-            document.documentElement.setAttribute('data-theme', 'light');
+        if (theme === 'light' || theme === 'fintech') {
+            document.documentElement.setAttribute('data-theme', theme);
         } else {
             document.documentElement.removeAttribute('data-theme');
         }
@@ -4172,8 +4178,10 @@ const TradingEngine = (() => {
 
         const moonIcon = byId('theme-icon-moon');
         const sunIcon = byId('theme-icon-sun');
-        if (moonIcon) moonIcon.style.display = theme === 'light' ? 'none' : 'block';
+        const fintechIcon = byId('theme-icon-fintech');
+        if (moonIcon) moonIcon.style.display = theme === 'dark' ? 'block' : 'none';
         if (sunIcon) sunIcon.style.display = theme === 'light' ? 'block' : 'none';
+        if (fintechIcon) fintechIcon.style.display = theme === 'fintech' ? 'block' : 'none';
 
         // The chart canvas paints its own background/grid/text via JS options,
         // not CSS, so it needs to be told about the theme change explicitly.
@@ -4181,7 +4189,8 @@ const TradingEngine = (() => {
     }
 
     function toggleTheme() {
-        applyTheme(getCurrentTheme() === 'light' ? 'dark' : 'light');
+        const idx = THEME_CYCLE.indexOf(getCurrentTheme());
+        applyTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
     }
 
     function setupThemeToggle() {
