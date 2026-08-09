@@ -277,6 +277,27 @@ const TradingEngine = (() => {
 
     function savePortfolio() {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio)); } catch (e) { /* quota / private mode */ }
+        // (9 Ağustos 2026 — "aynı hesabı 2-3 cihazdan art arda satabiliyorum,
+        // her seferinde parasını alıyorum" kök neden düzeltmesi) ÖNCEDEN bu
+        // fonksiyon SADECE localStorage'a yazıyordu — buluta (ve dolayısıyla
+        // diğer cihazlara) sadece finteclubBridge.js'in periyodik 5 saniyelik
+        // turunda gidiyordu. Bir işlemden hemen sonra buluta gidene kadar
+        // geçen bu boşluk, tam olarak başka bir cihazın AYNI pozisyonu
+        // "hâlâ açık" sanıp tekrar satabildiği ve her seferinde parasını
+        // aldığı pencereydi. Artık her portföy değişikliğinde (satış/alım/
+        // kapama/SL-TP/admin bakiye komutu — hepsi savePortfolio()'dan
+        // geçiyor) finteclubBridge.js'e anında (kısa bir debounce ile)
+        // senkronize olma talebi gönderiliyor; asıl çift-ödeme güvencesi
+        // ise finteclubBridge.js'teki rev-korumalı Firestore TRANSACTION'ı
+        // sağlıyor (bkz. o dosyadaki requestImmediateSync/
+        // pushFullPortfolioToCloud yorumları) — bir cihazın bayat veriye
+        // dayanan işlemi asla kalıcı olarak buluta yazılamaz. FinteClub
+        // hiç yüklenmediyse (CDN engelli/offline) ya da giriş yapılmadıysa
+        // bu çağrı güvenle no-op olur, hiçbir üretim davranışı buna bağımlı
+        // değildir.
+        if (window.FinteClubBridge && typeof window.FinteClubBridge.requestImmediateSync === 'function') {
+            try { window.FinteClubBridge.requestImmediateSync(); } catch (e) { /* asla trade akışını bozmasın */ }
+        }
     }
 
     function resetPortfolio() {

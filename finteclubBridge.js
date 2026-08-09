@@ -34,11 +34,20 @@
    kullanıcıları yanlışlıkla kilitlemez.
 
    Bu dosya, mevcut dev kod tabanına (tradingEngine.js vb.) hiç dokunmadan,
-   tamamen ek/bağımsız olarak çalışacak şekilde tasarlandı; tek paylaştığı
-   şey, tradingEngine.js'in zaten okuduğu 'optipulselab_profile_name_v1'
-   localStorage anahtarıdır (bkz. applyVerifiedProfile()). Bu giriş ekranı
-   sadece "FinteLig Yarışmacısı" rozetini/takibini almak isteyenler için —
-   genel ziyaretçiler OPLab'ı hiç giriş yapmadan, olduğu gibi kullanabilir.
+   tamamen ek/bağımsız olarak çalışacak şekilde tasarlandı; paylaştığı şey,
+   tradingEngine.js'in zaten okuduğu 'optipulselab_profile_name_v1'/
+   'optipulselab_paper_portfolio_v1' localStorage anahtarları (bkz.
+   applyVerifiedProfile()/readLocalPortfolio()). Bu giriş ekranı sadece
+   "FinteLig Yarışmacısı" rozetini/takibini almak isteyenler için — genel
+   ziyaretçiler OPLab'ı hiç giriş yapmadan, olduğu gibi kullanabilir.
+
+   (9 Ağustos 2026 — çift-satış kök neden düzeltmesi) TEK bir BİLİNÇLİ
+   istisna: window.FinteClubBridge.requestImmediateSync() artık
+   tradingEngine.js tarafından her işlemden sonra çağrılıyor (bkz. o
+   fonksiyonun ve tradingEngine.js'teki savePortfolio()'nun yorumları) —
+   çok cihazlı çift-satışı önlemek için gerekliydi, aksi halde iki cihaz
+   arasında periyodik senkronun bıraktığı boşlukta aynı pozisyon birden
+   fazla kez satılıp her seferinde ödeniyordu.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -144,6 +153,41 @@
     // (reload döngüsü) emin olmak için.
     var DEVICE_ID_KEY = 'optipulselab_device_id_v1';
     var PORTFOLIO_CLOUD_SYNC_KEY = 'optipulselab_portfolio_cloud_sync_v1';
+    // (9 Ağustos 2026 — "aynı hesabı 2-3 cihazdan art arda satabiliyorum,
+    // her seferinde parasını alıyorum" kök neden düzeltmesi) ÖNCEKİ tasarımın
+    // açığı: pushFullPortfolioToCloud() KOŞULSUZ bir .set({merge:true}) idi
+    // — hangi cihaz EN SON yazarsa o kazanıyordu, ama "en son" olmak
+    // BAŞARISIZ/bayat bir işlemi meşrulaştırmıyordu. Telefon satıp parayı
+    // alıyor, PC (henüz telefonun yazdığını görmediği için) AYNI pozisyonu
+    // yine "açık" sanıp tekrar satıyor ve PARA YİNE VERİLİYOR — iki cihaz da
+    // kendi (birbirinden habersiz) sürümünü buluta yazınca, ikisinin de
+    // "kazandığı" nakit kalıcı olarak bakiyede kalıyordu (çift/üçlü ödeme).
+    //
+    // Kök çözüm: her bulut kaydına artan bir tam sayı sürüm numarası (rev)
+    // eklendi. Bir cihaz push ATMADAN ÖNCE, en son GÖRDÜĞÜ bulut rev'ini
+    // (PORTFOLIO_KNOWN_REV_KEY) bilir. push, düz bir .set() DEĞİL, bir
+    // Firestore TRANSACTION'ı içinde yapılır: transaction bulutun O ANKİ
+    // gerçek rev'ini okur; eğer bulutta, bu cihazın bildiğinden DAHA YENİ
+    // (başka bir cihazın arada yazdığı) bir rev varsa, bu cihazın kendi
+    // (muhtemelen bayat veriye dayanan, belki çift-satış içeren) sürümü
+    // ASLA buluta yazılıp doğru veriyi EZMEZ — push reddedilir, bunun
+    // yerine bu cihaz buluttaki GERÇEK/doğru sürümü benimseyip kendini
+    // düzeltir (bkz. pushFullPortfolioToCloud). Firestore transaction'ları
+    // ATOMİK olduğundan (okuma+yazma arasına başka bir yazma girerse
+    // otomatik olarak yeniden denenir), iki cihaz TAM OLARAK AYNI ANDA
+    // push atmaya çalışsa bile sadece biri kazanır — ötekinin çift ödemesi
+    // asla kalıcı olarak bakiyede kalamaz, birkaç saniye içinde geri alınır.
+    var PORTFOLIO_KNOWN_REV_KEY = 'optipulselab_portfolio_known_rev_v1';
+    function getKnownCloudRev() {
+        try {
+            var raw = localStorage.getItem(PORTFOLIO_KNOWN_REV_KEY);
+            var n = raw === null ? 0 : parseInt(raw, 10);
+            return isFinite(n) && n >= 0 ? n : 0;
+        } catch (e) { return 0; }
+    }
+    function setKnownCloudRev(rev) {
+        try { localStorage.setItem(PORTFOLIO_KNOWN_REV_KEY, String(rev)); } catch (e) { /* private mode */ }
+    }
     // (8 Ağustos 2026 — admin panelinden bakiye ayarlama) bu cihaza en son
     // UYGULANAN bakiye komutunun requestedAt zaman damgası — aynı komutu
     // tekrar tekrar uygulayıp durmadan (reload sonrası onSnapshot yeniden
@@ -453,6 +497,32 @@
         pushFullPortfolioToCloud();
     }
 
+    // (9 Ağustos 2026 — çift-satış kök neden düzeltmesi) ÖNCEDEN portföy
+    // sadece periyodik 5 saniyelik pushPortfolioSnapshot() turunda buluta
+    // gidiyordu — bir işlemden hemen sonra buluta gidene kadar geçen bu
+    // (en kötü ihtimalle ~5 saniyelik) boşluk, başka bir cihazın AYNI
+    // pozisyonu "hâlâ açık" sanıp tekrar satabilmesine izin veren asıl
+    // pencereydi. requestImmediateSync() bu boşluğu ~400ms'ye indirir:
+    // tradingEngine.js her portföy-değiştiren işlemden (savePortfolio())
+    // sonra bunu çağırır. Kısa bir debounce (aynı anda/art arda birden
+    // fazla tetiklenirse tek push'a birleştirmek için) dışında hemen
+    // pushFullPortfolioToCloud()'u tetikler — o da rev-korumalı TRANSACTION
+    // sayesinde, hangi cihaz gerçekten en güncel veriye dayanıyorsa SADECE
+    // onun yazmasını garanti eder (bkz. pushFullPortfolioToCloud). Yani bu
+    // fonksiyon çakışma PENCERESİNİ küçültür, gerçek güvenceyi ise
+    // transaction'daki rev kontrolü sağlar — pencere hiç kapanmasa bile
+    // (ör. çok kötü bir bağlantıda) çift-satışın parası kalıcı olarak
+    // bakiyede KALAMAZ.
+    var immediateSyncTimer = null;
+    function requestImmediateSync() {
+        if (!fsUserPortfoliosDoc || !verifiedApp) return;
+        if (immediateSyncTimer) clearTimeout(immediateSyncTimer);
+        immediateSyncTimer = setTimeout(function () {
+            immediateSyncTimer = null;
+            pushFullPortfolioToCloud();
+        }, 400);
+    }
+
     // Bu cihazı kalıcı olarak tanımlayan rastgele bir id — bkz. DEVICE_ID_KEY
     // yorumundaki açıklama.
     function getDeviceId() {
@@ -475,23 +545,85 @@
     // yapıyor ama PC'de açınca bakiyesi 100.000'e sıfırlanmış görünüyor"
     // hatasının kök çözümü — artık TEK doğru kaynak bu belge, localStorage
     // sadece hızlı yerel önbellek.
+    // (9 Ağustos 2026 — "aynı hesabı 2-3 cihazdan art arda satabiliyorum"
+    // kök neden düzeltmesi) ARTIK koşulsuz bir .set() DEĞİL — bkz.
+    // PORTFOLIO_KNOWN_REV_KEY yorumundaki tam açıklama. Bu fonksiyon bir
+    // Firestore TRANSACTION'ı içinde çalışır: bulutun O ANKİ gerçek rev'i,
+    // bu cihazın bildiğinden (getKnownCloudRev()) daha yeniyse VE bu yeni
+    // rev'i yazan cihaz kendisi değilse, bu cihazın kendi (bayat veriye
+    // dayanan) sürümü buluta YAZILMAZ — çakışma tespit edilir, bu cihaz
+    // buluttaki GERÇEK/güncel portföyü benimseyip kendini düzeltir. Rev
+    // eşleşiyorsa (araya başka bir cihaz girmemiş), normal şekilde yazılır
+    // ve rev bir artırılır.
     function pushFullPortfolioToCloud() {
-        if (!fsUserPortfoliosDoc || !verifiedApp) return;
+        if (!fsUserPortfoliosDoc || !verifiedApp) return Promise.resolve();
         var portfolio = readLocalPortfolio();
-        if (!portfolio || typeof portfolio.balance !== 'number') return;
-        var nowIso = new Date().toISOString();
-        var payload = { users: {} };
-        payload.users[String(verifiedApp.id)] = {
-            name: verifiedApp.name || '',
-            email: verifiedApp.email || '',
-            portfolio: portfolio,
-            deviceId: getDeviceId(),
-            updatedAt: nowIso
-        };
-        return fsUserPortfoliosDoc.set(payload, { merge: true }).then(function () {
-            try { localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, nowIso); } catch (e) { /* private mode */ }
+        if (!portfolio || typeof portfolio.balance !== 'number') return Promise.resolve();
+        var userId = String(verifiedApp.id);
+        var deviceId = getDeviceId();
+        var knownRev = getKnownCloudRev();
+        var db = fsUserPortfoliosDoc.firestore;
+
+        return db.runTransaction(function (tx) {
+            return tx.get(fsUserPortfoliosDoc).then(function (doc) {
+                var data = doc.exists ? (doc.data() || {}) : {};
+                var users = data.users || {};
+                var record = users[userId];
+                var cloudRev = (record && typeof record.rev === 'number') ? record.rev : 0;
+
+                // ÇAKIŞMA: bulutta bizim bildiğimizden DAHA YENİ bir sürüm
+                // var VE bunu yazan biz değiliz — bu cihazın üzerine işlem
+                // kurduğu taban veri ZATEN BAYAT (arada başka bir cihaz
+                // işlem yapmış). Kendi sürümümüzü buluta yazıp doğru
+                // veriyi ASLA ezmeyelim.
+                if (record && cloudRev > knownRev && record.deviceId !== deviceId) {
+                    return { conflict: true, record: record, cloudRev: cloudRev };
+                }
+
+                var nowIso = new Date().toISOString();
+                var newRecord = {
+                    name: verifiedApp.name || '',
+                    email: verifiedApp.email || '',
+                    portfolio: portfolio,
+                    rev: cloudRev + 1,
+                    deviceId: deviceId,
+                    updatedAt: nowIso
+                };
+                var newUsers = {};
+                newUsers[userId] = newRecord;
+                // (9 Ağustos 2026 — merge:true'nun kendi açtığı "hayalet
+                // pozisyon" düzeltmesi) DİKKAT: burada DÜZ {merge:true}
+                // KULLANILAMAZ. Firestore'da merge:true, İÇ İÇE map
+                // alanlarını (ör. portfolio.positions — sembol->pozisyon
+                // sözlüğü) da REKURSİF olarak birleştirir; yani bir
+                // pozisyon kapatılıp positions {} olsa bile, buluttaki
+                // ESKİ kayıttan kalan sembol anahtarı SİLİNMEZ (merge sadece
+                // EKLER/ÜZERİNE YAZAR, patch'te bulunmayan bir anahtarı asla
+                // silmez) — kapatılmış bir pozisyon başka bir cihaza
+                // senkronize olunca hayalet şekilde YENİDEN AÇIK görünür.
+                // mergeFields ile 'users.<id>' yolunun TAMAMINI (bir bütün
+                // olarak) DEĞİŞTİRİYORUZ — bu yolun altındaki her şey (rev,
+                // portfolio.positions dahil) tam olarak newRecord'daki
+                // değerle değişir, rekursif birleştirme YOK; aynı belgedeki
+                // DİĞER kullanıcıların (users.<başkaId>) kayıtlarına ise hiç
+                // dokunulmaz (mergeFields'ın asıl amacı zaten bu).
+                tx.set(fsUserPortfoliosDoc, { users: newUsers }, { mergeFields: ['users.' + userId] });
+                return { conflict: false, rev: cloudRev + 1, updatedAt: nowIso };
+            });
+        }).then(function (res) {
+            if (res.conflict) {
+                console.warn('Portföy push çakışması: buluttaki sürüm daha yeni, yerel işlem geri alınıp bulut benimseniyor.');
+                applyCloudPortfolioRecordIfNewer(res.record, { force: true, reasonConflict: true });
+                return { ok: false, conflict: true };
+            }
+            try {
+                setKnownCloudRev(res.rev);
+                localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, res.updatedAt);
+            } catch (e) { /* private mode */ }
+            return { ok: true };
         }).catch(function (e) {
             console.warn('Portföy bulut senkronizasyonu başarısız (oplab_user_portfolios).', e);
+            return { ok: false, error: e };
         });
     }
 
@@ -513,32 +645,42 @@
     // için hiçbir cihazda henüz push olmadı), yereldekini bulut için
     // başlangıç kaydı olarak gönderir.
     //
-    // BİLİNEN SINIR: aynı hesap AYNI ANDA iki cihazda açıksa (örn. hem
-    // telefon hem PC canlı işlem yapıyor), gerçek zamanlı çakışma çözümü
-    // yapılmıyor — hangi cihaz en son push ederse o kazanır. Yarışma
-    // sırasında her yarışmacının TEK cihazdan aktif işlem yapması önerilir;
-    // bu düzeltme "başka bir cihaza geçince görünmeyen/eski veri" sorununu
-    // (artık sayfa yenilemeden de) çözüyor — iki cihazın AYNI ANDA aktif
-    // trade yapmasını değil (bu, çok daha büyük bir çakışma-çözümleme
-    // projesi gerektirir).
-    function applyCloudPortfolioRecordIfNewer(record) {
+    // (9 Ağustos 2026 — çift-satış kök neden düzeltmesi) ÖNCEDEN "hangi
+    // cihaz en son push ederse o kazanır" diye BİLİNEN BİR SINIR olarak
+    // belgelenmişti — bu artık DOĞRU DEĞİL: karar artık son yazan değil,
+    // artan tam sayı rev'e (bkz. PORTFOLIO_KNOWN_REV_KEY) dayanıyor ve
+    // pushFullPortfolioToCloud() içindeki Firestore TRANSACTION'ı iki
+    // cihazın TAM OLARAK AYNI ANDA push atmasını bile güvenle çözüyor —
+    // sadece rev'i doğru bilen (yani en güncel veriye dayanan) taraf
+    // kazanıyor, ötekinin (bayat veriye dayanan, çift-satış içerebilecek)
+    // sürümü asla kalıcı olarak buluta yazılmıyor.
+    function applyCloudPortfolioRecordIfNewer(record, opts) {
         if (!record || !record.portfolio) return false;
+        opts = opts || {};
 
         // Bulut kaydı bu cihazın kendi son gönderdiği kayıtsa yapacak
-        // bir şey yok.
-        if (record.deviceId === getDeviceId()) return false;
+        // bir şey yok (force:true — push çakışması yolundan geliyorsa bu
+        // kontrolü atla, çünkü orada zaten "bu bizim kendi kaydımız
+        // DEĞİL" doğrulanmış oldu).
+        if (!opts.force && record.deviceId === getDeviceId()) return false;
 
-        var lastApplied = null;
-        try { lastApplied = localStorage.getItem(PORTFOLIO_CLOUD_SYNC_KEY); } catch (e) { /* private mode */ }
-        if (lastApplied && record.updatedAt && lastApplied === record.updatedAt) return false;
+        var cloudRev = typeof record.rev === 'number' ? record.rev : 0;
+        var knownRev = getKnownCloudRev();
+        // Zaten bu sürümü (ya da daha yenisini) biliyorsak tekrar
+        // uygulama/reload döngüsüne girme.
+        if (!opts.force && cloudRev <= knownRev) return false;
 
         try {
             localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(record.portfolio));
+            setKnownCloudRev(cloudRev);
             if (record.updatedAt) localStorage.setItem(PORTFOLIO_CLOUD_SYNC_KEY, record.updatedAt);
         } catch (e) { return false; /* private mode / quota — güvenle vazgeç, yerelde kalsın */ }
 
+        var msg = opts.reasonConflict
+            ? 'Bu cihazda yapılan son işlem başka bir cihazdaki daha güncel bir işlemle çakıştı ve geri alındı. Güncel/doğru portföyünüz yükleniyor...'
+            : 'Portföyün başka bir cihazdan senkronize edildi, sayfa yenileniyor...';
         if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
-            window.TradingEngine.showToast('Portföyün başka bir cihazdan senkronize edildi, sayfa yenileniyor...');
+            window.TradingEngine.showToast(msg);
         }
         setTimeout(function () { location.reload(); }, 900);
         return true;
@@ -551,6 +693,14 @@
             var data = doc.data() || {};
             var record = (data.users || {})[String(verifiedApp.id)];
             if (!record || !record.portfolio) { return pushFullPortfolioToCloud(); }
+            var cloudRev = typeof record.rev === 'number' ? record.rev : 0;
+            if (record.deviceId === getDeviceId()) {
+                // Bu, bu cihazın kendi son gönderdiği kayıt — yerel veriye
+                // dokunma, sadece bilinen rev'i hizala ki bir sonraki push
+                // doğru taban üzerinden çakışma kontrolü yapabilsin.
+                setKnownCloudRev(cloudRev);
+                return;
+            }
             applyCloudPortfolioRecordIfNewer(record);
         }).catch(function (e) {
             console.warn('Bulut portföy verisi okunamadı, yerel veriyle devam ediliyor.', e);
@@ -805,6 +955,33 @@
         listenForBalanceCommands: function () { return listenForBalanceCommands(); },
         pushPortfolioSnapshot: function () { return pushPortfolioSnapshot(); },
         computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); },
-        listenForPortfolioSync: function () { return listenForPortfolioSync(); }
+        listenForPortfolioSync: function () { return listenForPortfolioSync(); },
+        getKnownCloudRev: function () { return getKnownCloudRev(); },
+        setKnownCloudRev: function (n) { return setKnownCloudRev(n); },
+        requestImmediateSyncNow: function () { if (immediateSyncTimer) { clearTimeout(immediateSyncTimer); immediateSyncTimer = null; } return pushFullPortfolioToCloud(); },
+        // (9 Ağustos 2026 — çoklu cihaz test desteği) Gerçek girişte
+        // verifiedApp, tam Firebase Authentication + FinTeClub başvuru
+        // eşleştirme akışından SONRA dolar — bu, Playwright testlerinde
+        // gerçek bir hesap/şifre/onay akışı kurmadan çok-cihazlı senkron
+        // MANTIĞINI (push/hydrate/listen/transaction) doğrudan test etmeyi
+        // imkansız kılardı. Diğer debug fonksiyonları gibi hiçbir üretim
+        // kodu buna bağımlı değildir.
+        setVerifiedAppForTest: function (app) { verifiedApp = app; },
+        applyCloudPortfolioRecordIfNewer: function (record, opts) { return applyCloudPortfolioRecordIfNewer(record, opts); }
+    };
+
+    // (9 Ağustos 2026 — çift-satış kök neden düzeltmesi) Bu dosyanın
+    // başındaki tasarım ilkesi ("tradingEngine.js'e hiç dokunmadan çalışır")
+    // burada BİLEREK, tek ve dar bir noktada esnetildi: tradingEngine.js,
+    // her portföy-değiştiren işlemden sonra (savePortfolio() içinden) bu
+    // objeyi (varsa) çağırıp anlık bulut senkronizasyonu TALEP EDER. Bu,
+    // önceki periyodik-SADECE (5 saniyelik) senkronun bıraktığı, iki
+    // cihazın aynı pozisyonu art arda satabilmesine izin veren boşluğu
+    // kapatmak için gerekliydi — bkz. requestImmediateSync() yorumu.
+    // window.FinteClubBridge yoksa (bu dosya hiç yüklenemediyse / Firebase
+    // engelliyse) tradingEngine.js'teki çağrı güvenle no-op olur, hiçbir
+    // üretim davranışı buna bağımlı değildir.
+    window.FinteClubBridge = {
+        requestImmediateSync: function () { return requestImmediateSync(); }
     };
 })();
