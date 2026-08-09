@@ -1083,7 +1083,7 @@
                     <!-- Bekleyen OCO emirleri (17 Temmuz 2026, yedinci oturum;
                          23 Temmuz 2026 on üçüncü oturum devamında kart listesine çevrildi) -->
                     <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group">
-                        <label>Bekleyen OCO Emirleri (Spot)</label>
+                        <label>Bekleyen Emirler — OCO/Limit (Spot)</label>
                         <div class="table-container qt-mini-table">
                             <div id="qt-pending-oco-body" class="qt-card-list"></div>
                         </div>
@@ -1116,7 +1116,7 @@
                     </div>
 
                     <div class="form-group" style="margin-top: 16px;" id="qt-pending-oco-group-viop">
-                        <label>Bekleyen OCO Emirleri (VİOP)</label>
+                        <label>Bekleyen Emirler — OCO/Limit (VİOP)</label>
                         <div class="table-container qt-mini-table">
                             <div id="qt-pending-oco-body-viop" class="qt-card-list"></div>
                         </div>
@@ -1430,6 +1430,32 @@
                     <div class="indicator-modal-toolbar" style="margin-top:10px;">
                         <button type="button" class="btn-chip-action" id="btn-sltp-clear">Temizle</button>
                         <button type="button" class="btn-chip-action" id="btn-sltp-save">Kaydet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- (6 Ağustos 2026 — Ali İhsan Hocam'ın isteği) Alım/satım onay penceresi —
+         AL/SAT tuşuna basınca emir DOĞRUDAN gerçekleşmez, önce bu modal emrin
+         özetini (adet, sembol, fiyat, kaldıraç, gereken teminat) gösterir ve
+         kullanıcı "Onayla" demeden hiçbir pozisyon/bakiye değişmez. Hem Spot
+         hem VİOP, hem Piyasa hem Limit emir tipleri için kullanılır. -->
+    <div class="indicator-modal-backdrop" id="order-confirm-modal-backdrop">
+        <div class="indicator-modal" role="dialog" aria-modal="true" aria-label="Emir Onayı">
+            <div class="indicator-modal-header">
+                <h3 id="order-confirm-title">Emir Onayı</h3>
+                <button type="button" class="indicator-modal-close" id="btn-close-order-confirm" aria-label="Kapat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="indicator-modal-body">
+                <div class="indicator-modal-category" data-category-label="özet">
+                    <p class="order-confirm-question" id="order-confirm-question">--</p>
+                    <div class="order-confirm-summary" id="order-confirm-summary"></div>
+                    <div class="indicator-modal-toolbar" style="margin-top:14px;">
+                        <button type="button" class="btn-chip-action" id="btn-order-confirm-cancel">Vazgeç</button>
+                        <button type="button" class="btn-chip-action btn-order-confirm-submit" id="btn-order-confirm-submit">Onayla</button>
                     </div>
                 </div>
             </div>
