@@ -93,17 +93,34 @@ const TradingEngine = (() => {
     function updateTradeAvailabilityUI() {
         const submitBtn = byId('qt-submit');
         const notice = byId('qt-trading-status-notice');
-        const allowed = isTradingAllowedNow();
+        // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
+        // Admin durdurması HER ZAMAN tam blok (kuyruğa bile alınamaz — bkz.
+        // submitOrder()). Piyasa kapalı olması ise artık OCO HARİÇ tam blok
+        // DEĞİL: Market/Limit emirleri hâlâ girilebilir, sadece hemen değil
+        // piyasa açılınca sıradan otomatik gerçekleşir (bkz. submitOrder(),
+        // queuePendingMarketOrder, checkPendingOcoOrders). OCO bu kapsamın
+        // dışında tutuldu, o yüzden piyasa kapalıyken OCO seçiliyse buton
+        // yine tam pasif.
+        const haltedByAdmin = isTradingHaltedByAdmin();
+        const marketClosed = !isMarketOpenForTrading();
+        const blockedHard = haltedByAdmin || (marketClosed && state.orderType === 'OCO');
         if (submitBtn) {
-            submitBtn.disabled = !allowed;
-            submitBtn.title = allowed ? '' : tradingBlockedReason();
+            submitBtn.disabled = blockedHard;
+            submitBtn.title = blockedHard ? tradingBlockedReason() : (marketClosed ? 'Piyasa kapalı — emriniz sıraya alınıp açılışta otomatik gerçekleştirilecek.' : '');
         }
         if (notice) {
-            if (allowed) {
-                notice.style.display = 'none';
-            } else {
+            if (blockedHard) {
                 notice.textContent = '⛔ ' + tradingBlockedReason();
                 notice.style.display = '';
+                notice.classList.remove('qt-alert-info');
+                notice.classList.add('qt-alert-error');
+            } else if (marketClosed) {
+                notice.textContent = 'ℹ️ Piyasa şu anda kapalı — gireceğiniz Piyasa/Limit emri sıraya alınır, gereken teminat şimdi bakiyenizden kilitlenir, piyasa açılınca (hafta içi 09:55–18:00 TRT) otomatik gerçekleştirilir.';
+                notice.style.display = '';
+                notice.classList.remove('qt-alert-error');
+                notice.classList.add('qt-alert-info');
+            } else {
+                notice.style.display = 'none';
             }
         }
     }
@@ -2937,12 +2954,31 @@ const TradingEngine = (() => {
     // ASELS 0,01 TL'den almak istediğinize emin misiniz?" gibi bir özeti
     // görünce hatayı fark edebilir).
     function submitOrder() {
-        // (9 Ağustos 2026 — piyasa kapalıyken/admin durdurunca emir engelleme)
-        // Bu, tek gerçek koruma DEĞİL — buton da updateTradeAvailabilityUI()
-        // ile pasif hale getiriliyor — ama olası bir yarış durumuna (ör.
-        // buton disabled olmadan hemen önce tıklanması) veya klavye/programatik
-        // tetiklemeye karşı asıl, atlanamaz kontrol burası.
-        if (!isTradingAllowedNow()) {
+        // (9 Ağustos 2026 — admin durdurunca emir engelleme) Bu, tek gerçek
+        // koruma DEĞİL — buton da updateTradeAvailabilityUI() ile pasif hale
+        // getiriliyor — ama olası bir yarış durumuna (ör. buton disabled
+        // olmadan hemen önce tıklanması) veya klavye/programatik tetiklemeye
+        // karşı asıl, atlanamaz kontrol burası. Admin durdurması HER ZAMAN
+        // tam blok (kuyruğa bile alınamaz).
+        if (isTradingHaltedByAdmin()) {
+            const m = tradingBlockedReason();
+            showToast(m); showTicketAlert(m, 'error');
+            return;
+        }
+        // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
+        // ÖNCEDEN piyasa kapalıyken TÜM emir türleri burada reddediliyordu.
+        // Artık kullanıcı isteği üzerine SADECE OCO bu şekilde tam
+        // reddediliyor — Piyasa ve Limit emirleri piyasa kapalıyken de
+        // kabul ediliyor, aşağıda "kuyruğa alınacak" (willQueueAsPending)
+        // olarak işaretlenip gerçek gerçekleştirme piyasa açılınca
+        // checkPendingOcoOrders() üzerinden otomatik yapılıyor — tıpkı
+        // gerçek borsa/aracı kurum uygulamalarındaki (Binance/Midas vb.)
+        // "seans dışı emir" davranışı gibi: emir anında kuyruğa alınır,
+        // gereken teminat ANINDA bakiyeden kilitlenir (bkz.
+        // queuePendingLimitOrder/queuePendingMarketOrder), piyasa açılır
+        // açılmaz o anki güncel/açılış fiyatından gerçekleştirilir.
+        const marketClosedNow = !isMarketOpenForTrading();
+        if (marketClosedNow && state.orderType === 'OCO') {
             const m = tradingBlockedReason();
             showToast(m); showTicketAlert(m, 'error');
             return;
@@ -2960,7 +2996,9 @@ const TradingEngine = (() => {
             // OCO zaten "anında gerçekleşmeyen, koşula bağlı" bir emir türü
             // (kurulduğunda hiçbir şey satın alınmıyor/satılmıyor) — hocanın
             // istediği "AL/SAT'a basınca onay" akışı buraya değil, ANINDA
-            // gerçekleşen Piyasa/Limit emirlerine uygulanıyor.
+            // gerçekleşen Piyasa/Limit emirlerine uygulanıyor. (Piyasa
+            // kapalıyken zaten yukarıda reddedildiği için buraya SADECE
+            // piyasa açıkken ulaşılır.)
             submitOcoOrder(qty, enteredPrice, commissionPct);
             return;
         }
@@ -2986,17 +3024,38 @@ const TradingEngine = (() => {
             const marketPrice = getPrice(state.activeSymbol);
             if (!marketPrice) { const m = 'Fiyat bilgisi alınamadı.'; showToast(m); showTicketAlert(m, 'error'); return; }
             limitPrice = enteredPrice;
-            const conditionAlreadyMet = state.side === 'BUY' ? (limitPrice >= marketPrice) : (limitPrice <= marketPrice);
-            if (conditionAlreadyMet) {
-                fillPrice = marketPrice; // KÖK DÜZELTME: kullanıcının yazdığı fiyat DEĞİL, gerçek/sınırlı piyasa fiyatı
-            } else {
+            if (marketClosedNow) {
+                // Piyasa kapalıyken koşul o anki (donmuş) fiyata göre zaten
+                // sağlanmış olsa bile HEMEN gerçekleştirilemez — piyasa
+                // açılınca checkPendingOcoOrders() ilk tick'te normal LIMIT
+                // tetik mantığıyla değerlendirir (genelde açılış anında da
+                // hâlâ sağlanıyor olacağından pratikte "açılışta gerçekleşir"
+                // anlamına gelir).
                 willQueueAsPending = true;
+            } else {
+                const conditionAlreadyMet = state.side === 'BUY' ? (limitPrice >= marketPrice) : (limitPrice <= marketPrice);
+                if (conditionAlreadyMet) {
+                    fillPrice = marketPrice; // KÖK DÜZELTME: kullanıcının yazdığı fiyat DEĞİL, gerçek/sınırlı piyasa fiyatı
+                } else {
+                    willQueueAsPending = true;
+                }
             }
+        } else if (state.orderType === 'MARKET' && marketClosedNow) {
+            // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
+            // Piyasa kapalıyken bir Piyasa (Market) emri artık reddedilmek
+            // yerine kuyruğa alınıyor — bkz. queuePendingMarketOrder().
+            // fillPrice zaten enteredPrice (donmuş son fiyat), sadece
+            // TAHMİNİ teminat hesaplamak ve onay penceresinde göstermek için
+            // kullanılıyor; gerçek gerçekleşme fiyatı piyasa açılınca o anki
+            // güncel fiyattır.
+            willQueueAsPending = true;
         }
 
-        // Optional Stop-Loss / Take-Profit — bekleyen bir limit emri için henüz
-        // gerçekleşme fiyatı bilinmediğinden, doğrulama limitPrice'a göre yapılır.
-        const sltpReference = willQueueAsPending ? limitPrice : fillPrice;
+        // Optional Stop-Loss / Take-Profit — bekleyen bir emir için henüz
+        // kesin gerçekleşme fiyatı bilinmediğinden, doğrulama limitPrice
+        // (Limit) ya da fillPrice (kapalıyken kuyruğa alınan Market) baz
+        // alınarak yapılır.
+        const sltpReference = willQueueAsPending ? (limitPrice !== null ? limitPrice : fillPrice) : fillPrice;
         const sltpToggle = byId('qt-sltp-toggle');
         let slPrice = null, tpPrice = null;
         if (sltpToggle && sltpToggle.checked) {
@@ -3048,7 +3107,16 @@ const TradingEngine = (() => {
     // submitOrder()'ın hazırladığı emir bağlamı (bkz. yukarısı).
     function executeConfirmedOrder(ctx) {
         if (ctx.willQueueAsPending) {
-            queuePendingLimitOrder(ctx);
+            // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
+            // İki farklı kuyruklama nedeni var: Limit fiyat koşulu henüz
+            // sağlanmadı (kind: 'LIMIT') YA DA piyasa kapalı olduğu için bir
+            // Market emri hemen gerçekleştirilemedi (kind: 'MARKET_QUEUED').
+            // ctx.limitPrice sadece gerçek bir LIMIT emrinde dolu olur.
+            if (ctx.orderType === 'LIMIT') {
+                queuePendingLimitOrder(ctx);
+            } else {
+                queuePendingMarketOrder(ctx);
+            }
             resetTicketAfterOrder();
             return;
         }
@@ -3157,11 +3225,19 @@ const TradingEngine = (() => {
     // PİYASA FİYATINDAN gerçekleştiriyor — asla kullanıcının yazdığı limit
     // fiyatından değil (bkz. submitOrder()'daki kök neden notu).
     function queuePendingLimitOrder(ctx) {
-        // Bakiye ön-kontrolü (OCO'daki ile aynı desen): kesin kontrol yine
-        // tetiklenme anında placeOrder() içinde yapılacak, bu sadece erken
-        // bir uyarı katmanı — tahmini fiyat olarak limit fiyatı kullanılıyor.
-        // (effectiveBalance() kullanılıyor ki FinteLig girişi yapmamış bir
-        // kullanıcı için de gerçek placeOrder() kontrolüyle tutarlı olsun.)
+        // (9 Ağustos 2026 — Binance/Midas tarzı anlık teminat kilidi)
+        // ÖNCEDEN bu sadece bir "ön kontrol"dü (estimatedRequired >
+        // effectiveBalance() kontrolü geçilirse HİÇBİR ŞEY bakiyeden
+        // düşülmüyordu) — kullanıcı aynı bakiyeyle art arda birden fazla
+        // bekleyen emir kurup toplamda bakiyesinden fazla teminat taahhüt
+        // edebiliyordu. Gerçek borsa/aracı kurum davranışı (kullanıcının
+        // referans verdiği Binance/Midas gibi): emir GİRER GİRMEZ gereken
+        // teminat anında kilitlenir/düşülür. Aşağıda estimatedRequired kadarı
+        // (pozisyon azaltma/kapatma ağırlıklı emirlerde negatif çıkabilir —
+        // o durumda hiçbir şey kilitlenmiyor) portfolio.balance'tan hemen
+        // düşülüp emrin üzerinde `reservedAmount` olarak saklanıyor; emir
+        // tetiklendiğinde (checkPendingOcoOrders) ya da iptal edildiğinde
+        // (cancelOcoOrder) TAM olarak geri iade ediliyor.
         const estimatedMargin = estimateOrderMarginRequirement(ctx.symbol, ctx.side, ctx.qty, ctx.limitPrice, ctx.leverage, ctx.market);
         const estimatedCommission = ctx.limitPrice * ctx.qty * (ctx.commissionPct / 100);
         const estimatedRequired = estimatedMargin + estimatedCommission;
@@ -3186,6 +3262,9 @@ const TradingEngine = (() => {
             return;
         }
 
+        const reservedAmount = Math.max(0, estimatedRequired);
+        if (reservedAmount > 0) portfolio.balance -= reservedAmount;
+
         const b = book(ctx.market);
         b.pending.push({
             id: genId(),
@@ -3201,11 +3280,67 @@ const TradingEngine = (() => {
             tpPrice: ctx.tpPrice,
             useTrailing: ctx.useTrailing,
             trailingPct: ctx.trailingPct,
+            reservedAmount,
             createdAt: Date.now()
         });
         savePortfolio();
         renderPendingOcoOrders();
-        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] Limit emir kuruldu: ${ctx.qty} adet ${ctx.symbol} — fiyat ₺${fmtPrice(ctx.limitPrice)} olunca ${ctx.side === 'BUY' ? 'alınacak' : 'satılacak'}.`);
+        renderAccountSummary(); // bakiye anında değişti, ekranı hemen tazele
+        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] Limit emir kuruldu: ${ctx.qty} adet ${ctx.symbol} — fiyat ₺${fmtPrice(ctx.limitPrice)} olunca ${ctx.side === 'BUY' ? 'alınacak' : 'satılacak'}. Gereken teminat (₺${fmtTRY(reservedAmount).replace('₺', '')}) şimdiden kilitlendi.`);
+    }
+
+    // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
+    // Kullanıcı geri bildirimi: "market kapalıyken alım yapar, market
+    // açılınca parayı çeker, kullanıcıya da 'işleminiz sıraya alındı, piyasa
+    // açıldığında bakiyenizden düşecektir' der — Binance/Midas'ta nasılsa
+    // öyle" (teminat anında kilitlenir). queuePendingLimitOrder() ile AYNI
+    // desen — TEK FARK: kind 'MARKET_QUEUED', bir fiyat koşulu YOK, piyasa
+    // açılıp checkPendingOcoOrders() ilk çalıştığı an (o anki güncel/açılış
+    // fiyatından) KOŞULSUZ gerçekleştiriliyor.
+    function queuePendingMarketOrder(ctx) {
+        const estimatedMargin = estimateOrderMarginRequirement(ctx.symbol, ctx.side, ctx.qty, ctx.fillPrice, ctx.leverage, ctx.market);
+        const estimatedCommission = ctx.fillPrice * ctx.qty * (ctx.commissionPct / 100);
+        const estimatedRequired = estimatedMargin + estimatedCommission;
+        if (estimatedRequired > effectiveBalance()) {
+            const m = isFtcLoggedIn()
+                ? 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').'
+                : 'İşlem açmak için önce FinteLig girişi yapmalısın (profil panelinden).';
+            showToast(m);
+            showTicketAlert(m, 'error');
+            return;
+        }
+        const estimatedOpeningNotional = ctx.fillPrice * ctx.qty;
+        if (estimatedOpeningNotional > MAX_ORDER_NOTIONAL_TL) {
+            const m = 'Emrin büyüklüğü (' + fmtTRY(estimatedOpeningNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.';
+            showToast(m);
+            showTicketAlert(m, 'error');
+            return;
+        }
+
+        const reservedAmount = Math.max(0, estimatedRequired);
+        if (reservedAmount > 0) portfolio.balance -= reservedAmount;
+
+        const b = book(ctx.market);
+        b.pending.push({
+            id: genId(),
+            kind: 'MARKET_QUEUED',
+            symbol: ctx.symbol,
+            side: ctx.side,
+            qty: ctx.qty,
+            leverage: ctx.leverage,
+            commissionPct: ctx.commissionPct,
+            market: ctx.market,
+            slPrice: ctx.slPrice,
+            tpPrice: ctx.tpPrice,
+            useTrailing: ctx.useTrailing,
+            trailingPct: ctx.trailingPct,
+            reservedAmount,
+            createdAt: Date.now()
+        });
+        savePortfolio();
+        renderPendingOcoOrders();
+        renderAccountSummary();
+        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] İşleminiz sıraya alındı — piyasa açıldığında ${ctx.qty} adet ${ctx.symbol} ${ctx.side === 'BUY' ? 'alım' : 'satım'} emriniz otomatik gerçekleştirilecek. Gereken teminat (₺${fmtTRY(reservedAmount).replace('₺', '')}) şimdiden bakiyenizden kilitlendi.`);
     }
 
     /* ════════════════════════════════════════════════
@@ -3232,7 +3367,15 @@ const TradingEngine = (() => {
         const expectedExecPrice = ctx.willQueueAsPending ? null : execFillPrice(ctx.side, ctx.fillPrice);
 
         if (ctx.willQueueAsPending) {
-            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Limit Fiyatı</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.limitPrice)}</span></div>`);
+            if (ctx.orderType === 'LIMIT') {
+                rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Limit Fiyatı</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.limitPrice)}</span></div>`);
+            } else {
+                // (9 Ağustos 2026) Piyasa kapalıyken kuyruğa alınan Market
+                // emri — gösterilen fiyat SADECE tahmini teminat hesabı
+                // içindir, gerçek gerçekleşme fiyatı piyasa açılınca o anki
+                // güncel/açılış fiyatıdır.
+                rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Yaklaşık Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.fillPrice)} (açılışta güncellenecek)</span></div>`);
+            }
         } else {
             rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(expectedExecPrice)}${ctx.orderType === 'LIMIT' ? ' (güncel piyasa)' : ''}</span></div>`);
         }
@@ -3241,12 +3384,12 @@ const TradingEngine = (() => {
             rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Kaldıraç</span><span class="order-confirm-row-value">${fmtLeverage(ctx.leverage)}x</span></div>`);
         }
 
-        const referencePrice = ctx.willQueueAsPending ? ctx.limitPrice : expectedExecPrice;
+        const referencePrice = ctx.willQueueAsPending ? (ctx.orderType === 'LIMIT' ? ctx.limitPrice : ctx.fillPrice) : expectedExecPrice;
         const notional = referencePrice * ctx.qty;
         const commission = notional * (ctx.commissionPct / 100);
         const margin = notional / Math.max(1, Number(ctx.leverage) || 1);
         const required = margin + commission;
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">${ctx.willQueueAsPending ? 'Tahmini Gereken Teminat' : 'Gereken Teminat'}</span><span class="order-confirm-row-value">₺${fmtTRY(required).replace('₺', '')}</span></div>`);
+        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">${ctx.willQueueAsPending ? 'Şimdi Kilitlenecek Teminat' : 'Gereken Teminat'}</span><span class="order-confirm-row-value">₺${fmtTRY(required).replace('₺', '')}</span></div>`);
         rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Nominal Değer</span><span class="order-confirm-row-value">₺${fmtTRY(notional).replace('₺', '')}</span></div>`);
 
         return rows.join('');
@@ -3269,13 +3412,20 @@ const TradingEngine = (() => {
         const actionWord = ctx.side === 'BUY' ? 'ALMAK' : 'SATMAK';
         const marketLabel = ctx.market === 'VIOP' ? 'VİOP' : 'Spot';
         if (questionEl) {
-            questionEl.textContent = ctx.willQueueAsPending
-                ? `${ctx.qty} adet ${ctx.symbol} için ${marketLabel} piyasasında ₺${fmtPrice(ctx.limitPrice)} limit fiyatından ${actionWord.toLowerCase()} istediğinize emin misiniz? (fiyat bu seviyeye ulaşınca gerçekleşecek)`
-                : `${ctx.qty} adet ${ctx.symbol} hissesini ${marketLabel} piyasasında ₺${fmtPrice(execFillPrice(ctx.side, ctx.fillPrice))} fiyattan ${actionWord.toLowerCase()} istediğinize emin misiniz?`;
+            if (ctx.willQueueAsPending && ctx.orderType === 'LIMIT') {
+                questionEl.textContent = `${ctx.qty} adet ${ctx.symbol} için ${marketLabel} piyasasında ₺${fmtPrice(ctx.limitPrice)} limit fiyatından ${actionWord.toLowerCase()} istediğinize emin misiniz? (fiyat bu seviyeye ulaşınca gerçekleşecek)`;
+            } else if (ctx.willQueueAsPending) {
+                // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma")
+                questionEl.textContent = `Piyasa şu anda kapalı — ${ctx.qty} adet ${ctx.symbol} için ${marketLabel} piyasasında ${actionWord.toLowerCase()} emriniz SIRAYA alınacak, gereken teminat şimdi kilitlenecek ve piyasa açılır açılmaz o anki güncel fiyattan otomatik gerçekleştirilecek. Onaylıyor musunuz?`;
+            } else {
+                questionEl.textContent = `${ctx.qty} adet ${ctx.symbol} hissesini ${marketLabel} piyasasında ₺${fmtPrice(execFillPrice(ctx.side, ctx.fillPrice))} fiyattan ${actionWord.toLowerCase()} istediğinize emin misiniz?`;
+            }
         }
         if (summaryEl) summaryEl.innerHTML = buildOrderConfirmSummaryHtml(ctx);
         if (submitBtn) {
-            submitBtn.textContent = ctx.willQueueAsPending ? 'Limit Emri Kur' : (ctx.side === 'BUY' ? 'Onayla · AL' : 'Onayla · SAT');
+            submitBtn.textContent = ctx.willQueueAsPending
+                ? (ctx.orderType === 'LIMIT' ? 'Limit Emri Kur' : 'Sıraya Al')
+                : (ctx.side === 'BUY' ? 'Onayla · AL' : 'Onayla · SAT');
             submitBtn.classList.toggle('order-confirm-sell-btn', ctx.side === 'SELL' && !ctx.willQueueAsPending);
         }
 
@@ -3428,6 +3578,14 @@ const TradingEngine = (() => {
                     const triggered = order.side === 'BUY' ? (price <= order.limitPrice) : (price >= order.limitPrice);
                     if (!triggered) { stillPending.push(order); return; }
                     changed = true;
+                    // (9 Ağustos 2026 — Binance/Midas tarzı teminat kilidi)
+                    // Kuyruğa alırken (queuePendingLimitOrder) kilitlenen
+                    // reservedAmount önce iade edilir, ardından placeOrder()
+                    // GERÇEK gerçekleşme fiyatına göre kendi teminatını
+                    // yeniden hesaplayıp düşer — reservedAmount sadece limit
+                    // fiyatı üzerinden bir TAHMİNDİ, gerçek (spread'li) fiyat
+                    // biraz farklı çıkabilir, fark burada otomatik dengelenir.
+                    if (order.reservedAmount) portfolio.balance += order.reservedAmount;
                     const result = placeOrder(order.symbol, order.side, order.qty, price, order.commissionPct, order.leverage, market);
                     if (result.ok) {
                         showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] Limit emir gerçekleşti: ${order.symbol} ${order.side === 'BUY' ? 'AL' : 'SAT'} @ ₺${fmtPrice(result.fillPrice)} (limit ₺${fmtPrice(order.limitPrice)}).`);
@@ -3452,6 +3610,44 @@ const TradingEngine = (() => {
                         renderOrders();
                     } else {
                         showToast(`Limit emir tetiklendi ama gerçekleşemedi: ${result.msg}`);
+                    }
+                    return;
+                }
+
+                // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma"
+                // özelliği) Bu fonksiyon SADECE piyasa açıkken çalışır (bkz.
+                // tickPrices()'ın en baştaki DC.isMarketOpenNow() koruması) —
+                // yani buraya bir 'MARKET_QUEUED' emri ulaştıysa, piyasa
+                // (yeniden) açılmış demektir. Bir fiyat KOŞULU beklemiyor,
+                // gördüğü anda o anki güncel/açılış fiyatından KOŞULSUZ
+                // gerçekleştirilir.
+                if (order.kind === 'MARKET_QUEUED') {
+                    changed = true;
+                    if (order.reservedAmount) portfolio.balance += order.reservedAmount;
+                    const result = placeOrder(order.symbol, order.side, order.qty, price, order.commissionPct, order.leverage, market);
+                    if (result.ok) {
+                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] Piyasa açıldı — sıradaki emriniz gerçekleşti: ${order.symbol} ${order.side === 'BUY' ? 'AL' : 'SAT'} @ ₺${fmtPrice(result.fillPrice)}.`);
+                        if (order.slPrice !== null || order.tpPrice !== null || order.useTrailing) {
+                            const pos = book(market).positions[order.symbol];
+                            const expectedSide = order.side === 'BUY' ? 'LONG' : 'SHORT';
+                            if (pos && pos.side === expectedSide) {
+                                if (order.useTrailing) {
+                                    pos.trailingPct = order.trailingPct;
+                                    pos.trailingExtreme = pos.avgPrice;
+                                    delete pos.sl;
+                                } else if (order.slPrice !== null) {
+                                    pos.sl = order.slPrice;
+                                    delete pos.trailingPct;
+                                    delete pos.trailingExtreme;
+                                }
+                                if (order.tpPrice !== null) pos.tp = order.tpPrice;
+                                savePortfolio();
+                            }
+                        }
+                        renderPositions();
+                        renderOrders();
+                    } else {
+                        showToast(`Sıradaki piyasa emri gerçekleşemedi: ${result.msg}`);
                     }
                     return;
                 }
@@ -3492,19 +3688,35 @@ const TradingEngine = (() => {
     // ederken hangi deftere ait olduğunu ayrıca bilmeye gerek yok, ikisinde de
     // aranıp bulunduğu defterden çıkarılıyor.
     function cancelOcoOrder(orderId) {
-        let found = false;
-        if (portfolio.pendingOrders && portfolio.pendingOrders.some(o => o.id === orderId)) {
-            portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
-            found = true;
+        // (9 Ağustos 2026 — Binance/Midas tarzı teminat kilidi) LIMIT ve
+        // MARKET_QUEUED emirleri kurulurken teminat ANINDA kilitleniyor
+        // (bkz. queuePendingLimitOrder/queuePendingMarketOrder) — iptal
+        // edildiğinde bu kilitli tutar TAM olarak bakiyeye geri iade
+        // edilmeli, aksi halde kullanıcı iptal ettiği emrin parasını
+        // kaybetmiş gibi görünür. OCO'nun kendisi hiçbir teminat kilitlemez
+        // (reservedAmount hiç yok), o yüzden onun iptalinde ekstra bir şey
+        // yapılmıyor.
+        let order = null, orderMarket = null;
+        if (portfolio.pendingOrders) {
+            const found = portfolio.pendingOrders.find(o => o.id === orderId);
+            if (found) { order = found; orderMarket = 'NORMAL'; }
         }
-        if (portfolio.viopPendingOrders && portfolio.viopPendingOrders.some(o => o.id === orderId)) {
+        if (!order && portfolio.viopPendingOrders) {
+            const found = portfolio.viopPendingOrders.find(o => o.id === orderId);
+            if (found) { order = found; orderMarket = 'VIOP'; }
+        }
+        if (!order) return;
+        if (order.reservedAmount) portfolio.balance += order.reservedAmount;
+        if (orderMarket === 'VIOP') {
             portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => o.id !== orderId);
-            found = true;
+        } else {
+            portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
         }
-        if (!found) return;
         savePortfolio();
         renderPendingOcoOrders();
-        showToast('OCO emri iptal edildi.');
+        renderAccountSummary();
+        const kindLabel = order.kind === 'LIMIT' ? 'Limit emri' : order.kind === 'MARKET_QUEUED' ? 'Sıradaki piyasa emri' : 'OCO emri';
+        showToast(kindLabel + ' iptal edildi' + (order.reservedAmount ? ` — kilitli teminat (₺${fmtTRY(order.reservedAmount).replace('₺', '')}) bakiyenize iade edildi.` : '.'));
     }
     window.__optipulseCancelOco = cancelOcoOrder; // used by inline onclick in rendered rows
 
@@ -3525,6 +3737,29 @@ const TradingEngine = (() => {
             return;
         }
         body.innerHTML = orders.map(o => {
+            // (9 Ağustos 2026) LIMIT/MARKET_QUEUED emirleri artık kurulduğu
+            // anda gerçek bir teminat kilitliyor (bkz. queuePendingLimitOrder/
+            // queuePendingMarketOrder) — kullanıcının "param nereye gitti"
+            // diye şaşırmaması için kilitli tutar kartta ayrıca gösteriliyor.
+            const reservedRow = o.reservedAmount
+                ? `<div class="oco-card-bottom font-mono" style="margin-top:4px;opacity:0.75;"><span>🔒 Kilitli teminat: ₺${fmtTRY(o.reservedAmount).replace('₺', '')}</span></div>`
+                : '';
+            if (o.kind === 'MARKET_QUEUED') {
+                return `
+                    <div class="oco-card">
+                        <div class="oco-card-top">
+                            <span class="font-bold">${o.symbol} · Piyasa (Sırada) ${o.side === 'BUY' ? 'AL' : 'SAT'}</span>
+                            <button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button>
+                        </div>
+                        <div class="oco-card-bottom font-mono">
+                            <span>Piyasa açılınca gerçekleşir</span>
+                            <span>${o.qty} adet</span>
+                            <span>${o.leverage > 1 ? fmtLeverage(o.leverage) + 'x' : ''}</span>
+                        </div>
+                        ${reservedRow}
+                    </div>
+                `;
+            }
             if (o.kind === 'LIMIT') {
                 return `
                     <div class="oco-card">
@@ -3537,6 +3772,7 @@ const TradingEngine = (() => {
                             <span>${o.qty} adet</span>
                             <span>${o.leverage > 1 ? fmtLeverage(o.leverage) + 'x' : ''}</span>
                         </div>
+                        ${reservedRow}
                     </div>
                 `;
             }
