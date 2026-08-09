@@ -33,25 +33,9 @@ const MultiChartGrid = (() => {
 
     const THEME_CHART_COLORS = {
         dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
-        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' },
-        // (9 Ağustos 2026, DÜZELTME — "koyu mavi beyaz olsun dedim") bkz.
-        // tradingChart.js'teki aynı düzeltme notu — styles.css'teki
-        // --bg-panel (#10192B) ile aynı koyu lacivert.
-        fintech: { bg: '#10192B', text: '#8A97AC', grid: 'rgba(255,255,255,0.04)', border: 'rgba(46,134,255,0.20)' }
+        light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' }
     };
     const COLORS = { up: '#D4AF37', down: '#555555', wickUp: '#D4AF37', wickDown: '#777777', sma20: '#42A5F5', ema9: '#26C6DA', bbLine: '#AB47BC', draw: '#D4AF37' };
-    // (9 Ağustos 2026 — "Kurumsal Mavi" fintech teması) tradingChart.js'teki
-    // AYNI desen (bkz. o dosyadaki applyChartColorPaletteForTheme() yorumu),
-    // burada daha basit bir haliyle: bu ızgara "her açılışta yeniden
-    // oluşturuluyor" (bkz. dosya başındaki mimari not), o yüzden canlı bir
-    // setTheme() senkronuna gerek yok — openGridView() her çağrıldığında
-    // COLORS'un altın'a bağlı anahtarları o anki temaya göre güncellenir.
-    const GOLD_DEFAULT_GRID_COLORS = { up: COLORS.up, down: COLORS.down, wickUp: COLORS.wickUp, wickDown: COLORS.wickDown, draw: COLORS.draw };
-    const FINTECH_GRID_OVERRIDES = { up: '#1E7D32', down: '#C62828', wickUp: '#1E7D32', wickDown: '#C62828', draw: '#2E86FF' };
-    function applyGridColorPaletteForTheme() {
-        const source = currentTheme() === 'fintech' ? FINTECH_GRID_OVERRIDES : GOLD_DEFAULT_GRID_COLORS;
-        Object.keys(source).forEach(k => { COLORS[k] = source[k]; });
-    }
 
     // (18 Temmuz 2026, onuncu oturum, üçüncü tur → 22 Temmuz 2026, on ikinci
     // oturum'da genişletildi) Her hücreye sade bir gösterge seçimi eklendi —
@@ -89,8 +73,7 @@ const MultiChartGrid = (() => {
     function byId(id) { return document.getElementById(id); }
 
     function currentTheme() {
-        const v = document.documentElement.getAttribute('data-theme');
-        return (v === 'light' || v === 'fintech') ? v : 'dark';
+        return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     }
 
     function loadCellSymbols() {
@@ -447,7 +430,6 @@ const MultiChartGrid = (() => {
 
     function openGridView() {
         active = true;
-        applyGridColorPaletteForTheme();
         const single = byId('tv-chart-area-single');
         const gridView = byId('tv-grid-view');
         const resBar = byId('tv-resolution-bar');
