@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // (9 Ağustos 2026 — Madde #127: Kulüp CV gerçek dosya yükleme)
+    // Zirve kayıt formundaki "Kulüp CV / Tanıtım Dosyası" alanı buraya
+    // yükleniyor (bkz. index.html'deki pubZirveForm submit handler'ı).
+    // Herkese açık form olduğu için kimlik doğrulaması ZORUNLU KOŞULAMIYOR —
+    // bunun yerine dosya boyutu ve tipini makul bir şekle zorluyoruz.
+    // Okuma herkese açık (admin.html'in "CV İndir" bağlantısı için basit bir
+    // <a href> yeterli olsun diye, ayrıca kulüp CV'si zaten kendi isteğiyle
+    // gönderilen tanıtım amaçlı bir belge — hassas kişisel veri değil).
+    match /zirve-cv/{fileName} {
+      allow read: if true;
+      allow create: if request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/.*|application/msword|application/vnd\\..*|application/zip');
+      // Bir kez yüklenen bir CV'nin üzerine yazılamaz/silinemez — her
+      // gönderim kendi benzersiz dosya adını kullanıyor zaten
+      // (zirveId_timestamp_dosyaadı), bu yüzden pratikte hiçbir zaman
+      // çakışmıyor; yine de "update/delete yok" kuralı ekstra bir güvence.
+      allow update, delete: if false;
+    }
+
+    // Tanımsız her yol reddedilir — bu belge dışında Storage'da hiçbir şey
+    // yok (bkz. optipulselab/firestore.rules'daki aynı "varsayılan kapalı"
+    // deseni).
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
