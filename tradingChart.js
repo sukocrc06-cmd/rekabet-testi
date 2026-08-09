@@ -74,10 +74,10 @@ const TradingChart = (() => {
     // dönüldüğünde tam olarak eski haline dönmeyi garanti ediyor.
     const FINTECH_CHART_OVERRIDES = {
         up: '#1E7D32', down: '#C62828', wickUp: '#1E7D32', wickDown: '#C62828',
-        draw: '#0057D8', fibLine: 'rgba(0, 87, 216, 0.5)',
+        draw: '#2E86FF', fibLine: 'rgba(46, 134, 255, 0.5)',
         volUp: 'rgba(30, 125, 50, 0.45)', volDown: 'rgba(198, 40, 40, 0.35)',
-        baselineTop: '#1E7D32', pivot: 'rgba(0, 87, 216, 0.7)',
-        oscillatorAccent: '#0057D8'
+        baselineTop: '#1E7D32', pivot: 'rgba(46, 134, 255, 0.7)',
+        oscillatorAccent: '#2E86FF'
     };
     const GOLD_DEFAULT_CHART_COLORS = {};
     Object.keys(FINTECH_CHART_OVERRIDES).forEach(k => { GOLD_DEFAULT_CHART_COLORS[k] = COLORS[k]; });
@@ -143,9 +143,10 @@ const TradingChart = (() => {
     const THEME_CHART_COLORS = {
         dark: { bg: '#1E1E1E', text: '#888888', grid: 'rgba(255,255,255,0.04)', border: 'rgba(212,175,55,0.15)' },
         light: { bg: '#FFFFFF', text: '#5A5D63', grid: 'rgba(20,22,28,0.07)', border: 'rgba(184,134,11,0.22)' },
-        // (9 Ağustos 2026 — "Kurumsal Mavi" fintech teması) light ile aynı
-        // beyaz zemin ailesi, sadece kenarlık rengi altın yerine mavi.
-        fintech: { bg: '#FFFFFF', text: '#3A4250', grid: 'rgba(0,40,90,0.06)', border: 'rgba(0,87,216,0.22)' }
+        // (9 Ağustos 2026, DÜZELTME — "koyu mavi beyaz olsun dedim") Nötr koyu
+        // gri DEĞİL — styles.css'teki [data-theme="fintech"]'in --bg-panel'i
+        // (#10192B) ile AYNI koyu lacivert, kenarlık altın yerine mavi.
+        fintech: { bg: '#10192B', text: '#8A97AC', grid: 'rgba(255,255,255,0.04)', border: 'rgba(46,134,255,0.20)' }
     };
     function resolveThemeName(v) {
         return (v === 'light' || v === 'fintech') ? v : 'dark';
@@ -450,7 +451,7 @@ const TradingChart = (() => {
         // (9 Ağustos 2026 — "Kurumsal Mavi" fintech teması) Çapraz imleç rengi
         // önceden altın olarak sabitti; artık COLORS.draw'a bağlı (aynı
         // applyChartColorPaletteForTheme() mutasyonu bunu da güncelliyor).
-        const crosshairColor = currentTheme === 'fintech' ? 'rgba(0,87,216,0.35)' : 'rgba(212,175,55,0.35)';
+        const crosshairColor = currentTheme === 'fintech' ? 'rgba(46,134,255,0.35)' : 'rgba(212,175,55,0.35)';
         const crosshairLabelBg = COLORS.draw;
         return {
             width: container.clientWidth,
@@ -4757,7 +4758,7 @@ const TradingChart = (() => {
         applyChartColorPaletteForTheme();
 
         const c = THEME_CHART_COLORS[currentTheme];
-        const crosshairColor = currentTheme === 'fintech' ? 'rgba(0,87,216,0.35)' : 'rgba(212,175,55,0.35)';
+        const crosshairColor = currentTheme === 'fintech' ? 'rgba(46,134,255,0.35)' : 'rgba(212,175,55,0.35)';
         const opts = {
             layout: { background: { color: c.bg }, textColor: c.text },
             grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },

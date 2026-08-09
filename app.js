@@ -157,7 +157,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.status === 'ok') {
                     if (el.engineStatus) {
                         el.engineStatus.innerText = 'ONLINE';
-                        el.engineStatus.style.color = 'var(--profit)'; // Green
+                        // (9 Ağustos 2026 — "Kurumsal Mavi" tema düzeltmesi)
+                        // Önceden 'var(--profit)' idi — styles.css'te HİÇBİR
+                        // YERDE tanımlı değildi (kontrol edildi), yani bu satır
+                        // hep sessizce başarısız oluyor, metin miras alınan
+                        // varsayılan renkte kalıyordu. Gerçekten tanımlı ve
+                        // her üç temada da (Koyu/Açık/Kurumsal Mavi) doğru
+                        // yeşile karşılık gelen '--success' kullanılıyor.
+                        el.engineStatus.style.color = 'var(--success)';
                     }
                 }
                 updateEngineTooltip();
@@ -166,7 +173,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('[Heartbeat] Backend server connection failed:', err);
                 if (el.engineStatus) {
                     el.engineStatus.innerText = 'OFFLINE';
-                    el.engineStatus.style.color = '#F44336'; // Red
+                    // (9 Ağustos 2026) Sabit '#F44336' yerine '--danger' —
+                    // yukarıdaki ONLINE düzeltmesiyle aynı gerekçe.
+                    el.engineStatus.style.color = 'var(--danger)';
                 }
                 updateEngineTooltip();
             });
@@ -252,11 +261,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.marketStatusVal) {
             if (isMarketOpen) {
                 el.marketStatusVal.innerText = 'OPEN';
-                el.marketStatusVal.style.color = 'var(--profit)'; // Gold / green profit theme
+                // (9 Ağustos 2026 — "Kurumsal Mavi" tema düzeltmesi) Önceden
+                // 'var(--profit)' idi — tanımsız bir değişken (bkz. app.js
+                // checkBackendHeartbeat()'teki aynı düzeltmenin yorumu),
+                // metin hep miras alınan renkte kalıyordu. '--success' HER
+                // temada (Koyu/Açık/Kurumsal Mavi) doğru yeşile karşılık gelir.
+                el.marketStatusVal.style.color = 'var(--success)';
                 if (el.marketStatusSub) el.marketStatusSub.style.display = 'none';
             } else {
                 el.marketStatusVal.innerText = 'CLOSED';
-                el.marketStatusVal.style.color = '#FFA726'; // Subtle warning orange
+                // (9 Ağustos 2026) Sabit '#FFA726' yerine '--warning' — hangi
+                // tema aktifse o temanın uyarı rengini kullanır, "Kurumsal
+                // Mavi" temaya geçilince de sarı kalakalmaz.
+                el.marketStatusVal.style.color = 'var(--warning)';
                 if (el.marketStatusSub) el.marketStatusSub.style.display = 'inline';
             }
         }
