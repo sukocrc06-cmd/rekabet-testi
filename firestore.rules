@@ -2,6 +2,18 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // (9 Ağustos 2026 — KRİTİK güvenlik açığı düzeltmesi) Gerçek admin(ler)i
+    // Firebase Authentication'ın KRİPTOGRAFİK OLARAK İMZALI, sahtelenemez
+    // request.auth.token.email alanına göre tanıyan tek kaynak. admin.html
+    // basit e-posta/şifre girişi kullanıyor (Custom Claims yok) — küçük,
+    // sabit bir admin ekibi için bu yeterli ve güvenli: bir öğrenci kendi
+    // Firebase Authentication oturumunun email claim'ini SAHTELEYEMEZ.
+    // Yeni bir admin eklenirse bu listeye e-postası eklenmeli.
+    function isFinteClubAdmin() {
+      return request.auth != null &&
+        request.auth.token.email in ['suko.crc06@gmail.com'];
+    }
+
     // ── finteclub/shared_state ─────────────────────────────────────────
     // Herkese açık site (index.html) buraya YAZMAK zorunda (başvuru/zirve
     // kaydı gönderimi), bu yüzden tam "sadece admin yazabilir" kilidi
@@ -18,7 +30,16 @@ service cloud.firestore {
             (request.resource.data.applications is list && request.resource.data.applications.size() < 3000))
         && (!('zirveRegistrations' in request.resource.data) ||
             (request.resource.data.zirveRegistrations is list && request.resource.data.zirveRegistrations.size() < 3000));
-      allow delete: if request.auth != null;
+      // (9 Ağustos 2026) Önceden "request.auth != null" idi — yani OPLab'da
+      // e-postasıyla doğrulanmış HERHANGİ bir yarışmacı, gerçek admin girişi
+      // yapmadan, TÜM başvuru/zirve veritabanını (state.applications VE
+      // state.zirveRegistrations — yani bu belgenin TAMAMI) tek Firestore
+      // çağrısıyla kalıcı olarak silebilirdi. Bu, bu dosyadaki DİĞER tüm
+      // düzeltmelerden bile daha yıkıcı bir açıktı. Meşru öğrenci akışı bu
+      // belgeyi HİÇBİR ZAMAN silmiyor, sadece admin panelindeki toplu/tekil
+      // silme işlemleri siliyor — bu yüzden admin-only kısıtlaması hiçbir
+      // meşru akışı bozmuyor.
+      allow delete: if isFinteClubAdmin();
     }
 
     // ── finteclub/oplab_activity, finteclub/oplab_live_portfolio ───────
@@ -26,15 +47,94 @@ service cloud.firestore {
     // belgelere kimlik doğrulaması olmadan yazıyor (OPLab tarafında admin
     // girişi kavramı yok) — düşük hassasiyetli, kendi kendine bildirilen
     // aktivite/portföy verisi. Yine de belge boyutunu makul tutuyoruz.
+    //
+    // (9 Ağustos 2026 — KRİTİK düzeltme: boyut kuralı aslında hiçbir şeyi
+    // sınırlamıyordu) Bu iki belgenin GERÇEK şekli tek bir üst seviye alan
+    // içeriyor: { visitors: {...} } / { competitors: {...} } — yani
+    // finteclubBridge.js her zaman `.set(payload, {merge:true})` ile TEK bir
+    // üst seviye anahtar ("visitors" veya "competitors") gönderiyor.
+    // `request.resource.data.size()` BELGENİN üst seviye alan SAYISINI
+    // sayar — bu her zaman 1'dir (sadece "visitors"/"competitors" anahtarı),
+    // İÇİNDEKİ map'in KAÇ ziyaretçi/yarışmacı barındırdığını DEĞİL. Yani
+    // "< 20" kontrolü pratikte HİÇBİR ZAMAN devreye girmiyordu — biri binlerce
+    // sahte ziyaretçi/yarışmacı kaydı enjekte edip belgeyi Firestore'un kendi
+    // 1MB sert sınırına kadar şişirebilirdi. Düzeltme: gerçek kısıtlamayı
+    // İÇ map'in kendi boyutuna (visitors.size()/competitors.size()) uyguluyoruz.
     match /finteclub/oplab_activity {
       allow read: if true;
-      allow write: if request.resource.data.size() < 20;
-      allow delete: if request.auth != null;
+      allow write: if request.resource.data.size() < 5
+        && (!('visitors' in request.resource.data) || request.resource.data.visitors.size() < 2000);
+      // (9 Ağustos 2026) Belgeyi TAMAMEN silme artık sadece admin'e ait —
+      // önceden "request.auth != null" idi, yani herhangi bir öğrenci kendi
+      // Firebase Authentication oturumuyla TÜM ziyaretçi/aktivite verisini
+      // tek seferde silebilirdi. Meşru öğrenci akışı bu belgeyi HİÇBİR ZAMAN
+      // silmiyor (sadece kendi kaydını yazıyor), bu yüzden bu kısıtlama
+      // hiçbir şeyi bozmuyor.
+      allow delete: if isFinteClubAdmin();
     }
     match /finteclub/oplab_live_portfolio {
       allow read: if true;
-      allow write: if request.resource.data.size() < 20;
-      allow delete: if request.auth != null;
+      allow write: if request.resource.data.size() < 5
+        && (!('competitors' in request.resource.data) || request.resource.data.competitors.size() < 2000);
+      allow delete: if isFinteClubAdmin();
+    }
+
+    // (9 Ağustos 2026 — KRİTİK güvenlik açığı düzeltmesi) oplab_balance_commands:
+    // SADECE admin'in yarışmacı bakiyesi ayarlama/sıfırlama komutu yazması
+    // gereken TEK YÖNLÜ (admin → öğrenci) bir kanal. Öğrenci tarafı
+    // (finteclubBridge.js) bu belgeyi SADECE DİNLER, hiçbir zaman yazmaz.
+    // Önceden bu belge aşağıdaki genel "finteclub/{document}" kuralına
+    // düşüyordu (allow write: if request.auth != null) — yani gerçek admin
+    // girişi yapmadan, SADECE OPLab'da e-postasıyla doğrulanmış herhangi bir
+    // yarışmacı, tarayıcı konsolundan doğrudan Firestore'a yazıp KENDİ
+    // hesabına sınırsız bakiye komutu gönderebilirdi. Artık sadece admin
+    // yazabiliyor; öğrencinin "appliedAt/appliedDeviceId" onay (ack)
+    // alanını güncellemesi de ayrı bir yazma değil, admin'in yazdığı
+    // documentin İÇİNDEKİ bir alt-alan güncellemesi olduğundan (aynı
+    // update işlemi) bu kısıtlama öğrencinin komutu OKUYUP UYGULAMASINI
+    // engellemiyor — sadece yeni bir komut YAZMASINI engelliyor. Öğrenci
+    // tarafı zaten hiç yazmadığından (sadece onListen ile okuyor) bu
+    // kısıtlama üretimde hiçbir şeyi bozmaz.
+    match /finteclub/oplab_balance_commands {
+      allow read: if true;
+      allow write: if isFinteClubAdmin();
+    }
+
+    // (9 Ağustos 2026 — KRİTİK güvenlik açığı düzeltmesi, KISMİ) oplab_user_portfolios:
+    // Çoklu cihaz senkron belgesi — her yarışmacı KENDİ portföyünü
+    // (users.<applicationId>) yazabilmeli, bu yüzden tam "sadece admin"
+    // kilidi burada UYGULANAMAZ (meşru öğrenci akışını kırar). Önceden bu
+    // belge de genel "finteclub/{document}" kuralına düşüyordu (herhangi bir
+    // doğrulanmış kullanıcı belgenin TAMAMINI, yani BAŞKA yarışmacıların
+    // kayıtlarını da, serbestçe değiştirebilirdi). Aşağıdaki kural en azından
+    // TEK BİR YAZMADA sadece TEK BİR yarışmacının kaydının değişmesini
+    // ZORUNLU kılıyor (affectedKeys().size() == 1) — yani kötü niyetli bir
+    // yarışmacı artık TÜM belgeyi silip/toplu olarak birden çok kaydı aynı
+    // anda bozamaz/toplu veri enjekte edemez.
+    //   BİLİNEN, KASITLI OLARAK KAPSAM DIŞI BIRAKILAN KALAN AÇIK: Firestore
+    // kuralları, değişen TEK anahtarın GERÇEKTEN yazan kullanıcının KENDİ
+    // kaydı olup olmadığını (users.<applicationId> anahtarı ile
+    // request.auth.token.email eşleşmesini) doğrulayamıyor — çünkü anahtar
+    // Firebase Authentication kimliği değil, uygulama ID'si (applicationId).
+    // Bunu TAM olarak kapatmanın doğru yolu ya (a) bu belgeyi
+    // oplab_user_portfolios/{applicationId} alt koleksiyonuna taşımak (her
+    // belge için ayrı "sadece kendi e-postan" kuralı yazılabilir hale gelir)
+    // ya da (b) anahtar şemasını applicationId yerine
+    // request.auth.token.email'e çevirmek — ikisi de finteclubBridge.js VE
+    // admin.html'deki her erişim noktasını güncellemeyi gerektiren, canlı bir
+    // yarışma sırasında test edilmeden yapılması riskli, daha büyük bir
+    // değişiklik olduğu için bu turda kapsam dışı bırakıldı (aynı sınıf kısıt,
+    // dosyanın altındaki applications/zirveRegistrations notuyla aynı köke
+    // sahip). Pratikte istismarı, sisteme GERÇEKTEN doğrulanmış bir hesapla
+    // giriş yapmış VE başka bir yarışmacının applicationId'sini bilen VE
+    // tarayıcı konsolundan elle Firestore SDK çağrısı yazabilen biri
+    // gerektiriyor — herkese açık, kimliksiz bir saldırı değil.
+    match /finteclub/oplab_user_portfolios {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null &&
+        request.resource.data.users.diff(resource.data.users).affectedKeys().size() <= 1;
+      allow delete: if isFinteClubAdmin();
     }
 
     // ── finteclub/ altında tanımlı olmayan her şey ──────────────────────
@@ -42,7 +142,7 @@ service cloud.firestore {
     // Varsayılan olarak KAPALI — sadece admin girişi yapmış biri yazabilir.
     match /finteclub/{document} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isFinteClubAdmin();
     }
 
     // Bu üç belge dışında finteclub koleksiyonunda (veya başka bir

@@ -524,9 +524,70 @@ def _extract_fast_price(stock: "yf.Ticker"):
     return None
 
 
+# (9 Ağustos 2026 — KRİTİK düzeltme: WebSocket event-loop donma riski)
+# Aşağıdaki iki sorun aynı kök nedene sahipti: /ws/live/{ticker} ucu
+# senkron (bloklayan) yfinance/requests çağrılarını DOĞRUDAN asyncio
+# event loop'u İÇİNDE, await'siz olarak çalıştırıyordu. Python'da senkron
+# bir fonksiyon çağrısı event loop'u fiilen DURDURUR — o an aktif olan
+# TÜM diğer WebSocket bağlantıları (ve hatta aynı worker'daki normal HTTP
+# istekleri) o çağrı bitene kadar (ağ gecikmesi + olası backoff
+# time.sleep()'i, saniyelerce sürebilir) donuyordu. Render gibi tek
+# worker'lı ücretsiz bir planda bu, TEK BİR yavaş yfinance isteğinin
+# yarışmadaki TÜM kullanıcıların canlı akışını aynı anda kilitleyebileceği
+# anlamına geliyordu. Çözüm: senkron kısmı asyncio.to_thread() ile ayrı
+# bir thread'e taşımak — event loop, o thread'in bitmesini "await" ederek
+# BEKLERKEN aynı anda başka bağlantılara da hizmet vermeye devam edebiliyor.
+def _fetch_real_price_sync(stock: "yf.Ticker", ticker: str):
+    """SENKRON (bloklayan) fiyat çekme mantığı — asyncio.to_thread() ile
+    ayrı bir thread'de çalıştırılmak üzere tasarlandı, event loop'ta
+    DOĞRUDAN çağrılmamalı."""
+    real_price = _extract_fast_price(stock)
+    if real_price is None:
+        # Yedek yol: son 1 günlük/1 dakikalık barın kapanışı.
+        try:
+            recent = _yf_call_with_backoff(
+                lambda: stock.history(period="1d", interval="1m", timeout=8),
+                label=f"live fallback history({ticker})"
+            )
+            if not recent.empty:
+                real_price = float(recent["Close"].iloc[-1])
+        except Exception as e:
+            print(f"[WebSocket] fallback history fetch failed for {ticker}: {e}")
+    return real_price
+
+
+# (9 Ağustos 2026 — KRİTİK düzeltme: bağlantı sayısı sınırı) Her açık
+# WebSocket bağlantısı, arka planda LIVE_POLL_INTERVAL_SEC'te bir yfinance'e
+# istek atan sonsuz bir döngü demek. Sınırsız sayıda eşzamanlı bağlantıya
+# izin vermek, tek bir Render worker'ının kaynaklarını (ve yfinance'e giden
+# istek hacmini, rate-limit riskini artırarak) tüketebilir. Bu üst sınır
+# kasıtlı olarak cömert tutuldu (bir yarışmada gerçekçi eşzamanlı kullanıcı
+# sayısının çok üzerinde) — amaç normal kullanımı KISITLAMAK değil, bir
+# hata/döngü/kötü niyetli istemcinin süreci tüketmesini ÖNLEMEK.
+_MAX_CONCURRENT_LIVE_CONNECTIONS = 300
+_active_live_connections = 0
+
+
 @app.websocket("/ws/live/{ticker}")
 async def websocket_endpoint(websocket: WebSocket, ticker: str):
+    global _active_live_connections
+
+    # (9 Ağustos 2026) Diğer tüm uç noktalarda (ör. /api/v1/ohlcv/{ticker})
+    # zaten uygulanan _is_valid_ticker_format() doğrulaması bu WebSocket
+    # ucunda EKSİKTİ — herhangi biri /ws/live/<rastgele-uzun-string> gibi
+    # geçersiz bir sembolle bağlanıp gereksiz yere sonsuz bir yfinance
+    # sorgulama döngüsü başlatabiliyordu. Artık diğer uçlarla tutarlı
+    # şekilde erken reddediliyor.
+    if not _is_valid_ticker_format(ticker):
+        await websocket.close(code=1008, reason="Invalid ticker format")
+        return
+
+    if _active_live_connections >= _MAX_CONCURRENT_LIVE_CONNECTIONS:
+        await websocket.close(code=1013, reason="Server busy, try again later")
+        return
+
     await websocket.accept()
+    _active_live_connections += 1
     # (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi) Bu uç
     # önceden `random.uniform` ile TAMAMEN sahte/simüle tick üretiyordu ve
     # frontend tarafından hiç kullanılmıyordu. Artık geçmiş mumlardan sonra,
@@ -560,19 +621,13 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         async def fetch_and_send_tick() -> bool:
             """Bir gerçek fiyat çekip varsa 'tick' olarak gönderir; başarılıysa
             True döner (çağıran taraf bunu sadece loglama/tanı amaçlı kullanır,
-            akışı etkilemez)."""
-            real_price = _extract_fast_price(stock)
-            if real_price is None:
-                # Yedek yol: son 1 günlük/1 dakikalık barın kapanışı.
-                try:
-                    recent = _yf_call_with_backoff(
-                        lambda: stock.history(period="1d", interval="1m", timeout=8),
-                        label=f"live fallback history({ticker})"
-                    )
-                    if not recent.empty:
-                        real_price = float(recent["Close"].iloc[-1])
-                except Exception as e:
-                    print(f"[WebSocket] fallback history fetch failed for {ticker}: {e}")
+            akışı etkilemez).
+            (9 Ağustos 2026) Senkron/bloklayan kısım artık asyncio.to_thread()
+            ile ayrı bir thread'de çalışıyor — bkz. _fetch_real_price_sync()
+            üzerindeki kök neden açıklaması. Bu await, event loop'u
+            BLOKLAMAZ; thread çalışırken loop başka bağlantılara/isteklere
+            hizmet vermeye devam edebilir."""
+            real_price = await asyncio.to_thread(_fetch_real_price_sync, stock, ticker)
 
             if real_price is None or real_price <= 0:
                 # Gerçek fiyat bu turda alınamadı (ağ/yfinance geçici sorunu
@@ -610,6 +665,12 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         pass
     except Exception as e:
         print(f"[WebSocket] Error for {ticker}: {e}")
+    finally:
+        # (9 Ağustos 2026) Bağlantı sayacı — bağlantı nasıl biterse bitsin
+        # (normal kapanma, hata, veya istemcinin aniden kopması) mutlaka
+        # azaltılmalı, yoksa sayaç zamanla "sızar" ve gerçek kapasite
+        # dolmadan yeni bağlantılar reddedilmeye başlar.
+        _active_live_connections -= 1
 
 # (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
 # Burada önceden /api/v1/backtest/export uç noktası vardı — PDF raporu
