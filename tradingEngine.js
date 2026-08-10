@@ -284,6 +284,7 @@ const TradingEngine = (() => {
         return VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage;
     }
     const MIN_VIOP_HOLD_MS = 30000; // VİOP pozisyonu manuel kapatılmadan önce açık kalması gereken asgari süre (30 saniye)
+    const MIN_TRAILING_PCT = 0.5; // Trailing Stop için izin verilen asgari yüzde — daha küçüğü fiyat gürültüsüyle anında tetiklenip asgari tutma süresini dolanmanın bir yolu olurdu
 
     // (10 Ağustos 2026) applyQtyPct/computeRiskBasedQty/updateEstimate/
     // estimateOrderMarginRequirement gibi ÖNİZLEME hesaplayıcılarının,
@@ -3162,7 +3163,20 @@ const TradingEngine = (() => {
 
         const trailingToggle = byId('qt-trailing-toggle');
         const trailingPctInput = byId('qt-trailing-pct');
-        const useTrailing = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
+        const trailingRequested = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
+        // (10 Ağustos 2026, ikinci tur) Aşırı küçük bir trailing yüzdesi
+        // (ör. %0,01), fiyat gürültüsünün bile anında tetiklediği, fiilen
+        // "kârdaysa hemen kapat" ile aynı işi gören bir "tetik" haline
+        // gelirdi — asgari tutma süresi kuralını dolanmanın başka bir yolu.
+        // Gerçek platformlarda da trailing stop için genelde bir asgari
+        // yüzde/tık zorunludur; burada da MIN_TRAILING_PCT ile aynısı
+        // uygulanıyor.
+        if (trailingRequested && Number(trailingPctInput.value) < MIN_TRAILING_PCT) {
+            const m = `Trailing Stop yüzdesi en az %${MIN_TRAILING_PCT} olmalı (çok küçük bir yüzde, gürültüyle anında tetiklenir).`;
+            showToast(m); showTicketAlert(m, 'error');
+            return;
+        }
+        const useTrailing = trailingRequested;
 
         openOrderConfirmModal({
             symbol: state.activeSymbol,
@@ -4141,19 +4155,32 @@ const TradingEngine = (() => {
         const pos = book(market).positions[symbol];
         if (!pos) return;
 
-        // (10 Ağustos 2026 — VİOP asgari tutma süresi) `reason` sadece
-        // OTOMATİK kapamalarda (SL/TP/TRAILING/LIQUIDATION) dolu gelir —
-        // manuel "Kapat" butonu her zaman null geçer (bkz. __optipulseClosePosition
-        // inline onclick). Bu sınır SADECE manuel kapamaya uygulanıyor; risk
-        // yönetimi (SL/TP/marj çağrısı) hiçbir koşulda geciktirilmemeli.
-        // pos.openedAt olmayan (bu düzeltmeden ÖNCE açılmış) eski pozisyonlar
-        // güvenlik için bloklanmıyor — asgari süre sadece bundan sonra açılan
-        // pozisyonlar için geçerli.
-        if (!reason && market === 'VIOP' && pos.openedAt) {
+        // (10 Ağustos 2026 — VİOP asgari tutma süresi) `reason` OTOMATİK
+        // kapamalarda (SL/TP/TRAILING/LIQUIDATION) dolu gelir — manuel
+        // "Kapat" butonu her zaman null geçer (bkz. __optipulseClosePosition
+        // inline onclick). Bu sınır manuel kapamaya VE Take-Profit'e
+        // uygulanıyor. (10 Ağustos 2026, ikinci tur) TP de dahil edildi,
+        // çünkü aksi halde kullanıcı pozisyonu açar açmaz giriş fiyatının
+        // hemen üstüne bir TP koyup asgari süreyi TAMAMEN dolanabilirdi —
+        // TP, checkStopLossTakeProfit() tarafından her 2 saniyelik tick'te
+        // yeniden kontrol edildiği için koşul sağlandığı an otomatik
+        // tetiklenir, tıpkı manuel "kârdaysa hemen kapat" davranışı gibi.
+        // Stop-Loss/Trailing Stop/Marj çağrısı KESİNLİKLE bu sınıra TABİ
+        // DEĞİL — bunlar kayıptan koruma mekanizmaları, asla
+        // geciktirilmemeli. pos.openedAt olmayan (bu düzeltmeden ÖNCE
+        // açılmış) eski pozisyonlar bloklanmıyor.
+        const holdGatedClose = !reason || reason === 'TP';
+        if (holdGatedClose && market === 'VIOP' && pos.openedAt) {
             const heldMs = Date.now() - pos.openedAt;
             if (heldMs < MIN_VIOP_HOLD_MS) {
-                const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
-                showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_VIOP_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
+                if (!reason) {
+                    const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
+                    showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_VIOP_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
+                }
+                // TP tetiklemesi sessizce ertelenir — checkStopLossTakeProfit()
+                // zaten her tick'te tekrar deneyecek, süre dolunca (fiyat hâlâ
+                // TP koşulunu sağlıyorsa) otomatik gerçekleşir. Burada toast
+                // basmıyoruz, aksi halde 2 saniyede bir spam olurdu.
                 return;
             }
         }
