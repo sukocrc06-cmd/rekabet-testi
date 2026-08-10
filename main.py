@@ -348,7 +348,17 @@ def format_ticker(ticker: str) -> str:
 # Kısa süreli TTL önbellek (_QUOTE_CACHE_TTL_SEC), aynı sembol seti kısa
 # aralıklarla tekrar istenirse (ör. birden fazla açık sekme) yeniden ağa
 # gitmeyi önlüyor.
-_QUOTE_CACHE_TTL_SEC = 45
+# (10 Ağustos 2026 — "gerçek fiyattan sürekli geride kalma" tespiti) Bu değer
+# ÖNCEDEN 45sn'ydi — frontend'in kendi periyodik senkron aralığından
+# (tradingEngine.js → WATCHLIST_SYNC_INTERVAL_MS = 40000ms) DAHA UZUNDU. Sonuç:
+# `now - ts < TTL` koşulu yüzünden istemcinin ardışık pollarının YARISI kadarı
+# önbellek İSABETİ oluyordu (bkz. kök neden: ts sadece gerçek bir ağ isteğinde
+# güncelleniyor, isabetlerde değil) — bu da tek bir istemcinin bile gerçek
+# fiyatı ~40sn yerine ortalama ~80sn gecikmeyle görmesine yol açıyordu. Önbellek
+# artık istemci aralığından KISA (35sn) — çoklu-sekme senaryosunda hâlâ
+# gereksiz ardışık ağ isteklerini önlüyor, ama artık tek bir istemcinin kendi
+# düzenli pollamasını YAVAŞLATMIYOR.
+_QUOTE_CACHE_TTL_SEC = 35
 _quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}}
 
 
@@ -386,10 +396,21 @@ def get_quotes(request: QuotesRequest):
             ),
             label="quotes toplu indirme"
         )
-        single = len(formatted_map) == 1
+        # (10 Ağustos 2026 — "tek sembollük istek sessizce boş dönüyor" kök
+        # neden düzeltmesi) Önceden burada "tek sembol isteniyorsa yf.download
+        # düz (MultiIndex olmayan) sütunlar döner" varsayımıyla `len(formatted_map)
+        # == 1` kontrolü yapılıyordu. Ama `group_by="ticker"` AÇIKÇA verildiğinde
+        # yfinance, istek TEK bir sembol için bile olsa sütunları HER ZAMAN
+        # (sembol, alan) şeklinde MultiIndex olarak döndürüyor — bu varsayım
+        # yanlıştı. Sonuç: tek sembollük bir /api/v1/quotes isteğinde `raw["Close"]`
+        # bir KeyError fırlatıyordu, bu da aşağıdaki `except: continue` tarafından
+        # sessizce yutuluyor ve `quotes` boş dönüyordu (frontend'e hiçbir hata
+        # sızmıyordu — sadece o sembol senkronize olmuyordu). Doğru kontrol,
+        # sembol sayısını TAHMİN ETMEK değil, DataFrame'in gerçekten MultiIndex
+        # olup olmadığına doğrudan bakmak: `raw.columns.nlevels > 1`.
         for formatted, original in formatted_map.items():
             try:
-                close_series = raw["Close"] if single else raw[formatted]["Close"]
+                close_series = raw[formatted]["Close"] if raw.columns.nlevels > 1 else raw["Close"]
                 close_series = close_series.dropna()
                 if len(close_series) > 0:
                     quotes[original] = round(float(close_series.iloc[-1]), 2)
