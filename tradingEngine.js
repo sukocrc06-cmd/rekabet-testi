@@ -249,6 +249,55 @@ const TradingEngine = (() => {
         return side === 'BUY' ? midPrice * (1 + HALF_SPREAD_PCT / 100) : midPrice * (1 - HALF_SPREAD_PCT / 100);
     }
 
+    // (10 Ağustos 2026 — VİOP kaldıraç/tur gerçekçiliği düzeltmesi, ikinci
+    // tur) 9 Ağustos'taki spread+nominal tavan düzeltmesi tek başına yeterli
+    // olmadı: canlı veride "Edanur"/"Mehmet Ali" hesaplarının, TEK bir
+    // sembolde, sabit 20x kaldıraçla, ortalama ~10 SANİYE tutup (en kısası
+    // 1,7 saniye!) 25 kez üst üste aç-kapa yaparak, 25 işlemin 24'ünü kârlı
+    // kapattığı (%96 kazanma oranı — saf rastgele bir piyasada istatistiksel
+    // olarak neredeyse imkansız) tespit edildi. Demek ki spread+komisyonun
+    // toplam ~%0,18'lik sürtünmesi, dev pozisyon büyüklüğü × 20x kaldıraç
+    // ile kolayca aşılabiliyormuş. Gerçek platformlarda (Binance vb.) bunu
+    // engelleyen İKİ ayrı yapısal fren var, ikisi de burada eksikti:
+    //   1) Kademeli kaldıraç: pozisyonun nominal büyüklüğü arttıkça izin
+    //      verilen maksimum kaldıraç OTOMATİK düşer — büyük pozisyonlar daha
+    //      az kaldıraçla açılabilir (bkz. VIOP_LEVERAGE_TIERS/tieredMaxLeverage,
+    //      placeOrder() içinde uygulanışı).
+    //   2) Asgari pozisyon tutma süresi: gerçek piyasalarda spread+gerçek
+    //      likidite saniyeler içinde aç-kapa yapmayı zaten anlamsız kılar —
+    //      burada bunu taklit etmek için MANUEL kapamalara asgari bir süre
+    //      zorunlu kılındı (bkz. MIN_VIOP_HOLD_MS, closePosition() içinde
+    //      uygulanışı). Otomatik SL/TP/Trailing/Marj çağrısı kapamaları BU
+    //      SINIRA TABİ DEĞİL — risk yönetimi asla geciktirilmemeli.
+    const VIOP_LEVERAGE_TIERS = [
+        { maxNotional: 250000, maxLeverage: 20 },
+        { maxNotional: 1000000, maxLeverage: 10 },
+        { maxNotional: 5000000, maxLeverage: 5 },
+        { maxNotional: 20000000, maxLeverage: 3 },
+        { maxNotional: Infinity, maxLeverage: 2 }
+    ];
+    function tieredMaxLeverage(notional) {
+        const n = Math.max(0, Number(notional) || 0);
+        for (let i = 0; i < VIOP_LEVERAGE_TIERS.length; i++) {
+            if (n <= VIOP_LEVERAGE_TIERS[i].maxNotional) return VIOP_LEVERAGE_TIERS[i].maxLeverage;
+        }
+        return VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage;
+    }
+    const MIN_VIOP_HOLD_MS = 30000; // VİOP pozisyonu manuel kapatılmadan önce açık kalması gereken asgari süre (30 saniye)
+
+    // (10 Ağustos 2026) applyQtyPct/computeRiskBasedQty/updateEstimate/
+    // estimateOrderMarginRequirement gibi ÖNİZLEME hesaplayıcılarının,
+    // kademeli kaldıraç yüzünden placeOrder()'ın GERÇEKTE uygulayacağından
+    // FARKLI bir kaldıraçla hesap yapıp kullanıcıyı "önizlemede yeterliydi,
+    // gönderince yetersiz bakiye" sürprizine düşürmemesi için ortak yardımcı.
+    // placeOrder() her zaman nihai/otoriter karardır — bu sadece önizlemeyi
+    // ona yaklaştırır.
+    function previewTieredLeverage(notional, requestedLeverage, market) {
+        const req = Math.max(1, Number(requestedLeverage) || 1);
+        if (market !== 'VIOP') return req;
+        return Math.min(req, tieredMaxLeverage(notional));
+    }
+
     /* ────────── DOM helpers ────────── */
     function byId(id) { return document.getElementById(id); }
 
@@ -2600,7 +2649,16 @@ const TradingEngine = (() => {
         // (9 Ağustos 2026) BUY için gerçek gerçekleşme fiyatı (ask) mid'den
         // biraz yüksek — bkz. applyQtyPct'teki aynı not.
         const marginPrice = state.side === 'BUY' ? execFillPrice('BUY', price) : price;
-        const maxQtyByMargin = Math.floor(effectiveBalance() / (marginPrice * ((1 / leverage) + (commissionPct / 100))));
+        let maxQtyByMargin = Math.floor(effectiveBalance() / (marginPrice * ((1 / leverage) + (commissionPct / 100))));
+        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) bkz. applyQtyPct'teki
+        // aynı not — teminat tavanı da gerçekte uygulanacak (düşürülmüş
+        // olabilecek) kaldıraçla tutarlı olsun diye tek bir ek geçişle düzeltiliyor.
+        if (state.market === 'VIOP') {
+            const tierLev = previewTieredLeverage(marginPrice * maxQtyByMargin, leverage, state.market);
+            if (tierLev < leverage) {
+                maxQtyByMargin = Math.floor(effectiveBalance() / (marginPrice * ((1 / tierLev) + (commissionPct / 100))));
+            }
+        }
         // (9 Ağustos 2026 — kök neden düzeltmesi) Risk bazlı miktar da aynı
         // gerçekçi nominal tavana tabi — bkz. applyQtyPct/placeOrder.
         const maxQtyByNotional = Math.floor(MAX_ORDER_NOTIONAL_TL / price);
@@ -2804,6 +2862,18 @@ const TradingEngine = (() => {
             const execPrice = execFillPrice('BUY', price);
             const usableMargin = effectiveBalance() * (pct / 100);
             qty = Math.floor((usableMargin * leverage) / (execPrice * (1 + (commissionPct / 100) * leverage)));
+            // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) İlk geçişte
+            // hesaplanan miktarın nominal değeri, seçili kaldıracın izin
+            // verildiği kademeyi aşıyorsa, miktar placeOrder()'ın gerçekte
+            // uygulayacağı düşük kaldıraçla TEK bir ek geçişte yeniden
+            // hesaplanıyor.
+            if (state.market === 'VIOP') {
+                const tierLev = previewTieredLeverage(execPrice * qty, leverage, state.market);
+                if (tierLev < leverage) {
+                    qty = Math.floor((usableMargin * tierLev) / (execPrice * (1 + (commissionPct / 100) * tierLev)));
+                    showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(tierLev)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
+                }
+            }
         } else {
             // (29 Temmuz 2026 — Madde 11) Ticket şu an hangi moddaysa (Normal
             // Seans/VİOP) o defterdeki pozisyona bakılıyor — aksi halde
@@ -2816,6 +2886,13 @@ const TradingEngine = (() => {
             } else {
                 const usableMargin = effectiveBalance() * (pct / 100);
                 qty = Math.floor((usableMargin * leverage) / price);
+                if (state.market === 'VIOP') {
+                    const tierLev = previewTieredLeverage(price * qty, leverage, state.market);
+                    if (tierLev < leverage) {
+                        qty = Math.floor((usableMargin * tierLev) / price);
+                        showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(tierLev)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
+                    }
+                }
             }
         }
         // (9 Ağustos 2026 — kök neden düzeltmesi) Otomatik miktar hesabı,
@@ -2865,8 +2942,12 @@ const TradingEngine = (() => {
             return;
         }
         const commissionPct = getCommissionPct();
-        const leverage = Math.max(1, Number(state.leverage) || 1);
         const notional = price * qty;
+        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) Gösterilen gereken
+        // teminat, placeOrder()'ın bu pozisyon büyüklüğü için GERÇEKTE
+        // uygulayacağı (kademe nedeniyle düşürülmüş olabilecek) kaldıraçla
+        // hesaplanıyor — bkz. previewTieredLeverage.
+        const leverage = previewTieredLeverage(notional, state.leverage, state.market);
         const commission = notional * (commissionPct / 100);
         const margin = notional / leverage;
         const requiredTotal = margin + commission;
@@ -3175,6 +3256,12 @@ const TradingEngine = (() => {
         // (mid) yerine bu gösteriliyor ki kullanıcı gerçekte ne fiyattan
         // işlem yaptığını görsün.
         showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] ${ctx.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${ctx.qty} adet ${ctx.symbol} @ ₺${fmtPrice(result.fillPrice)}`);
+        // (10 Ağustos 2026 — kademeli kaldıraç) Seçilen kaldıraç, pozisyonun
+        // büyüklüğü nedeniyle düşürüldüyse kullanıcı sessizce şaşırmasın diye
+        // ayrıca bilgilendiriliyor — bkz. placeOrder()/tieredMaxLeverage.
+        if (result.leverageClampedTo) {
+            showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(result.leverageClampedTo)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
+        }
         // Emir başarıyla gerçekleşti. Bu turda bir kaldıraç notu gösterildiyse
         // (leverageNote) onu ekranda bırakıyoruz — kullanıcının hâlâ görmesi
         // faydalı bir bilgi. Gösterilmediyse, ÖNCEKİ bir başarısız denemeden
@@ -3861,7 +3948,10 @@ const TradingEngine = (() => {
         // pozisyonun ESKİ kaldıracıyla değil, bilet üzerinde SEÇİLİ olan
         // (bu fonksiyona parametre olarak gelen) kaldıraçla hesaplanıyor —
         // bkz. placeOrder()'daki ayrıntılı açıklama.
-        const effectiveLeverage = Math.max(1, Number(leverage) || 1);
+        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) ...ve artık
+        // kademeli kaldıraç tavanıyla da (bkz. previewTieredLeverage)
+        // placeOrder()'ın GERÇEKTE uygulayacağıyla tutarlı.
+        const effectiveLeverage = previewTieredLeverage(price * remainingQty, leverage, market);
         const margin = (price * remainingQty) / effectiveLeverage;
         return margin - releasedMargin;
     }
@@ -3901,6 +3991,7 @@ const TradingEngine = (() => {
         const commissionTotal = price * qty * (commissionPct / 100);
         let remainingQty = qty;
         const pos = b.positions[symbol];
+        let leverageClampedTo = null; // (10 Ağustos 2026) kademeli kaldıraç devreye girdiyse çağırana bildirmek için
 
         // 1. Close/reduce an opposite-direction position first.
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
@@ -3968,7 +4059,22 @@ const TradingEngine = (() => {
                 return { ok: false, msg: 'Emrin büyüklüğü (' + fmtTRY(openingNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.' };
             }
 
-            const margin = (price * remainingQty) / requestedLeverage;
+            // (10 Ağustos 2026 — kademeli kaldıraç) VİOP'ta izin verilen
+            // maksimum kaldıraç, AÇILAN kısmın nominal büyüklüğüne göre
+            // otomatik düşer (bkz. VIOP_LEVERAGE_TIERS/tieredMaxLeverage
+            // yukarıda) — gerçek platformlardaki (Binance vb.) kademeli
+            // kaldıraç/marj sistemine benzer. NORMAL seansta zaten 1x'e
+            // sabitlendiği için bu her zaman no-op'tur.
+            let effectiveRequestedLeverage = requestedLeverage;
+            if (market === 'VIOP') {
+                const tierMax = tieredMaxLeverage(openingNotional);
+                if (effectiveRequestedLeverage > tierMax) {
+                    leverageClampedTo = tierMax;
+                    effectiveRequestedLeverage = tierMax;
+                }
+            }
+
+            const margin = (price * remainingQty) / effectiveRequestedLeverage;
             const requiredBalance = margin + openCommission;
             if (effectiveBalance() < requiredBalance) {
                 savePortfolio();
@@ -3981,14 +4087,20 @@ const TradingEngine = (() => {
 
             let effectiveLeverage;
             if (!existingPos) {
-                effectiveLeverage = requestedLeverage;
-                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
+                effectiveLeverage = effectiveRequestedLeverage;
+                // (10 Ağustos 2026 — VİOP asgari tutma süresi) openedAt, bu
+                // pozisyon MANUEL olarak ne zaman kapatılabileceğini belirlemek
+                // için closePosition()'da kullanılıyor — bkz. MIN_VIOP_HOLD_MS.
+                // Var olan bir pozisyona EKLEME yapılırken (aşağıdaki else dalı)
+                // kasıtlı olarak DOKUNULMUYOR: pozisyonun "yaşı" ilk açıldığı
+                // ana göre sayılmaya devam eder, her ekleme sayacı sıfırlamaz.
+                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage, openedAt: Date.now() };
             } else {
                 const p = existingPos;
                 const totalQty = p.qty + remainingQty;
                 const oldLeverage = p.leverage || 1;
                 p.avgPrice = (p.avgPrice * p.qty + price * remainingQty) / totalQty;
-                effectiveLeverage = (oldLeverage * p.qty + requestedLeverage * remainingQty) / totalQty;
+                effectiveLeverage = (oldLeverage * p.qty + effectiveRequestedLeverage * remainingQty) / totalQty;
                 p.qty = totalQty;
                 p.leverage = effectiveLeverage;
             }
@@ -4017,7 +4129,7 @@ const TradingEngine = (() => {
         // farklı olabildiği için, çağıranların kendi (spread'siz) mid
         // değişkenleri yerine GERÇEKTEN gerçekleşen fiyatı gösterebilmesi
         // için burada da döndürülüyor.
-        return { ok: true, fillPrice: price };
+        return { ok: true, fillPrice: price, leverageClampedTo: leverageClampedTo };
     }
 
     function closePosition(symbol, reason, market) {
@@ -4028,6 +4140,24 @@ const TradingEngine = (() => {
         market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
         const pos = book(market).positions[symbol];
         if (!pos) return;
+
+        // (10 Ağustos 2026 — VİOP asgari tutma süresi) `reason` sadece
+        // OTOMATİK kapamalarda (SL/TP/TRAILING/LIQUIDATION) dolu gelir —
+        // manuel "Kapat" butonu her zaman null geçer (bkz. __optipulseClosePosition
+        // inline onclick). Bu sınır SADECE manuel kapamaya uygulanıyor; risk
+        // yönetimi (SL/TP/marj çağrısı) hiçbir koşulda geciktirilmemeli.
+        // pos.openedAt olmayan (bu düzeltmeden ÖNCE açılmış) eski pozisyonlar
+        // güvenlik için bloklanmıyor — asgari süre sadece bundan sonra açılan
+        // pozisyonlar için geçerli.
+        if (!reason && market === 'VIOP' && pos.openedAt) {
+            const heldMs = Date.now() - pos.openedAt;
+            if (heldMs < MIN_VIOP_HOLD_MS) {
+                const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
+                showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_VIOP_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
+                return;
+            }
+        }
+
         const price = getPrice(symbol);
         if (!price) return;
         const side = pos.side === 'LONG' ? 'SELL' : 'BUY';
@@ -4262,6 +4392,21 @@ const TradingEngine = (() => {
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             const leverage = pos.leverage || 1;
             const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${fmtLeverage(leverage)}x</span>` : '';
+            // (10 Ağustos 2026 — VİOP asgari tutma süresi) Buton, asgari süre
+            // dolmadan tıklansa da closePosition() zaten engelliyor (bkz.
+            // yukarıda) — ama kullanıcı boşuna denemesin diye burada da
+            // görsel olarak devre dışı bırakılıp kalan saniye gösteriliyor.
+            // tickPrices() 2 saniyede bir renderPositions() çağırdığı için
+            // bu geri sayım otomatik güncelleniyor, ayrı bir zamanlayıcıya
+            // gerek yok.
+            let closeBtnHtml;
+            const heldMs = (market === 'VIOP' && pos.openedAt) ? (Date.now() - pos.openedAt) : null;
+            if (heldMs !== null && heldMs < MIN_VIOP_HOLD_MS) {
+                const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
+                closeBtnHtml = `<button class="btn-close-pos" disabled title="Asgari tutma süresi dolmadı">${remainingSec}sn</button>`;
+            } else {
+                closeBtnHtml = `<button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>`;
+            }
             // (23 Temmuz 2026, on üçüncü oturum devamı) Kart düzeni: üst satırda
             // sembol+yön+kaldıraç solda, K/Z sağda (nowrap — artık "-" işareti
             // ayrı satıra düşmüyor); alt satırda adet/ort. fiyat solda, SL/TP ve
@@ -4279,7 +4424,7 @@ const TradingEngine = (() => {
                         <div class="pos-card-meta font-mono">${pos.qty} adet<span class="pos-card-dot">·</span>Ort. ₺${fmtPrice(pos.avgPrice)}</div>
                         <div class="pos-actions-cell">
                             <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}', '${market}')" title="Stop-Loss / Take-Profit">SL/TP</button>
-                            <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>
+                            ${closeBtnHtml}
                         </div>
                     </div>
                     ${sltpSub}
