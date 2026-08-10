@@ -491,17 +491,36 @@ const TradingEngine = (() => {
     // atılır (TICK_MS=2000ms × 60 ≈ son 2 dakika).
     const SPARK_HISTORY_LEN = 60;
 
+    // (10 Ağustos 2026 — "kuruş bazlı değil, 1-2 TL'lik sıçramalar" düzeltmesi)
+    // DC.STOCK_PROFILES'taki `volatility` alanı (ör. ASELS için 0,017) bir
+    // GÜNLÜK/SEANS oynaklığı parametresi — ama tickPrices() bunu doğrudan HER
+    // 2 saniyelik tick'e uyguluyordu, sanki günlük oynaklıkmış gibi değil de
+    // tek bir tick'in oynaklığıymış gibi. Bu da (356 TL × %1,7 × 0,5 ≈ 3 TL)
+    // her 2 saniyede bir liralarla ölçülen sıçramalara yol açıyordu — gerçek
+    // piyasada ise ardışık tickler arası fark genelde kuruşlarla ölçülür.
+    // Doğru fiziksel model (rastgele yürüyüş / Brown hareketi ölçekleme
+    // kuralı): bir seansı N bağımsız tick'e bölersek, tek bir tick'in
+    // oynaklığı günlük oynaklığın 1/sqrt(N)'i kadar olmalı — toplam seans
+    // boyunca birikince yine günlük oynaklığa ulaşılsın diye. BIST_SESSION_
+    // MINUTES (480dk = 28800sn) / TICK_MS(2sn) ≈ 14400 tick/seans ->
+    // sqrt(14400) = 120. Yani tick başına oynaklık, günlük oynaklığın
+    // yaklaşık 1/120'si olmalı.
+    const BIST_SESSION_SECONDS = 480 * 60;
+    const TICKS_PER_SESSION = BIST_SESSION_SECONDS / (TICK_MS / 1000);
+    const TICK_VOLATILITY_SCALE = 1 / Math.sqrt(TICKS_PER_SESSION);
+
     function buildPriceProfiles() {
         const profiles = {};
         DC.BIST100.forEach(({ symbol }) => {
             const known = DC.STOCK_PROFILES[symbol];
             if (known) {
-                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, name: known.name, history: [known.basePrice] };
+                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, tickVolatility: known.volatility * TICK_VOLATILITY_SCALE, name: known.name, history: [known.basePrice] };
                 return;
             }
             const hash = Array.from(symbol).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
             const base = +(15 + Math.abs(hash % 400) + (Math.abs(hash) % 100) / 100).toFixed(2);
-            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000, history: [base] };
+            const dailyVol = 0.012 + (Math.abs(hash) % 8) / 1000;
+            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: dailyVol, tickVolatility: dailyVol * TICK_VOLATILITY_SCALE, history: [base] };
         });
         return profiles;
     }
@@ -535,7 +554,12 @@ const TradingEngine = (() => {
             // bildirdiği "bir anda yükselip düşüyor, çok spekülatif" hatası.
             const anchor = (typeof p.liveAnchor === 'number') ? p.liveAnchor : p.dayOpen;
             const meanReversion = (anchor - p.price) * 0.06;
-            const shock = (Math.random() - 0.5) * p.volatility * p.price;
+            // (10 Ağustos 2026) p.volatility DEĞİL p.tickVolatility kullanılıyor
+            // — bkz. buildPriceProfiles'taki TICK_VOLATILITY_SCALE notu. p.volatility
+            // hâlâ günlük ölçek referansı olarak duruyor (başka bir yerde kullanılmasa
+            // da ileride ör. risk göstergelerinde lazım olabilir diye korunuyor).
+            const tickVol = (typeof p.tickVolatility === 'number') ? p.tickVolatility : p.volatility;
+            const shock = (Math.random() - 0.5) * tickVol * p.price;
             let next = p.price + shock + meanReversion;
             // Kısa vadeli (tik-tik arası) dalgalanma artık günlük %6 bandı
             // yerine, en son bilinen GERÇEK fiyatın çok daha dar bir bandı
