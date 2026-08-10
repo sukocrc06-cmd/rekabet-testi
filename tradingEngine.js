@@ -496,12 +496,12 @@ const TradingEngine = (() => {
         DC.BIST100.forEach(({ symbol }) => {
             const known = DC.STOCK_PROFILES[symbol];
             if (known) {
-                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, volatility: known.volatility, name: known.name, history: [known.basePrice] };
+                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, name: known.name, history: [known.basePrice] };
                 return;
             }
             const hash = Array.from(symbol).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
             const base = +(15 + Math.abs(hash % 400) + (Math.abs(hash) % 100) / 100).toFixed(2);
-            profiles[symbol] = { price: base, dayOpen: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000, history: [base] };
+            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000, history: [base] };
         });
         return profiles;
     }
@@ -520,9 +520,32 @@ const TradingEngine = (() => {
 
         Object.keys(priceProfiles).forEach(sym => {
             const p = priceProfiles[sym];
-            const meanReversion = (p.dayOpen - p.price) * 0.02;
+            // (10 Ağustos 2026 — "ASELS spekülatif sıçrama" düzeltmesi)
+            // Reversion artık p.dayOpen'a DEĞİL, p.liveAnchor'a çekiyor.
+            // dayOpen sadece günlük %değişim göstergesi için sabit kalması
+            // gereken bir referans (gerçek gün açılışı); liveAnchor ise en
+            // son alınan GERÇEK fiyat (WS tick / 40sn'lik toplu senkron /
+            // sembol seçiminde OHLCV son kapanışı). Eskiden ikisi aynı
+            // (dayOpen) olduğu için, dayOpen ancak %6'lık geniş banttan
+            // taşıldığında güncelleniyordu — bu da günlük açılışa yakın
+            // bir eski/durgun fiyatın (ör. bir önceki günün kapanışı)
+            // saatlerce "yerçekimi" gibi fiyatı geri çekmesine, buna karşın
+            // her 40sn'de bir gerçek fiyata sıçramasına, yani testere dişi
+            // (sıçra-geri düş) görünümüne yol açıyordu — kullanıcının
+            // bildirdiği "bir anda yükselip düşüyor, çok spekülatif" hatası.
+            const anchor = (typeof p.liveAnchor === 'number') ? p.liveAnchor : p.dayOpen;
+            const meanReversion = (anchor - p.price) * 0.06;
             const shock = (Math.random() - 0.5) * p.volatility * p.price;
             let next = p.price + shock + meanReversion;
+            // Kısa vadeli (tik-tik arası) dalgalanma artık günlük %6 bandı
+            // yerine, en son bilinen GERÇEK fiyatın çok daha dar bir bandı
+            // (±%1,5) içinde tutuluyor — böylece iki gerçek-veri senkronu
+            // arasında fiyat gerçekten uzaklaşıp "kelepçelenerek" sıçramıyor.
+            // Günlük %6 sınırı (gerçek borsa marj/tavan-taban benzeri emniyet
+            // kemeri) dış sınır olarak ayrıca korunuyor.
+            const localBandPct = 0.015;
+            const localCapUp = anchor * (1 + localBandPct), localCapDown = anchor * (1 - localBandPct);
+            next = Math.max(localCapDown, Math.min(localCapUp, next));
             const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
             next = Math.max(capDown, Math.min(capUp, next));
             p.price = +next.toFixed(2);
@@ -588,6 +611,7 @@ const TradingEngine = (() => {
         if (!p || !lastClose) return;
         p.price = lastClose;
         p.dayOpen = lastClose;
+        p.liveAnchor = lastClose;
         renderWatchlistPrices();
         if (symbol === state.activeSymbol) {
             updateActiveSymbolTicket();
@@ -688,6 +712,10 @@ const TradingEngine = (() => {
                 if (msg.price > capUp || msg.price < capDown) {
                     p.dayOpen = msg.price;
                 }
+                // (10 Ağustos 2026) liveAnchor'ı da her gerçek tick'te
+                // güncelliyoruz — tickPrices()'ın kısa vadeli reversion/bant
+                // hedefi artık bu, dayOpen değil (bkz. tickPrices yorumu).
+                p.liveAnchor = msg.price;
                 p.price = +msg.price.toFixed(2);
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
@@ -778,6 +806,9 @@ const TradingEngine = (() => {
             if (price > capUp || price < capDown) {
                 p.dayOpen = price;
             }
+            // (10 Ağustos 2026) liveAnchor her 40sn'lik toplu senkronda da
+            // güncelleniyor — bkz. openLiveSocket'teki aynı not.
+            p.liveAnchor = price;
             p.price = +price.toFixed(2);
             anyUpdated = true;
         });
@@ -2312,6 +2343,7 @@ const TradingEngine = (() => {
             if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
                 priceProfiles[symbol].price = chartInfo.lastClose;
                 priceProfiles[symbol].dayOpen = chartInfo.lastClose;
+                priceProfiles[symbol].liveAnchor = chartInfo.lastClose;
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
             }
@@ -5231,7 +5263,7 @@ const TradingEngine = (() => {
         // belirsizleştiriyor. Bekleyen emir tetikleme mantığını piyasa
         // saatlerinden bağımsız test edebilmek için ayrı bir QA girişi.
         debugCheckPendingOrdersNow: () => checkPendingOcoOrders(),
-        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; } },
+        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; priceProfiles[symbol].liveAnchor = price; } },
         // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
         // finteclubBridge.js'in shared_state dinleyicisi tarafından çağrılır.
         setAdminForcedTheme
