@@ -514,13 +514,13 @@ const TradingEngine = (() => {
         DC.BIST100.forEach(({ symbol }) => {
             const known = DC.STOCK_PROFILES[symbol];
             if (known) {
-                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, tickVolatility: known.volatility * TICK_VOLATILITY_SCALE, name: known.name, history: [known.basePrice] };
+                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, tickVolatility: known.volatility * TICK_VOLATILITY_SCALE, name: known.name, history: [known.basePrice], hasRealAnchor: false, pendingSuspiciousPrice: null };
                 return;
             }
             const hash = Array.from(symbol).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
             const base = +(15 + Math.abs(hash % 400) + (Math.abs(hash) % 100) / 100).toFixed(2);
             const dailyVol = 0.012 + (Math.abs(hash) % 8) / 1000;
-            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: dailyVol, tickVolatility: dailyVol * TICK_VOLATILITY_SCALE, history: [base] };
+            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: dailyVol, tickVolatility: dailyVol * TICK_VOLATILITY_SCALE, history: [base], hasRealAnchor: false, pendingSuspiciousPrice: null };
         });
         return profiles;
     }
@@ -630,12 +630,75 @@ const TradingEngine = (() => {
     // olmayan bir sıçrama oluşabilir (iki ayrı rastgele yürüyüş aynı
     // sembol için farklı sonlara varır). Sembol o an aktif sembolse ilgili
     // panelleri de tazeler.
+    // (10 Ağustos 2026, dördüncü tur — "204 TL'den aldım, kısa süre sonra
+    // 14 TL'den satılmış, kâr yerine dev zarar" hatası — GERÇEK ve ciddi bir
+    // sistem arızası, kullanıcı hayal görmüyordu) Buraya kadarki üç
+    // düzeltme (liveAnchor, tickVolatility, backend tekli-sembol/önbellek)
+    // fiyatın YANLIŞ hızda/hedefte hareket etmesiyle ilgiliydi. tickPrices()
+    // simülasyonunun kendisi zaten sıkı bantlanmış (liveAnchor'ın ±%1,5'i,
+    // dayOpen'ın ±%6'sı) — yani KENDİ BAŞINA 204'ten 14'e gibi bir sıçrama
+    // ÜRETEMEZ. Ama WebSocket tick'i, toplu /api/v1/quotes senkronu ve
+    // sembol seçimindeki OHLCV son-kapanış çapalaması, backend'den/yfinance'ten
+    // gelen "gerçek" fiyatı HİÇBİR MANTIKLILIK KONTROLÜ OLMADAN doğrudan
+    // p.price'a yazıyordu. Ücretsiz bir veri kaynağından (yfinance) TEK bir
+    // bozuk/hatalı veri noktası (ağ hatası, geçici önbellek/kolon karışıklığı,
+    // ya da bir kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
+    // karışıklığı) geldiğinde fiyat ekranda VE checkMarginCalls()/oto-SL
+    // değerlendirmesinde ANINDA gerçekçi olmayan bir seviyeye sıçrıyor,
+    // kaldıraçlı bir VİOP pozisyonunu anlık olarak eziyor ya da kullanıcıyı
+    // panikle yanlış fiyattan kapamaya itiyordu. Çözüm: gelen her "gerçek"
+    // fiyatı applyRealPriceUpdate() üzerinden geçiriyoruz — mevcut bilinen
+    // fiyattan %20'den fazla sapan tek seferlik bir değeri HEMEN uygulamak
+    // yerine "şüpheli" olarak saklıyor, ancak BİR SONRAKİ gerçek veri turunda
+    // da aynı (yakın) seviye tekrar gelirse (yani tek seferlik bir veri hatası
+    // değil, kalıcı bir fiyat seviyesiyse) uyguluyoruz. Bir sembol için henüz
+    // hiç gerçek veri görülmediyse (hasRealAnchor false) bu kontrol atlanır —
+    // ilk açılış çapası her zaman doğrudan uygulanmalı.
+    const SUSPICIOUS_PRICE_JUMP_PCT = 0.20;
+    const SUSPICIOUS_CONFIRM_TOLERANCE_PCT = 0.03;
+    function applyRealPriceUpdate(symbol, realPrice, applyFn) {
+        const p = priceProfiles[symbol];
+        if (!p || typeof realPrice !== 'number' || !(realPrice > 0)) return false;
+
+        if (!p.hasRealAnchor || !(p.price > 0)) {
+            p.hasRealAnchor = true;
+            p.pendingSuspiciousPrice = null;
+            applyFn(p, realPrice);
+            return true;
+        }
+
+        const deviation = Math.abs(realPrice - p.price) / p.price;
+        if (deviation <= SUSPICIOUS_PRICE_JUMP_PCT) {
+            p.pendingSuspiciousPrice = null;
+            applyFn(p, realPrice);
+            return true;
+        }
+
+        const pending = p.pendingSuspiciousPrice;
+        if (pending && Math.abs(realPrice - pending) / pending <= SUSPICIOUS_CONFIRM_TOLERANCE_PCT) {
+            // Aynı şüpheli seviye art arda ikinci kez geldi — artık tek
+            // seferlik bir veri hatası olma ihtimali çok düşük, kalıcı kabul
+            // edip uyguluyoruz.
+            p.pendingSuspiciousPrice = null;
+            applyFn(p, realPrice);
+            if (window.console && console.warn) console.warn(`[OptiPulse] ${symbol}: büyük fiyat sıçraması (%${(deviation * 100).toFixed(1)}) iki ayrı veri turunda doğrulandı, uygulandı.`);
+            return true;
+        }
+
+        p.pendingSuspiciousPrice = realPrice;
+        if (window.console && console.warn) console.warn(`[OptiPulse] ${symbol}: şüpheli fiyat sıçraması (₺${p.price} -> ₺${realPrice}, %${(deviation * 100).toFixed(1)}) — tek seferlik veri hatası olabilir, doğrulanana kadar UYGULANMADI.`);
+        return false;
+    }
+
     function syncPriceAnchor(symbol, lastClose) {
         const p = priceProfiles[symbol];
         if (!p || !lastClose) return;
-        p.price = lastClose;
-        p.dayOpen = lastClose;
-        p.liveAnchor = lastClose;
+        const applied = applyRealPriceUpdate(symbol, lastClose, (prof, val) => {
+            prof.price = val;
+            prof.dayOpen = val;
+            prof.liveAnchor = val;
+        });
+        if (!applied) return;
         renderWatchlistPrices();
         if (symbol === state.activeSymbol) {
             updateActiveSymbolTicket();
@@ -732,20 +795,26 @@ const TradingEngine = (() => {
                 // saniyelik simülasyon tick'i bu gerçek fiyatı hatalı
                 // şekilde eski banda geri "kelepçeler" — tıpkı sembol ilk
                 // seçildiğinde selectSymbol()'ün yaptığı ilk çıpalama gibi.
-                const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
-                if (msg.price > capUp || msg.price < capDown) {
-                    p.dayOpen = msg.price;
+                // (10 Ağustos 2026, dördüncü tur) Artık bu doğrudan atama
+                // yerine applyRealPriceUpdate() üzerinden geçiyor — tek
+                // seferlik bozuk bir yfinance tick'inin fiyatı anında
+                // gerçekçi olmayan bir seviyeye sıçratmasını engeller (bkz.
+                // fonksiyonun tanımındaki not).
+                const applied = applyRealPriceUpdate(symbol, msg.price, (prof, price) => {
+                    const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
+                    if (price > capUp || price < capDown) {
+                        prof.dayOpen = price;
+                    }
+                    prof.liveAnchor = price;
+                    prof.price = +price.toFixed(2);
+                });
+                if (applied) {
+                    renderWatchlistPrices();
+                    updateActiveSymbolTicket();
+                    if (window.TradingChart) window.TradingChart.updateLastPrice(symbol, p.price);
+                    renderPositions();
+                    renderAccountSummary();
                 }
-                // (10 Ağustos 2026) liveAnchor'ı da her gerçek tick'te
-                // güncelliyoruz — tickPrices()'ın kısa vadeli reversion/bant
-                // hedefi artık bu, dayOpen değil (bkz. tickPrices yorumu).
-                p.liveAnchor = msg.price;
-                p.price = +msg.price.toFixed(2);
-                renderWatchlistPrices();
-                updateActiveSymbolTicket();
-                if (window.TradingChart) window.TradingChart.updateLastPrice(symbol, p.price);
-                renderPositions();
-                renderAccountSummary();
             }
             liveFeedActive = true;
             liveFeedLastTickAt = Date.now();
@@ -826,15 +895,18 @@ const TradingEngine = (() => {
             // connectLiveFeed'in onmessage'ı): gerçek fiyat mevcut günlük
             // banttan çok uzaksa dayOpen'ı da yeniden merkezle, aksi halde
             // bir sonraki simüle tick bu gerçek fiyatı geri "kelepçeler".
-            const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
-            if (price > capUp || price < capDown) {
-                p.dayOpen = price;
-            }
-            // (10 Ağustos 2026) liveAnchor her 40sn'lik toplu senkronda da
-            // güncelleniyor — bkz. openLiveSocket'teki aynı not.
-            p.liveAnchor = price;
-            p.price = +price.toFixed(2);
-            anyUpdated = true;
+            // (10 Ağustos 2026, dördüncü tur) applyRealPriceUpdate() üzerinden
+            // geçiyor — tek seferlik bozuk bir yfinance verisinin ~97 sembollük
+            // toplu senkronda fiyatı anında sıçratmasını engeller.
+            const applied = applyRealPriceUpdate(symbol, price, (prof, val) => {
+                const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
+                if (val > capUp || val < capDown) {
+                    prof.dayOpen = val;
+                }
+                prof.liveAnchor = val;
+                prof.price = +val.toFixed(2);
+            });
+            if (applied) anyUpdated = true;
         });
 
         if (anyUpdated) {
@@ -2364,10 +2436,15 @@ const TradingEngine = (() => {
             // actual last close, so the two charts silently disagree on
             // "the current price" for the same symbol.
             const alreadyHasLiveTick = liveFeedActive && liveFeedSymbol === symbol;
-            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
-                priceProfiles[symbol].price = chartInfo.lastClose;
-                priceProfiles[symbol].dayOpen = chartInfo.lastClose;
-                priceProfiles[symbol].liveAnchor = chartInfo.lastClose;
+            // (10 Ağustos 2026, dördüncü tur) Burada da applyRealPriceUpdate()
+            // kullanılıyor — OHLCV geçmişindeki son kapanış da (ör. bir
+            // kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
+            // karışıklığı yüzünden) tek seferlik bozuk olabilir.
+            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
+                prof.price = val;
+                prof.dayOpen = val;
+                prof.liveAnchor = val;
+            })) {
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
             }
