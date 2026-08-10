@@ -4014,7 +4014,13 @@ const TradingEngine = (() => {
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
             const posLeverage = pos.leverage || 1;
-            releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
+            // (10 Ağustos 2026) placeOrder()'daki lockedMargin düzeltmesiyle
+            // tutarlı olsun diye burada da GERÇEK kilitli marj (varsa)
+            // kullanılıyor — bkz. placeOrder'daki tam açıklama.
+            const totalLockedMargin = (typeof pos.lockedMargin === 'number')
+                ? pos.lockedMargin
+                : (pos.avgPrice * pos.qty) / posLeverage;
+            releasedMargin = totalLockedMargin * (closeQty / pos.qty);
             remainingQty -= closeQty;
         }
         if (remainingQty <= 0) return -releasedMargin;
@@ -4074,7 +4080,31 @@ const TradingEngine = (() => {
             const closeQty = Math.min(remainingQty, pos.qty);
             const closeCommission = commissionTotal * (closeQty / qty);
             const posLeverage = pos.leverage || 1;
-            const releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
+            // (10 Ağustos 2026 — kök neden düzeltmesi: "kâr gösteriyor ama
+            // bakiye artacağına azalıyor") ESKİ formül: releasedMargin =
+            // avgPrice*closeQty/leverage — burada `leverage`, pozisyona
+            // yapılan TÜM eklemelerin adet-ağırlıklı ORTALAMASI (bkz. aşağıdaki
+            // "2. Open or add" dalı). Bu formül SADECE pozisyona yapılan TÜM
+            // eklemeler AYNI kaldıraçla yapıldıysa gerçekten kilitlenen
+            // toplam marjla eşleşir. Kademeli VİOP kaldıracı (tieredMaxLeverage)
+            // yüzünden aynı sembole art arda YAPILAN eklemeler artık SIKLIKLA
+            // farklı kaldıraçlarda oluyor (pozisyon büyüdükçe otomatik daha
+            // düşük tier'a düşüyor) — bu durumda avgPrice*qty/ortalamaKaldıraç,
+            // gerçekte kilitlenmiş toplam marjdan SİSTEMATİK olarak sapıyor
+            // (örnek: 1000 adet @100 10x'te [marj 10.000] + 1000 adet @110
+            // 5x'te [marj 22.000] = gerçek kilitli marj 32.000 TL, ama eski
+            // formül 105*2000/7.5 = 28.000 TL hesaplıyordu — kapanışta 4.000
+            // TL'lik marj SESSİZCE KAYBOLUYORDU, kâr doğru hesaplansa bile net
+            // bakiye beklenenden düşük çıkıyordu). Düzeltme: pos.lockedMargin
+            // artık her eklemede GERÇEKTEN kilitlenen tutarı birebir topluyor
+            // (bkz. aşağıki "2." dal) ve burada oranla (closeQty/pos.qty)
+            // GERİ VERİLİYOR — ortalama kaldıraçtan yeniden hesaplanmıyor.
+            // pos.lockedMargin yoksa (bu düzeltmeden ÖNCE açılmış eski bir
+            // pozisyon) eski formülle bir kerelik geriye dönük tahmin yapılır.
+            const totalLockedMargin = (typeof pos.lockedMargin === 'number')
+                ? pos.lockedMargin
+                : (pos.avgPrice * pos.qty) / posLeverage;
+            const releasedMargin = totalLockedMargin * (closeQty / pos.qty);
             let realizedPnl;
 
             if (pos.side === 'LONG') {
@@ -4084,6 +4114,7 @@ const TradingEngine = (() => {
             }
             portfolio.balance += releasedMargin + realizedPnl;
 
+            pos.lockedMargin = totalLockedMargin - releasedMargin;
             pos.qty -= closeQty;
             remainingQty -= closeQty;
             if (pos.qty <= 0) delete b.positions[symbol];
@@ -4170,13 +4201,30 @@ const TradingEngine = (() => {
                 // Var olan bir pozisyona EKLEME yapılırken (aşağıdaki else dalı)
                 // kasıtlı olarak DOKUNULMUYOR: pozisyonun "yaşı" ilk açıldığı
                 // ana göre sayılmaya devam eder, her ekleme sayacı sıfırlamaz.
-                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage, openedAt: Date.now() };
+                // (10 Ağustos 2026 — kök neden düzeltmesi) lockedMargin,
+                // pozisyonda GERÇEKTEN kilitli duran toplam marjı izliyor —
+                // bkz. yukarıdaki "1. Close/reduce" dalındaki tam açıklama.
+                // Taze açılışta bu basitçe az önce hesaplanan `margin`.
+                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage, lockedMargin: margin, openedAt: Date.now() };
             } else {
                 const p = existingPos;
                 const totalQty = p.qty + remainingQty;
                 const oldLeverage = p.leverage || 1;
+                // (10 Ağustos 2026 — kök neden düzeltmesi) Eklemeden ÖNCEKİ
+                // gerçek kilitli marj — pos.lockedMargin varsa onu kullan,
+                // yoksa (bu düzeltmeden önce açılmış eski pozisyon) eski
+                // formülle bir kerelik tahmin. Yeni eklenen kısmın marjı
+                // (`margin`, yukarıda zaten kendi kaldıracıyla doğru
+                // hesaplandı ve bakiyeden düşüldü) buna DOĞRUDAN eklenir —
+                // ortalama kaldıraç üzerinden YENİDEN hesaplanmaz, bu yüzden
+                // farklı kaldıraçlarla yapılan art arda eklemelerde bile
+                // kilitli toplam marj hep doğru kalır.
+                const existingLockedMargin = (typeof p.lockedMargin === 'number')
+                    ? p.lockedMargin
+                    : (p.avgPrice * p.qty) / oldLeverage;
                 p.avgPrice = (p.avgPrice * p.qty + price * remainingQty) / totalQty;
                 effectiveLeverage = (oldLeverage * p.qty + effectiveRequestedLeverage * remainingQty) / totalQty;
+                p.lockedMargin = existingLockedMargin + margin;
                 p.qty = totalQty;
                 p.leverage = effectiveLeverage;
             }
@@ -4339,7 +4387,13 @@ const TradingEngine = (() => {
                 if (leverage <= 1) return;
                 const price = getPrice(symbol);
                 if (!price) return;
-                const margin = (pos.avgPrice * pos.qty) / leverage;
+                // (10 Ağustos 2026) Likidasyon eşiği artık GERÇEK kilitli
+                // marja (pos.lockedMargin, varsa) göre hesaplanıyor — bkz.
+                // placeOrder'daki tam açıklama. Karışık kaldıraçlı
+                // eklemelerde eski formül (avgPrice*qty/ortalamaKaldıraç)
+                // yanlış bir marj tabanı verip likidasyonu erken/geç
+                // tetikleyebiliyordu.
+                const margin = (typeof pos.lockedMargin === 'number') ? pos.lockedMargin : (pos.avgPrice * pos.qty) / leverage;
                 const unrealized = pos.side === 'LONG'
                     ? (price - pos.avgPrice) * pos.qty
                     : (pos.avgPrice - price) * pos.qty;
@@ -4858,7 +4912,10 @@ const TradingEngine = (() => {
                 const pos = positions[symbol];
                 const current = getPrice(symbol) || pos.avgPrice;
                 const leverage = pos.leverage || 1;
-                const margin = (pos.avgPrice * pos.qty) / leverage;
+                // (10 Ağustos 2026) Özkaynak/kullanılan marj artık GERÇEK
+                // kilitli marja (pos.lockedMargin, varsa) göre — bkz.
+                // placeOrder'daki tam açıklama.
+                const margin = (typeof pos.lockedMargin === 'number') ? pos.lockedMargin : (pos.avgPrice * pos.qty) / leverage;
                 usedMargin += margin;
                 if (pos.side === 'LONG') {
                     openPnl += (current - pos.avgPrice) * pos.qty;
@@ -4932,12 +4989,27 @@ const TradingEngine = (() => {
         // (5 Ağustos 2026) Giriş yapılmadan bakiye 0 görünüyor — sebepsiz
         // "neden 0" kafa karışıklığını önlemek için pill'e açıklayıcı bir
         // tooltip ekleniyor, sadece kapı aktifken ve giriş yapılmamışken.
+        // (10 Ağustos 2026 — "cihaz değiştirince bakiyem sıfırlanıyor, her
+        // şey gitti" kök neden düzeltmesi) Bu tooltip SADECE fare ile üzerine
+        // gelince (hover) görünüyordu — dokunmatik cihazlarda (telefon/
+        // tablet) hover diye bir şey YOK, yani asıl bu senaryoda (biri
+        // telefondan tablete/bilgisayara GEÇTİĞİNDE, yeni cihazda henüz
+        // giriş yapmadığı için bakiye gerçekten 0 GÖRÜNÜYOR — veri
+        // KAYBOLMUYOR, sadece görünmüyor) kullanıcı bu açıklamayı HİÇBİR
+        // ZAMAN göremiyordu, "her şeyim gitti" sanıyordu. Artık aynı bilgi
+        // pill'in üzerine GÖRÜNÜR bir etiket olarak da yazılıyor (hem
+        // dokunmatik hem masaüstünde görünür), tooltip da yedek olarak
+        // duruyor.
         const balancePillEl = byId('header-balance-pill');
+        const balanceLabelEl = byId('header-balance-label');
+        const needsLogin = isFtcGateActive() && !isFtcLoggedIn();
         if (balancePillEl) {
-            balancePillEl.title = (isFtcGateActive() && !isFtcLoggedIn())
-                ? 'Gerçek demo bakiyeni görmek ve işlem açmak için profil panelinden FinteLig girişi yap. Giriş yapmadan sadece gezinebilirsin.'
+            balancePillEl.title = needsLogin
+                ? 'Bakiyen kaybolmadı — bu cihazda henüz FinteLig girişi yapmadın. Giriş yapınca gerçek demo bakiyen (diğer cihazlarınla senkronize) geri gelir.'
                 : '';
+            balancePillEl.classList.toggle('pill-login-needed', needsLogin);
         }
+        if (balanceLabelEl) balanceLabelEl.textContent = needsLogin ? 'Giriş yap' : 'Bakiye';
         // (29 Temmuz 2026 — Madde 8) Header'daki Toplam Varlık, bu fonksiyon
         // her çağrıldığında (işlem sonrası, fiyat tick'inde, SL/TP
         // değişiminde vb. — bkz. yukarıdaki çağrı noktaları) otomatik

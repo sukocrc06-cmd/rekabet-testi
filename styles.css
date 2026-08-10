@@ -708,6 +708,20 @@ body {
     color: var(--gold);
 }
 
+/* (10 Ağustos 2026 — "cihaz değiştirince bakiyem sıfırlanıyor" kök neden
+   düzeltmesi) Bakiye 0 görünüyorsa ve bunun sebebi bu cihazda henüz giriş
+   yapılmamış olmasıysa (veri kaybı DEĞİL), pill'i turuncu bir "aksiyon
+   gerekli" rengine çevirip etiketi "Giriş yap" yapıyoruz — dokunmatik
+   cihazlarda hover tooltip'i hiç görmeyen kullanıcılar için de görünür. */
+.header-balance-pill.pill-login-needed {
+    background-color: rgba(255, 167, 38, 0.12);
+    border-color: #FFA726;
+}
+.header-balance-pill.pill-login-needed .header-balance-label,
+.header-balance-pill.pill-login-needed .header-balance-value {
+    color: #FFA726;
+}
+
 /* (29 Temmuz 2026 — Madde 8: bakiyenin yanına Toplam Varlık) */
 .header-equity-block {
     display: inline-flex;
