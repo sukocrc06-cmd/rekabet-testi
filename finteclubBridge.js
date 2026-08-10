@@ -683,6 +683,31 @@
         // uygulama/reload döngüsüne girme.
         if (!opts.force && cloudRev <= knownRev) return false;
 
+        // (10 Ağustos 2026 — "SL/TP birden kayboldu, sanki sistem offline/
+        // online oldu" kök neden düzeltmesi) Bu cihazda HENÜZ buluta
+        // gönderilmemiş, requestImmediateSync()'in 400ms debounce'unda
+        // bekleyen yerel bir değişiklik varsa (ör. az önce eklenen bir
+        // Stop-Loss), o değişikliği hiç göz önünde bulundurmadan aşağıdaki
+        // location.reload() yerel state'i SESSİZCE SİLERDİ — kullanıcıya
+        // sanki bağlantı bir anlığına "offline" olup gelmiş gibi görünen
+        // (sayfa birden yenilenip eski/eksik bir portföyle geri gelen) tam
+        // olarak bu davranıştı. Kök çözüm: reload'a gitmeden ÖNCE bekleyen
+        // push'u hemen (debounce'u atlayarak) gönderiyoruz — pushFullPortfolioToCloud()
+        // zaten rev-korumalı bir TRANSACTION olduğundan, yerel değişiklik
+        // gerçekten güncelse (ki genelde öyledir, kullanıcı SADECE ŞİMDİ
+        // işlem yaptı) kazanır ve bu gelen 'record' otomatik olarak bayat
+        // sayılır; gerçekten çakışma varsa (başka bir cihaz/hesap gerçekten
+        // daha yeniyse) transaction'ın kendi conflict yolu zaten doğru
+        // kaydı force:true ile uygulayıp reload'u kendisi tetikler — bu
+        // çağrının burada devam edip ERKEN/eksik bir reload yapmasına hiç
+        // gerek kalmaz.
+        if (!opts.force && immediateSyncTimer) {
+            clearTimeout(immediateSyncTimer);
+            immediateSyncTimer = null;
+            pushFullPortfolioToCloud();
+            return false;
+        }
+
         try {
             localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(record.portfolio));
             setKnownCloudRev(cloudRev);
