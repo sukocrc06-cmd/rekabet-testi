@@ -266,9 +266,15 @@ const TradingEngine = (() => {
     //   2) Asgari pozisyon tutma süresi: gerçek piyasalarda spread+gerçek
     //      likidite saniyeler içinde aç-kapa yapmayı zaten anlamsız kılar —
     //      burada bunu taklit etmek için MANUEL kapamalara asgari bir süre
-    //      zorunlu kılındı (bkz. MIN_VIOP_HOLD_MS, closePosition() içinde
-    //      uygulanışı). Otomatik SL/TP/Trailing/Marj çağrısı kapamaları BU
+    //      zorunlu kılındı (bkz. MIN_POSITION_HOLD_MS, closePosition() içinde
+    //      uygulanışı). Otomatik SL/Trailing/Marj çağrısı kapamaları BU
     //      SINIRA TABİ DEĞİL — risk yönetimi asla geciktirilmemeli.
+    // (10 Ağustos 2026, üçüncü tur — "genel tarama") Asgari tutma süresi
+    // başta sadece VİOP'a uygulanmıştı; ama aynı "kârdaysa hemen kapat"
+    // deseni kaldıraç olmadan da (daha yavaş, çünkü kazanç gerçek fiyat
+    // hareketiyle sınırlı, amplifikasyon yok) teorik olarak Normal seansta
+    // da mümkün. Tutarlılık için MIN_POSITION_HOLD_MS artık HER İKİ deftere
+    // de uygulanıyor — bkz. closePosition()/renderPositionsInto().
     const VIOP_LEVERAGE_TIERS = [
         { maxNotional: 250000, maxLeverage: 20 },
         { maxNotional: 1000000, maxLeverage: 10 },
@@ -283,7 +289,7 @@ const TradingEngine = (() => {
         }
         return VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage;
     }
-    const MIN_VIOP_HOLD_MS = 30000; // VİOP pozisyonu manuel kapatılmadan önce açık kalması gereken asgari süre (30 saniye)
+    const MIN_POSITION_HOLD_MS = 30000; // Bir pozisyon manuel (veya TP ile) kapatılmadan önce açık kalması gereken asgari süre (30 saniye) — hem Normal hem VİOP defteri için geçerli
     const MIN_TRAILING_PCT = 0.5; // Trailing Stop için izin verilen asgari yüzde — daha küçüğü fiyat gürültüsüyle anında tetiklenip asgari tutma süresini dolanmanın bir yolu olurdu
 
     // (10 Ağustos 2026) applyQtyPct/computeRiskBasedQty/updateEstimate/
@@ -4104,7 +4110,7 @@ const TradingEngine = (() => {
                 effectiveLeverage = effectiveRequestedLeverage;
                 // (10 Ağustos 2026 — VİOP asgari tutma süresi) openedAt, bu
                 // pozisyon MANUEL olarak ne zaman kapatılabileceğini belirlemek
-                // için closePosition()'da kullanılıyor — bkz. MIN_VIOP_HOLD_MS.
+                // için closePosition()'da kullanılıyor — bkz. MIN_POSITION_HOLD_MS.
                 // Var olan bir pozisyona EKLEME yapılırken (aşağıdaki else dalı)
                 // kasıtlı olarak DOKUNULMUYOR: pozisyonun "yaşı" ilk açıldığı
                 // ana göre sayılmaya devam eder, her ekleme sayacı sıfırlamaz.
@@ -4170,12 +4176,12 @@ const TradingEngine = (() => {
         // geciktirilmemeli. pos.openedAt olmayan (bu düzeltmeden ÖNCE
         // açılmış) eski pozisyonlar bloklanmıyor.
         const holdGatedClose = !reason || reason === 'TP';
-        if (holdGatedClose && market === 'VIOP' && pos.openedAt) {
+        if (holdGatedClose && pos.openedAt) {
             const heldMs = Date.now() - pos.openedAt;
-            if (heldMs < MIN_VIOP_HOLD_MS) {
+            if (heldMs < MIN_POSITION_HOLD_MS) {
                 if (!reason) {
-                    const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
-                    showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_VIOP_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
+                    const remainingSec = Math.ceil((MIN_POSITION_HOLD_MS - heldMs) / 1000);
+                    showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_POSITION_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
                 }
                 // TP tetiklemesi sessizce ertelenir — checkStopLossTakeProfit()
                 // zaten her tick'te tekrar deneyecek, süre dolunca (fiyat hâlâ
@@ -4419,17 +4425,17 @@ const TradingEngine = (() => {
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             const leverage = pos.leverage || 1;
             const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${fmtLeverage(leverage)}x</span>` : '';
-            // (10 Ağustos 2026 — VİOP asgari tutma süresi) Buton, asgari süre
-            // dolmadan tıklansa da closePosition() zaten engelliyor (bkz.
-            // yukarıda) — ama kullanıcı boşuna denemesin diye burada da
-            // görsel olarak devre dışı bırakılıp kalan saniye gösteriliyor.
-            // tickPrices() 2 saniyede bir renderPositions() çağırdığı için
-            // bu geri sayım otomatik güncelleniyor, ayrı bir zamanlayıcıya
-            // gerek yok.
+            // (10 Ağustos 2026 — asgari tutma süresi, hem Normal hem VİOP)
+            // Buton, asgari süre dolmadan tıklansa da closePosition() zaten
+            // engelliyor (bkz. yukarıda) — ama kullanıcı boşuna denemesin
+            // diye burada da görsel olarak devre dışı bırakılıp kalan saniye
+            // gösteriliyor. tickPrices() 2 saniyede bir renderPositions()
+            // çağırdığı için bu geri sayım otomatik güncelleniyor, ayrı bir
+            // zamanlayıcıya gerek yok.
             let closeBtnHtml;
-            const heldMs = (market === 'VIOP' && pos.openedAt) ? (Date.now() - pos.openedAt) : null;
-            if (heldMs !== null && heldMs < MIN_VIOP_HOLD_MS) {
-                const remainingSec = Math.ceil((MIN_VIOP_HOLD_MS - heldMs) / 1000);
+            const heldMs = pos.openedAt ? (Date.now() - pos.openedAt) : null;
+            if (heldMs !== null && heldMs < MIN_POSITION_HOLD_MS) {
+                const remainingSec = Math.ceil((MIN_POSITION_HOLD_MS - heldMs) / 1000);
                 closeBtnHtml = `<button class="btn-close-pos" disabled title="Asgari tutma süresi dolmadı">${remainingSec}sn</button>`;
             } else {
                 closeBtnHtml = `<button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>`;
