@@ -333,8 +333,20 @@
         }
         var email = (currentAuthUser.email || '').toLowerCase();
         var apps = lastSharedData.applications || [];
+        // (11 Ağustos 2026 — Madde #130: haftalık kota/kohort sistemi) Admin
+        // panelinde bir haftanın süresi/kotası dolunca o haftanın onaylı
+        // yarışmacıları `pastCompetitor:true` ile geçmişe alınıyor — status
+        // KENDİSİ 'onayli' olarak KALIYOR (geçmişte gerçekten onaylanmıştı),
+        // bu yüzden burada AYRICA !pastCompetitor kontrol ediliyor. Aksi
+        // halde haftası bitmiş biri giriş yapmaya devam ettiğinde hâlâ
+        // "✓ FinteLig Yarışmacısı" rozetini görür ve senkron/canlı izleme
+        // akışına veri göndermeye devam ederdi — kotanın/haftanın bittiğini
+        // görünmez kılardı.
+        var pastMatch = apps.filter(function (a) {
+            return (a.email || '').toLowerCase() === email && a.status === 'onayli' && a.pastCompetitor;
+        })[0];
         var match = apps.filter(function (a) {
-            return (a.email || '').toLowerCase() === email && a.status === 'onayli';
+            return (a.email || '').toLowerCase() === email && a.status === 'onayli' && !a.pastCompetitor;
         })[0];
         if (match) {
             setBadgeVisible(true);
@@ -361,7 +373,9 @@
             listenForPortfolioSync();
         } else {
             setBadgeVisible(false);
-            setVerifyStatus('Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
+            setVerifyStatus(pastMatch
+                ? 'Yarışma haftan sona erdi — bu hesap artık geçmiş yarışmacı statüsünde, canlı senkron/izlemeye dahil değil.'
+                : 'Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
             verifiedApp = null;
         }
     }
