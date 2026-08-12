@@ -71,6 +71,7 @@
     var fsPortfolioDoc = null;
     var fsUserPortfoliosDoc = null;
     var fsBalanceCommandsDoc = null;
+    var fsActionCommandsDoc = null;
     var ftcAuth = null;
 
     if (FIREBASE_ENABLED) {
@@ -103,6 +104,19 @@
             // kendi kimliğine ait bir komut görürse yerel bakiyeyi günceller ve
             // uygulandığını (appliedAt) aynı belgeye geri yazar.
             fsBalanceCommandsDoc = fs.collection('finteclub').doc('oplab_balance_commands');
+            // (11 Ağustos 2026 — Madde #132: admin canlı izleme/iptal köprüsü)
+            // Admin'in "Canlı İzleme" ekranından bir yarışmacının BEKLEYEN
+            // EMRİNİ iptal edebilmesi veya AÇIK POZİSYONUNU kapatabilmesi için
+            // AYRI bir komut kanalı — bilerek oplab_balance_commands'tan AYRI
+            // bir belge: o belgedeki {commands:{<id>:{...}}} tek bir komut
+            // nesnesi Firestore merge:true ile REKURSİF birleşiyor, yani eski
+            // bir bakiye komutundan kalan stale newBalance/reset alanları hâlâ
+            // orada dururken yeni bir aksiyon komutu eklersem applyBalanceCommand
+            // içindeki öncelik sırası (reset > newBalance > ...) o eski komutu
+            // YANLIŞLIKLA tekrar uygulayabilirdi. Ayrı belge = ayrı, çakışmasız
+            // durum. Şekli: {commands: {<userId>: {type:'cancelOco'|'closePosition',
+            // orderId?, symbol?, market?, requestedAt}}}.
+            fsActionCommandsDoc = fs.collection('finteclub').doc('oplab_action_commands');
             // (Doğrulama sağlamlaştırması, 3. tur) Aynı 'ftcBridge' app instance'ı
             // üzerinden Authentication — FinTeClub'ın başvuru formunda oluşturulan
             // hesaplarla AYNI Firebase projesi/kullanıcı havuzuna bakıyor.
@@ -206,6 +220,12 @@
     // tekrar tekrar uygulayıp durmadan (reload sonrası onSnapshot yeniden
     // tetiklenebilir) emin olmak için.
     var BALANCE_CMD_APPLIED_KEY = 'optipulselab_balance_cmd_applied_v1';
+    // (11 Ağustos 2026 — Madde #132) BALANCE_CMD_APPLIED_KEY ile AYNI mantık,
+    // ama oplab_action_commands (iptal/kapatma) için bağımsız bir anahtar —
+    // ikisi FARKLI belgeleri dinlediğinden requestedAt değerleri çakışabilir,
+    // paylaşılan bir anahtar bir kanalın komutunun diğerini "zaten uygulandı"
+    // sanıp atlamasına yol açabilirdi.
+    var ACTION_CMD_APPLIED_KEY = 'optipulselab_action_cmd_applied_v1';
 
     var lastSharedData = null;
     var loggedActivityForId = null; // aynı ziyarette Firestore'a tekrar tekrar yazmamak için
@@ -213,6 +233,7 @@
     var currentAuthUser = null; // Firebase Authentication kullanıcısı (giriş yapılmışsa)
     var hydrationCheckedThisSession = false; // bulut->yerel kontrolü sayfa yüklemesi başına SADECE BİR KEZ yapılır
     var balanceListenerAttached = false; // oplab_balance_commands dinleyicisi sadece bir kez bağlanır
+    var actionListenerAttached = false; // oplab_action_commands (iptal/kapatma) dinleyicisi sadece bir kez bağlanır
     var portfolioListenerAttached = false; // oplab_user_portfolios dinleyicisi (çok cihazlı canlı senkron) sadece bir kez bağlanır
     // (17 Ağustos 2026 düzeltmesi) Kullanıcının açık isteği: modal HER
     // AÇILIŞTA gösterilsin — daha önce "devam et" denmiş olması ya da
@@ -366,6 +387,7 @@
                 hydratePortfolioFromCloudIfNeeded();
             }
             listenForBalanceCommands();
+            listenForActionCommands();
             // (9 Ağustos 2026 — "kökten çöz") tek seferlik hydratePortfolioFromCloudIfNeeded()
             // ile YARIŞ HALİNDE değil: ikisi de aynı applyCloudPortfolioRecordIfNewer()
             // guard'larını (kendi deviceId'si / zaten uygulanmış updatedAt) paylaşıyor,
@@ -468,10 +490,14 @@
         // ikisi de son 10 kayıtla sınırlı (asıl/tam veri zaten localStorage'da
         // ve pushFullPortfolioToCloud() ile oplab_user_portfolios'ta duruyor,
         // burası SADECE admin'in canlı izleme ekranı için özet).
+        // (11 Ağustos 2026 — Madde #132) `id` alanı eklendi — admin'in "İPTAL
+        // ET" butonu, hangi spesifik OCO emrinin iptal edileceğini bu id ile
+        // (cancelOcoOrder(orderId)) belirtiyor; önceden burada hiç id
+        // gönderilmiyordu, admin sadece emri GÖREBİLİYORDU, iptal edemezdi.
         var pendingOut = (portfolio.pendingOrders || []).slice(0, 10).map(function (o) {
-            return { symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'NORMAL' };
+            return { id: o.id, symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'NORMAL' };
         }).concat((portfolio.viopPendingOrders || []).slice(0, 10).map(function (o) {
-            return { symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'VIOP' };
+            return { id: o.id, symbol: o.symbol, qty: o.qty, upper: o.upper, lower: o.lower, market: 'VIOP' };
         }));
         var histOut = (portfolio.history || []).slice(0, 10).map(function (h) {
             return { symbol: h.symbol, side: h.side, qty: h.qty, price: h.price, type: h.type, pnl: h.pnl, ts: h.ts, market: 'NORMAL' };
@@ -875,6 +901,58 @@
         });
     }
 
+    // (11 Ağustos 2026 — Madde #132: admin canlı izleme/iptal köprüsü)
+    // listenForBalanceCommands() ile TAMAMEN AYNI desen, ayrı belge/anahtar
+    // üzerinde: admin'in "Canlı İzleme" ekranından bir yarışmacının bekleyen
+    // OCO emrini iptal etmesini veya açık pozisyonunu kapatmasını GERÇEK
+    // ZAMANLI olarak uygular.
+    function applyActionCommand(cmd, requestedAt) {
+        var applied = false;
+        if (cmd.type === 'cancelOco' && cmd.orderId) {
+            if (window.TradingEngine && typeof window.TradingEngine.cancelOcoOrder === 'function') {
+                applied = window.TradingEngine.cancelOcoOrder(cmd.orderId, 'ADMIN') === true;
+            }
+        } else if (cmd.type === 'closePosition' && cmd.symbol) {
+            if (window.TradingEngine && typeof window.TradingEngine.closePosition === 'function') {
+                window.TradingEngine.closePosition(cmd.symbol, 'ADMIN', cmd.market === 'VIOP' ? 'VIOP' : 'NORMAL');
+                applied = true; // closePosition kendi içinde pozisyon yoksa/fiyat alınamıyorsa sessizce çıkar — burada "denendi" olarak işaretliyoruz, aşağıdaki anlık snapshot admin'e gerçek sonucu (pozisyon hâlâ duruyorsa) zaten gösterir.
+            }
+        }
+
+        try { localStorage.setItem(ACTION_CMD_APPLIED_KEY, requestedAt); } catch (e) { /* private mode */ }
+
+        // Admin'e "uygulandı" bilgisini geri yaz — applyBalanceCommand'daki
+        // AYNI ack deseni (merge:true, requestedAt/type/orderId/symbol SİLİNMEZ).
+        if (fsActionCommandsDoc && verifiedApp) {
+            var ack = { commands: {} };
+            ack.commands[String(verifiedApp.id)] = { appliedAt: new Date().toISOString(), applied: applied, appliedDeviceId: getDeviceId() };
+            fsActionCommandsDoc.set(ack, { merge: true }).catch(function (e) {
+                console.warn('Aksiyon komutu onaylanamadı (appliedAt yazılamadı).', e);
+            });
+        }
+        // applyBalanceCommand'daki AYNI gerekçe: admin'in canlı izleme ekranı
+        // (pozisyon/emir listesi) değişikliği ANINDA görsün, bir sonraki
+        // periyodik 5 saniyelik turu beklemesin.
+        pushPortfolioSnapshot();
+    }
+
+    function listenForActionCommands() {
+        if (!fsActionCommandsDoc || !verifiedApp || actionListenerAttached) return;
+        actionListenerAttached = true;
+        fsActionCommandsDoc.onSnapshot(function (doc) {
+            if (!doc.exists || !verifiedApp) return;
+            var data = doc.data() || {};
+            var cmd = (data.commands || {})[String(verifiedApp.id)];
+            if (!cmd || !cmd.requestedAt || !cmd.type) return;
+            var lastApplied = null;
+            try { lastApplied = localStorage.getItem(ACTION_CMD_APPLIED_KEY); } catch (e) { /* private mode */ }
+            if (lastApplied === cmd.requestedAt) return; // bu komut zaten uygulandı
+            applyActionCommand(cmd, cmd.requestedAt);
+        }, function (e) {
+            console.warn('Aksiyon komut kanalı dinlenemedi.', e);
+        });
+    }
+
     // (9 Ağustos 2026) window.FTC_TRADING_STATE.halted'i güncel tutar —
     // updateAccessGate() ile HER ZAMAN birlikte çağrılır (aynı lastSharedData
     // kaynağından besleniyor), ama TAM EKRAN kilit YERİNE tradingEngine.js'in
@@ -1036,6 +1114,8 @@
         getVerifiedApp: function () { return verifiedApp; },
         applyBalanceCommand: function (cmd, requestedAt) { return applyBalanceCommand(cmd, requestedAt); },
         listenForBalanceCommands: function () { return listenForBalanceCommands(); },
+        applyActionCommand: function (cmd, requestedAt) { return applyActionCommand(cmd, requestedAt); },
+        listenForActionCommands: function () { return listenForActionCommands(); },
         pushPortfolioSnapshot: function () { return pushPortfolioSnapshot(); },
         computeLightPortfolioSnapshot: function () { return computeLightPortfolioSnapshot(); },
         listenForPortfolioSync: function () { return listenForPortfolioSync(); },

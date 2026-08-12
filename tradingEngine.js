@@ -38,95 +38,6 @@ const TradingEngine = (() => {
     let DC = null;
     let priceProfiles = {};
     let portfolio = null;
-
-    /* (5 Ağustos 2026 — "giriş yapmadan önce bakiye hep 0 olsun, sadece
-       gezebilsin; giriş yapanların gerçek bakiyesi gözüksün") FinTeClub
-       girişi (finteclubBridge.js) yapılmadan bu demo portföyün bakiyesi
-       her yerde (header, risk hesaplayıcı, pozisyon açma marjı kontrolü)
-       0 olarak GÖRÜNÜR ve KULLANILIR — gerçek portfolio.balance
-       localStorage'da olduğu gibi korunur, sadece giriş yapılana kadar
-       erişilemez/görünmez olur. Giriş yapılınca gerçek değer anında
-       geri döner. finteclubBridge.js hiç yüklenemezse (CDN engeli vb.)
-       kapı devre dışı kalır ve eski davranışa (bakiye her zaman gerçek)
-       sessizce dönülür — bir altyapı sorunu gerçek kullanıcıyı asla
-       kilitlememeli. */
-    function isFtcGateActive() {
-        return !!(window.FTC_AUTH_STATE && window.FTC_AUTH_STATE.available);
-    }
-    function isFtcLoggedIn() {
-        return !isFtcGateActive() || !!window.FTC_AUTH_STATE.loggedIn;
-    }
-    // (9 Ağustos 2026 — kullanıcı bildirimi: "hafta sonu piyasa kapalıyken
-    // alım yapabildim") Önceden submitOrder() hiçbir piyasa-saati kontrolü
-    // yapmıyordu — sadece tickPrices() (fiyat simülasyonu) ve grafik/çoklu
-    // ızgara ticking'i DC.isMarketOpenNow() ile korunuyordu, emir gönderimi
-    // korunmuyordu. Aynı DC.isMarketOpenNow() (dataController.js'teki TEK
-    // gerçek kaynak) burada da kullanılıyor ki header rozetiyle, fiyat
-    // ticking'iyle ve emir engelleme mantığıyla ASLA çelişmesin.
-    function isMarketOpenForTrading() {
-        return !DC || !DC.isMarketOpenNow || DC.isMarketOpenNow();
-    }
-    // Admin, FinTeClub panelinden piyasa saatlerinden BAĞIMSIZ olarak da
-    // alım-satımı anında durdurabilir (bkz. finteclubBridge.js'teki
-    // window.FTC_TRADING_STATE ataması, finteclub/shared_state belgesindeki
-    // yeni tradingHalted alanından besleniyor). Bu, tam platform kilidinden
-    // (oplabEnabled/FTC_AUTH_STATE ile ilgisiz — o TÜM siteyi kilitler) daha
-    // hafif bir araç: kullanıcılar grafik/portföylerini görmeye devam eder,
-    // sadece YENİ emir gönderemezler.
-    function isTradingHaltedByAdmin() {
-        return !!(window.FTC_TRADING_STATE && window.FTC_TRADING_STATE.halted);
-    }
-    function isTradingAllowedNow() {
-        return isMarketOpenForTrading() && !isTradingHaltedByAdmin();
-    }
-    function tradingBlockedReason() {
-        if (isTradingHaltedByAdmin()) return 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu.';
-        if (!isMarketOpenForTrading()) return 'Piyasa şu anda kapalı — BIST seans saatleri: hafta içi 09:55–18:00 (TRT). Emir gönderilemez.';
-        return '';
-    }
-    // qt-submit butonunun etkin/pasif durumunu VE üstündeki kalıcı uyarı
-    // kutusunu (qt-trading-status-notice) günceller. tickPrices() piyasa
-    // kapalıyken erken çıktığı için (bkz. o fonksiyondaki DC.isMarketOpenNow()
-    // koruması) bu fonksiyon KENDİ setInterval'ında ayrıca çalıştırılır —
-    // aksi halde piyasa kapanış/açılış anında buton durumu F5 atılmadan
-    // güncellenmezdi (header rozetindeki aynı köklü hatanın bir benzeri).
-    function updateTradeAvailabilityUI() {
-        const submitBtn = byId('qt-submit');
-        const notice = byId('qt-trading-status-notice');
-        // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
-        // Admin durdurması HER ZAMAN tam blok (kuyruğa bile alınamaz — bkz.
-        // submitOrder()). Piyasa kapalı olması ise artık OCO HARİÇ tam blok
-        // DEĞİL: Market/Limit emirleri hâlâ girilebilir, sadece hemen değil
-        // piyasa açılınca sıradan otomatik gerçekleşir (bkz. submitOrder(),
-        // queuePendingMarketOrder, checkPendingOcoOrders). OCO bu kapsamın
-        // dışında tutuldu, o yüzden piyasa kapalıyken OCO seçiliyse buton
-        // yine tam pasif.
-        const haltedByAdmin = isTradingHaltedByAdmin();
-        const marketClosed = !isMarketOpenForTrading();
-        const blockedHard = haltedByAdmin || (marketClosed && state.orderType === 'OCO');
-        if (submitBtn) {
-            submitBtn.disabled = blockedHard;
-            submitBtn.title = blockedHard ? tradingBlockedReason() : (marketClosed ? 'Piyasa kapalı — emriniz sıraya alınıp açılışta otomatik gerçekleştirilecek.' : '');
-        }
-        if (notice) {
-            if (blockedHard) {
-                notice.textContent = '⛔ ' + tradingBlockedReason();
-                notice.style.display = '';
-                notice.classList.remove('qt-alert-info');
-                notice.classList.add('qt-alert-error');
-            } else if (marketClosed) {
-                notice.textContent = 'ℹ️ Piyasa şu anda kapalı — gireceğiniz Piyasa/Limit emri sıraya alınır, gereken teminat şimdi bakiyenizden kilitlenir, piyasa açılınca (hafta içi 09:55–18:00 TRT) otomatik gerçekleştirilir.';
-                notice.style.display = '';
-                notice.classList.remove('qt-alert-error');
-                notice.classList.add('qt-alert-info');
-            } else {
-                notice.style.display = 'none';
-            }
-        }
-    }
-    function effectiveBalance() {
-        return isFtcLoggedIn() ? portfolio.balance : 0;
-    }
     // Set<string> — kullanıcının izleme listesindeki semboller. İlk çalıştırmada
     // (localStorage'da hiç kayıt yoksa) TÜM BIST100 ile başlatılıyor, böylece
     // mevcut kullanıcılar için görünüm ANINDA değişmiyor — yalnızca bundan sonra
@@ -210,108 +121,13 @@ const TradingEngine = (() => {
     // marj çağrısı simülasyonu (bkz. checkMarginCalls()).
     const LIQUIDATION_MARGIN_LOSS_RATIO = 0.8;
 
-    // (9 Ağustos 2026 — "Zerda"/"Mehmet Ali" VİOP büyüklük patlaması kök
-    // neden düzeltmesi) İncelemede bulunan gerçek neden LIMIT emirlerdeki
-    // eski hatadan FARKLIYDI: burada MARKET emirlerle, AÇIK-KAPAT'ı saniyeler
-    // içinde art arda tekrarlayan (scalping) bir kullanıcı, HER işlemde
-    // "%100 bakiye" ile yeniden pozisyon açtığında, iki yapısal eksiklik
-    // yüzünden özkaynak saniyeler içinde katrilyonlarca TL'ye kadar
-    // katlanabiliyordu:
-    //   1) AL ve SAT TAMAMEN AYNI fiyattan (spread'siz) gerçekleşiyordu —
-    //      gerçek bir borsada asla olmaz, her zaman alış (ask) satıştan
-    //      (bid) biraz yüksektir. Spread'siz bir piyasada, fiyat rastgele
-    //      yukarı/aşağı oynadıkça kullanıcı sadece YEŞİL anları bekleyip
-    //      satarak neredeyse risksiz "bedava kâr" devşirebiliyordu —
-    //      komisyon bunu caydırmaya yetmiyordu.
-    //   2) Tek bir emrin büyüklüğüne (nominal değerine) HİÇBİR üst sınır
-    //      yoktu — özkaynak her katlandığında bir sonraki emir otomatik
-    //      olarak daha da büyüyor, birkaç dakika içinde milyar/trilyon TL'lik
-    //      "var olmayan" emirlere ulaşabiliyordu (gerçek bir borsada bu
-    //      büyüklükte bir emri karşılayacak likidite yok).
-    // DÜZELTME: (a) her AL emri gerçek piyasa fiyatının biraz ÜSTÜNDEN (ask),
-    // her SAT emri biraz ALTINDAN (bid) gerçekleşiyor — bkz. execFillPrice()
-    // ve placeOrder()'daki uygulanışı; bu, saf gürültü/volatiliteyi
-    // "bedava" kâra çevirmeyi yapısal olarak engelliyor (round-trip'in artık
-    // her zaman küçük ama gerçek bir maliyeti var). (b) tek bir emrin nominal
-    // değeri (fiyat × adet) MAX_ORDER_NOTIONAL_TL ile sınırlandı — bkz.
-    // applyQtyPct() (otomatik miktar hiç bu sınırı önermiyor) ve placeOrder()
-    // (elle yazılan miktarlar için son bir güvenlik duvarı). Kapatma
-    // (closePosition) bu sınıra TABİ DEĞİL — zaten açık bir pozisyon her
-    // zaman kapatılabilmeli, aksi halde kullanıcı pozisyonunda kilitli
-    // kalırdı.
-    const HALF_SPREAD_PCT = 0.04; // %0.04 (toplam ~%0.08 alış-satış farkı) — gerçekçi, ama abartılı olmayan bir kotasyon farkı
-    const MAX_ORDER_NOTIONAL_TL = 20000000; // tek bir emrin (fiyat × adet) aşamayacağı nominal tavan — 20 milyon TL
-
-    // AL emri her zaman ask'tan (mid'in biraz ÜSTÜnden), SAT emri her zaman
-    // bid'ten (mid'in biraz ALTINDAN) gerçekleşir — gerçek bir borsa
-    // kotasyonunun (bid/ask) basitleştirilmiş bir simülasyonu.
-    function execFillPrice(side, midPrice) {
-        return side === 'BUY' ? midPrice * (1 + HALF_SPREAD_PCT / 100) : midPrice * (1 - HALF_SPREAD_PCT / 100);
-    }
-
-    // (10 Ağustos 2026 — VİOP kaldıraç/tur gerçekçiliği düzeltmesi, ikinci
-    // tur) 9 Ağustos'taki spread+nominal tavan düzeltmesi tek başına yeterli
-    // olmadı: canlı veride "Edanur"/"Mehmet Ali" hesaplarının, TEK bir
-    // sembolde, sabit 20x kaldıraçla, ortalama ~10 SANİYE tutup (en kısası
-    // 1,7 saniye!) 25 kez üst üste aç-kapa yaparak, 25 işlemin 24'ünü kârlı
-    // kapattığı (%96 kazanma oranı — saf rastgele bir piyasada istatistiksel
-    // olarak neredeyse imkansız) tespit edildi. Demek ki spread+komisyonun
-    // toplam ~%0,18'lik sürtünmesi, dev pozisyon büyüklüğü × 20x kaldıraç
-    // ile kolayca aşılabiliyormuş. Gerçek platformlarda (Binance vb.) bunu
-    // engelleyen İKİ ayrı yapısal fren var, ikisi de burada eksikti:
-    //   1) Kademeli kaldıraç: pozisyonun nominal büyüklüğü arttıkça izin
-    //      verilen maksimum kaldıraç OTOMATİK düşer — büyük pozisyonlar daha
-    //      az kaldıraçla açılabilir (bkz. VIOP_LEVERAGE_TIERS/tieredMaxLeverage,
-    //      placeOrder() içinde uygulanışı).
-    //   2) Asgari pozisyon tutma süresi: gerçek piyasalarda spread+gerçek
-    //      likidite saniyeler içinde aç-kapa yapmayı zaten anlamsız kılar —
-    //      burada bunu taklit etmek için MANUEL kapamalara asgari bir süre
-    //      zorunlu kılındı (bkz. MIN_POSITION_HOLD_MS, closePosition() içinde
-    //      uygulanışı). Otomatik SL/Trailing/Marj çağrısı kapamaları BU
-    //      SINIRA TABİ DEĞİL — risk yönetimi asla geciktirilmemeli.
-    // (10 Ağustos 2026, üçüncü tur — "genel tarama") Asgari tutma süresi
-    // başta sadece VİOP'a uygulanmıştı; ama aynı "kârdaysa hemen kapat"
-    // deseni kaldıraç olmadan da (daha yavaş, çünkü kazanç gerçek fiyat
-    // hareketiyle sınırlı, amplifikasyon yok) teorik olarak Normal seansta
-    // da mümkün. Tutarlılık için MIN_POSITION_HOLD_MS artık HER İKİ deftere
-    // de uygulanıyor — bkz. closePosition()/renderPositionsInto().
-    const VIOP_LEVERAGE_TIERS = [
-        { maxNotional: 250000, maxLeverage: 20 },
-        { maxNotional: 1000000, maxLeverage: 10 },
-        { maxNotional: 5000000, maxLeverage: 5 },
-        { maxNotional: 20000000, maxLeverage: 3 },
-        { maxNotional: Infinity, maxLeverage: 2 }
-    ];
-    function tieredMaxLeverage(notional) {
-        const n = Math.max(0, Number(notional) || 0);
-        for (let i = 0; i < VIOP_LEVERAGE_TIERS.length; i++) {
-            if (n <= VIOP_LEVERAGE_TIERS[i].maxNotional) return VIOP_LEVERAGE_TIERS[i].maxLeverage;
-        }
-        return VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage;
-    }
-    const MIN_POSITION_HOLD_MS = 30000; // Bir pozisyon manuel (veya TP ile) kapatılmadan önce açık kalması gereken asgari süre (30 saniye) — hem Normal hem VİOP defteri için geçerli
-    const MIN_TRAILING_PCT = 0.5; // Trailing Stop için izin verilen asgari yüzde — daha küçüğü fiyat gürültüsüyle anında tetiklenip asgari tutma süresini dolanmanın bir yolu olurdu
-
-    // (10 Ağustos 2026) applyQtyPct/computeRiskBasedQty/updateEstimate/
-    // estimateOrderMarginRequirement gibi ÖNİZLEME hesaplayıcılarının,
-    // kademeli kaldıraç yüzünden placeOrder()'ın GERÇEKTE uygulayacağından
-    // FARKLI bir kaldıraçla hesap yapıp kullanıcıyı "önizlemede yeterliydi,
-    // gönderince yetersiz bakiye" sürprizine düşürmemesi için ortak yardımcı.
-    // placeOrder() her zaman nihai/otoriter karardır — bu sadece önizlemeyi
-    // ona yaklaştırır.
-    function previewTieredLeverage(notional, requestedLeverage, market) {
-        const req = Math.max(1, Number(requestedLeverage) || 1);
-        if (market !== 'VIOP') return req;
-        return Math.min(req, tieredMaxLeverage(notional));
-    }
-
     /* ────────── DOM helpers ────────── */
     function byId(id) { return document.getElementById(id); }
 
     // All full-screen modal backdrop ids in the app — used so opening one
     // reliably closes any other that might already be open.
     // (2 Ağustos 2026 — revize planı madde 8) 'chart-note-modal-backdrop' eklendi.
-    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop', 'command-palette-backdrop', 'chart-note-modal-backdrop', 'order-confirm-modal-backdrop'];
+    const ALL_MODAL_BACKDROP_IDS = ['indicator-modal-backdrop', 'alerts-modal-backdrop', 'sltp-modal-backdrop', 'heatmap-modal-backdrop', 'shortcuts-modal-backdrop', 'help-modal-backdrop', 'command-palette-backdrop', 'chart-note-modal-backdrop'];
     function closeOtherModals(exceptId) {
         ALL_MODAL_BACKDROP_IDS.forEach(id => {
             if (id === exceptId) return;
@@ -401,27 +217,6 @@ const TradingEngine = (() => {
 
     function savePortfolio() {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio)); } catch (e) { /* quota / private mode */ }
-        // (9 Ağustos 2026 — "aynı hesabı 2-3 cihazdan art arda satabiliyorum,
-        // her seferinde parasını alıyorum" kök neden düzeltmesi) ÖNCEDEN bu
-        // fonksiyon SADECE localStorage'a yazıyordu — buluta (ve dolayısıyla
-        // diğer cihazlara) sadece finteclubBridge.js'in periyodik 5 saniyelik
-        // turunda gidiyordu. Bir işlemden hemen sonra buluta gidene kadar
-        // geçen bu boşluk, tam olarak başka bir cihazın AYNI pozisyonu
-        // "hâlâ açık" sanıp tekrar satabildiği ve her seferinde parasını
-        // aldığı pencereydi. Artık her portföy değişikliğinde (satış/alım/
-        // kapama/SL-TP/admin bakiye komutu — hepsi savePortfolio()'dan
-        // geçiyor) finteclubBridge.js'e anında (kısa bir debounce ile)
-        // senkronize olma talebi gönderiliyor; asıl çift-ödeme güvencesi
-        // ise finteclubBridge.js'teki rev-korumalı Firestore TRANSACTION'ı
-        // sağlıyor (bkz. o dosyadaki requestImmediateSync/
-        // pushFullPortfolioToCloud yorumları) — bir cihazın bayat veriye
-        // dayanan işlemi asla kalıcı olarak buluta yazılamaz. FinteClub
-        // hiç yüklenmediyse (CDN engelli/offline) ya da giriş yapılmadıysa
-        // bu çağrı güvenle no-op olur, hiçbir üretim davranışı buna bağımlı
-        // değildir.
-        if (window.FinteClubBridge && typeof window.FinteClubBridge.requestImmediateSync === 'function') {
-            try { window.FinteClubBridge.requestImmediateSync(); } catch (e) { /* asla trade akışını bozmasın */ }
-        }
     }
 
     function resetPortfolio() {
@@ -435,25 +230,6 @@ const TradingEngine = (() => {
         sampleEquity();
         renderPerformanceTab();
         showToast('Portföy sıfırlandı: ' + fmtTRY(DEFAULT_BALANCE));
-    }
-
-    // (8 Ağustos 2026 — admin panelinden ANLIK bakiye ayarlama) resetPortfolio()
-    // ile AYNI güvenli desen: sadece portfolio.balance'ı (nakit) değiştirir,
-    // pozisyonlara/geçmişe DOKUNMAZ, kaydeder ve ekranı hemen yeniden çizer.
-    // finteclubBridge.js bunu doğrudan çağırır — böylece admin'in bakiye
-    // komutu sayfa YENİDEN YÜKLENMEDEN, senkron olarak anında uygulanır
-    // (önceki tasarımda localStorage'a yazıp sayfayı yenilemek gerekiyordu,
-    // bu da her zaman görünür bir gecikme/"flash" yaratıyordu).
-    function setBalance(amount) {
-        const n = Number(amount);
-        if (!isFinite(n) || n < 0) return false;
-        portfolio.balance = n;
-        savePortfolio();
-        renderAccountSummary();
-        renderPerformanceTab();
-        sampleEquity();
-        showToast('Bakiyeniz yönetici tarafından güncellendi: ' + fmtTRY(n));
-        return true;
     }
 
     // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Hocanın geri bildirimi:
@@ -491,46 +267,22 @@ const TradingEngine = (() => {
     // atılır (TICK_MS=2000ms × 60 ≈ son 2 dakika).
     const SPARK_HISTORY_LEN = 60;
 
-    // (10 Ağustos 2026 — "kuruş bazlı değil, 1-2 TL'lik sıçramalar" düzeltmesi)
-    // DC.STOCK_PROFILES'taki `volatility` alanı (ör. ASELS için 0,017) bir
-    // GÜNLÜK/SEANS oynaklığı parametresi — ama tickPrices() bunu doğrudan HER
-    // 2 saniyelik tick'e uyguluyordu, sanki günlük oynaklıkmış gibi değil de
-    // tek bir tick'in oynaklığıymış gibi. Bu da (356 TL × %1,7 × 0,5 ≈ 3 TL)
-    // her 2 saniyede bir liralarla ölçülen sıçramalara yol açıyordu — gerçek
-    // piyasada ise ardışık tickler arası fark genelde kuruşlarla ölçülür.
-    // Doğru fiziksel model (rastgele yürüyüş / Brown hareketi ölçekleme
-    // kuralı): bir seansı N bağımsız tick'e bölersek, tek bir tick'in
-    // oynaklığı günlük oynaklığın 1/sqrt(N)'i kadar olmalı — toplam seans
-    // boyunca birikince yine günlük oynaklığa ulaşılsın diye. BIST_SESSION_
-    // MINUTES (480dk = 28800sn) / TICK_MS(2sn) ≈ 14400 tick/seans ->
-    // sqrt(14400) = 120. Yani tick başına oynaklık, günlük oynaklığın
-    // yaklaşık 1/120'si olmalı.
-    const BIST_SESSION_SECONDS = 480 * 60;
-    const TICKS_PER_SESSION = BIST_SESSION_SECONDS / (TICK_MS / 1000);
-    const TICK_VOLATILITY_SCALE = 1 / Math.sqrt(TICKS_PER_SESSION);
-
     function buildPriceProfiles() {
         const profiles = {};
         DC.BIST100.forEach(({ symbol }) => {
             const known = DC.STOCK_PROFILES[symbol];
             if (known) {
-                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, liveAnchor: known.basePrice, volatility: known.volatility, tickVolatility: known.volatility * TICK_VOLATILITY_SCALE, name: known.name, history: [known.basePrice], hasRealAnchor: false, pendingSuspiciousPrice: null };
+                profiles[symbol] = { price: known.basePrice, dayOpen: known.basePrice, volatility: known.volatility, name: known.name, history: [known.basePrice] };
                 return;
             }
             const hash = Array.from(symbol).reduce((s, c) => s * 31 + c.charCodeAt(0), 0);
             const base = +(15 + Math.abs(hash % 400) + (Math.abs(hash) % 100) / 100).toFixed(2);
-            const dailyVol = 0.012 + (Math.abs(hash) % 8) / 1000;
-            profiles[symbol] = { price: base, dayOpen: base, liveAnchor: base, volatility: dailyVol, tickVolatility: dailyVol * TICK_VOLATILITY_SCALE, history: [base], hasRealAnchor: false, pendingSuspiciousPrice: null };
+            profiles[symbol] = { price: base, dayOpen: base, volatility: 0.012 + (Math.abs(hash) % 8) / 1000, history: [base] };
         });
         return profiles;
     }
 
     function tickPrices() {
-        // (9 Ağustos 2026) Emir bileti buton/uyarı durumu, aşağıdaki erken
-        // çıkıştan ETKİLENMEMELİ — piyasa kapalıyken de (özellikle piyasa TAM
-        // O AN kapandığında) buton anında pasif hale gelmeli.
-        updateTradeAvailabilityUI();
-
         // BIST kapalıyken (hafta sonu veya 09:55-18:00 TRT seans dışında)
         // fiyatlar simüle edilmeyi durdurur — son kapanış fiyatında donuk kalır,
         // tıpkı gerçek bir borsa gibi. Aksi halde mumlar piyasa kapalıyken de
@@ -539,37 +291,9 @@ const TradingEngine = (() => {
 
         Object.keys(priceProfiles).forEach(sym => {
             const p = priceProfiles[sym];
-            // (10 Ağustos 2026 — "ASELS spekülatif sıçrama" düzeltmesi)
-            // Reversion artık p.dayOpen'a DEĞİL, p.liveAnchor'a çekiyor.
-            // dayOpen sadece günlük %değişim göstergesi için sabit kalması
-            // gereken bir referans (gerçek gün açılışı); liveAnchor ise en
-            // son alınan GERÇEK fiyat (WS tick / 40sn'lik toplu senkron /
-            // sembol seçiminde OHLCV son kapanışı). Eskiden ikisi aynı
-            // (dayOpen) olduğu için, dayOpen ancak %6'lık geniş banttan
-            // taşıldığında güncelleniyordu — bu da günlük açılışa yakın
-            // bir eski/durgun fiyatın (ör. bir önceki günün kapanışı)
-            // saatlerce "yerçekimi" gibi fiyatı geri çekmesine, buna karşın
-            // her 40sn'de bir gerçek fiyata sıçramasına, yani testere dişi
-            // (sıçra-geri düş) görünümüne yol açıyordu — kullanıcının
-            // bildirdiği "bir anda yükselip düşüyor, çok spekülatif" hatası.
-            const anchor = (typeof p.liveAnchor === 'number') ? p.liveAnchor : p.dayOpen;
-            const meanReversion = (anchor - p.price) * 0.06;
-            // (10 Ağustos 2026) p.volatility DEĞİL p.tickVolatility kullanılıyor
-            // — bkz. buildPriceProfiles'taki TICK_VOLATILITY_SCALE notu. p.volatility
-            // hâlâ günlük ölçek referansı olarak duruyor (başka bir yerde kullanılmasa
-            // da ileride ör. risk göstergelerinde lazım olabilir diye korunuyor).
-            const tickVol = (typeof p.tickVolatility === 'number') ? p.tickVolatility : p.volatility;
-            const shock = (Math.random() - 0.5) * tickVol * p.price;
+            const meanReversion = (p.dayOpen - p.price) * 0.02;
+            const shock = (Math.random() - 0.5) * p.volatility * p.price;
             let next = p.price + shock + meanReversion;
-            // Kısa vadeli (tik-tik arası) dalgalanma artık günlük %6 bandı
-            // yerine, en son bilinen GERÇEK fiyatın çok daha dar bir bandı
-            // (±%1,5) içinde tutuluyor — böylece iki gerçek-veri senkronu
-            // arasında fiyat gerçekten uzaklaşıp "kelepçelenerek" sıçramıyor.
-            // Günlük %6 sınırı (gerçek borsa marj/tavan-taban benzeri emniyet
-            // kemeri) dış sınır olarak ayrıca korunuyor.
-            const localBandPct = 0.015;
-            const localCapUp = anchor * (1 + localBandPct), localCapDown = anchor * (1 - localBandPct);
-            next = Math.max(localCapDown, Math.min(localCapUp, next));
             const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
             next = Math.max(capDown, Math.min(capUp, next));
             p.price = +next.toFixed(2);
@@ -630,75 +354,11 @@ const TradingEngine = (() => {
     // olmayan bir sıçrama oluşabilir (iki ayrı rastgele yürüyüş aynı
     // sembol için farklı sonlara varır). Sembol o an aktif sembolse ilgili
     // panelleri de tazeler.
-    // (10 Ağustos 2026, dördüncü tur — "204 TL'den aldım, kısa süre sonra
-    // 14 TL'den satılmış, kâr yerine dev zarar" hatası — GERÇEK ve ciddi bir
-    // sistem arızası, kullanıcı hayal görmüyordu) Buraya kadarki üç
-    // düzeltme (liveAnchor, tickVolatility, backend tekli-sembol/önbellek)
-    // fiyatın YANLIŞ hızda/hedefte hareket etmesiyle ilgiliydi. tickPrices()
-    // simülasyonunun kendisi zaten sıkı bantlanmış (liveAnchor'ın ±%1,5'i,
-    // dayOpen'ın ±%6'sı) — yani KENDİ BAŞINA 204'ten 14'e gibi bir sıçrama
-    // ÜRETEMEZ. Ama WebSocket tick'i, toplu /api/v1/quotes senkronu ve
-    // sembol seçimindeki OHLCV son-kapanış çapalaması, backend'den/yfinance'ten
-    // gelen "gerçek" fiyatı HİÇBİR MANTIKLILIK KONTROLÜ OLMADAN doğrudan
-    // p.price'a yazıyordu. Ücretsiz bir veri kaynağından (yfinance) TEK bir
-    // bozuk/hatalı veri noktası (ağ hatası, geçici önbellek/kolon karışıklığı,
-    // ya da bir kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
-    // karışıklığı) geldiğinde fiyat ekranda VE checkMarginCalls()/oto-SL
-    // değerlendirmesinde ANINDA gerçekçi olmayan bir seviyeye sıçrıyor,
-    // kaldıraçlı bir VİOP pozisyonunu anlık olarak eziyor ya da kullanıcıyı
-    // panikle yanlış fiyattan kapamaya itiyordu. Çözüm: gelen her "gerçek"
-    // fiyatı applyRealPriceUpdate() üzerinden geçiriyoruz — mevcut bilinen
-    // fiyattan %20'den fazla sapan tek seferlik bir değeri HEMEN uygulamak
-    // yerine "şüpheli" olarak saklıyor, ancak BİR SONRAKİ gerçek veri turunda
-    // da aynı (yakın) seviye tekrar gelirse (yani tek seferlik bir veri hatası
-    // değil, kalıcı bir fiyat seviyesiyse) uyguluyoruz. Bir sembol için henüz
-    // hiç gerçek veri görülmediyse (hasRealAnchor false) bu kontrol atlanır —
-    // ilk açılış çapası her zaman doğrudan uygulanmalı.
-    const SUSPICIOUS_PRICE_JUMP_PCT = 0.20;
-    const SUSPICIOUS_CONFIRM_TOLERANCE_PCT = 0.03;
-    function applyRealPriceUpdate(symbol, realPrice, applyFn) {
-        const p = priceProfiles[symbol];
-        if (!p || typeof realPrice !== 'number' || !(realPrice > 0)) return false;
-
-        if (!p.hasRealAnchor || !(p.price > 0)) {
-            p.hasRealAnchor = true;
-            p.pendingSuspiciousPrice = null;
-            applyFn(p, realPrice);
-            return true;
-        }
-
-        const deviation = Math.abs(realPrice - p.price) / p.price;
-        if (deviation <= SUSPICIOUS_PRICE_JUMP_PCT) {
-            p.pendingSuspiciousPrice = null;
-            applyFn(p, realPrice);
-            return true;
-        }
-
-        const pending = p.pendingSuspiciousPrice;
-        if (pending && Math.abs(realPrice - pending) / pending <= SUSPICIOUS_CONFIRM_TOLERANCE_PCT) {
-            // Aynı şüpheli seviye art arda ikinci kez geldi — artık tek
-            // seferlik bir veri hatası olma ihtimali çok düşük, kalıcı kabul
-            // edip uyguluyoruz.
-            p.pendingSuspiciousPrice = null;
-            applyFn(p, realPrice);
-            if (window.console && console.warn) console.warn(`[OptiPulse] ${symbol}: büyük fiyat sıçraması (%${(deviation * 100).toFixed(1)}) iki ayrı veri turunda doğrulandı, uygulandı.`);
-            return true;
-        }
-
-        p.pendingSuspiciousPrice = realPrice;
-        if (window.console && console.warn) console.warn(`[OptiPulse] ${symbol}: şüpheli fiyat sıçraması (₺${p.price} -> ₺${realPrice}, %${(deviation * 100).toFixed(1)}) — tek seferlik veri hatası olabilir, doğrulanana kadar UYGULANMADI.`);
-        return false;
-    }
-
     function syncPriceAnchor(symbol, lastClose) {
         const p = priceProfiles[symbol];
         if (!p || !lastClose) return;
-        const applied = applyRealPriceUpdate(symbol, lastClose, (prof, val) => {
-            prof.price = val;
-            prof.dayOpen = val;
-            prof.liveAnchor = val;
-        });
-        if (!applied) return;
+        p.price = lastClose;
+        p.dayOpen = lastClose;
         renderWatchlistPrices();
         if (symbol === state.activeSymbol) {
             updateActiveSymbolTicket();
@@ -795,26 +455,16 @@ const TradingEngine = (() => {
                 // saniyelik simülasyon tick'i bu gerçek fiyatı hatalı
                 // şekilde eski banda geri "kelepçeler" — tıpkı sembol ilk
                 // seçildiğinde selectSymbol()'ün yaptığı ilk çıpalama gibi.
-                // (10 Ağustos 2026, dördüncü tur) Artık bu doğrudan atama
-                // yerine applyRealPriceUpdate() üzerinden geçiyor — tek
-                // seferlik bozuk bir yfinance tick'inin fiyatı anında
-                // gerçekçi olmayan bir seviyeye sıçratmasını engeller (bkz.
-                // fonksiyonun tanımındaki not).
-                const applied = applyRealPriceUpdate(symbol, msg.price, (prof, price) => {
-                    const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
-                    if (price > capUp || price < capDown) {
-                        prof.dayOpen = price;
-                    }
-                    prof.liveAnchor = price;
-                    prof.price = +price.toFixed(2);
-                });
-                if (applied) {
-                    renderWatchlistPrices();
-                    updateActiveSymbolTicket();
-                    if (window.TradingChart) window.TradingChart.updateLastPrice(symbol, p.price);
-                    renderPositions();
-                    renderAccountSummary();
+                const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
+                if (msg.price > capUp || msg.price < capDown) {
+                    p.dayOpen = msg.price;
                 }
+                p.price = +msg.price.toFixed(2);
+                renderWatchlistPrices();
+                updateActiveSymbolTicket();
+                if (window.TradingChart) window.TradingChart.updateLastPrice(symbol, p.price);
+                renderPositions();
+                renderAccountSummary();
             }
             liveFeedActive = true;
             liveFeedLastTickAt = Date.now();
@@ -895,18 +545,12 @@ const TradingEngine = (() => {
             // connectLiveFeed'in onmessage'ı): gerçek fiyat mevcut günlük
             // banttan çok uzaksa dayOpen'ı da yeniden merkezle, aksi halde
             // bir sonraki simüle tick bu gerçek fiyatı geri "kelepçeler".
-            // (10 Ağustos 2026, dördüncü tur) applyRealPriceUpdate() üzerinden
-            // geçiyor — tek seferlik bozuk bir yfinance verisinin ~97 sembollük
-            // toplu senkronda fiyatı anında sıçratmasını engeller.
-            const applied = applyRealPriceUpdate(symbol, price, (prof, val) => {
-                const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
-                if (val > capUp || val < capDown) {
-                    prof.dayOpen = val;
-                }
-                prof.liveAnchor = val;
-                prof.price = +val.toFixed(2);
-            });
-            if (applied) anyUpdated = true;
+            const capUp = p.dayOpen * 1.06, capDown = p.dayOpen * 0.94;
+            if (price > capUp || price < capDown) {
+                p.dayOpen = price;
+            }
+            p.price = +price.toFixed(2);
+            anyUpdated = true;
         });
 
         if (anyUpdated) {
@@ -1020,7 +664,7 @@ const TradingEngine = (() => {
                 else shortValue += pos.qty * current;
             });
         });
-        return effectiveBalance() + longValue - shortValue;
+        return portfolio.balance + longValue - shortValue;
     }
 
     function sampleEquity() {
@@ -1838,9 +1482,7 @@ const TradingEngine = (() => {
             { label: 'Fiyat Alarmları Panelini Aç', sub: 'Grafik', hint: 'A', keywords: 'alarm price alert fiyat uyarı', run: () => byId('btn-open-alerts')?.click() },
             { label: 'BIST100 Isı Haritasını Aç', sub: 'Piyasa', hint: 'H', keywords: 'ısı harita heatmap piyasa', run: () => byId('btn-open-heatmap')?.click() },
             { label: 'İşlem Panelini Aç/Kapat', sub: 'İşlem', keywords: 'işlem panel trade emir order al sat', run: () => byId('btn-toggle-tradepanel')?.click() },
-            // (6 Ağustos 2026 — "portföy sıfırlama artık sadece admin
-            // yapabilsin") "Parametreleri Sıfırla" komutu BİLEREK kaldırıldı —
-            // hedef aldığı #btn-reset-params butonu da kaldırıldı.
+            { label: 'Parametreleri Sıfırla (Reset)', sub: 'Genel', keywords: 'reset sıfırla temizle varsayılan', run: () => byId('btn-reset-params')?.click() },
             { label: 'Tanıtım Turunu Başlat', sub: 'Yardım', keywords: 'tur tanıtım tour rehber gezinti', run: () => byId('btn-open-tour')?.click() },
             { label: 'Klavye Kısayollarını Göster', sub: 'Yardım', hint: '?', keywords: 'kısayol shortcut klavye', run: () => byId('btn-open-shortcuts')?.click() },
             { label: 'Yardım / Hakkında', sub: 'Yardım', keywords: 'yardım hakkında help about bilgi', run: () => byId('btn-open-help')?.click() },
@@ -2436,15 +2078,9 @@ const TradingEngine = (() => {
             // actual last close, so the two charts silently disagree on
             // "the current price" for the same symbol.
             const alreadyHasLiveTick = liveFeedActive && liveFeedSymbol === symbol;
-            // (10 Ağustos 2026, dördüncü tur) Burada da applyRealPriceUpdate()
-            // kullanılıyor — OHLCV geçmişindeki son kapanış da (ör. bir
-            // kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
-            // karışıklığı yüzünden) tek seferlik bozuk olabilir.
-            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
-                prof.price = val;
-                prof.dayOpen = val;
-                prof.liveAnchor = val;
-            })) {
+            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol]) {
+                priceProfiles[symbol].price = chartInfo.lastClose;
+                priceProfiles[symbol].dayOpen = chartInfo.lastClose;
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
             }
@@ -2466,6 +2102,7 @@ const TradingEngine = (() => {
         const ocoUpperInput = byId('qt-oco-upper');
         const ocoLowerInput = byId('qt-oco-lower');
         const submitBtn = byId('qt-submit');
+        const resetBtn = byId('qt-reset-portfolio');
         const sltpToggle = byId('qt-sltp-toggle');
         const sltpRow = byId('qt-sltp-row');
         const trailingToggle = byId('qt-trailing-toggle');
@@ -2546,13 +2183,11 @@ const TradingEngine = (() => {
         setupMarketModeSelector();
 
         if (submitBtn) submitBtn.addEventListener('click', submitOrder);
-        // (6 Ağustos 2026 — "portföy sıfırlama artık sadece admin yapabilsin")
-        // Yarışmacının kendi portföyünü sıfırlayabildiği "Portföyü Sıfırla"
-        // butonu (ve buradaki wiring) BİLEREK kaldırıldı — buton index.html'den
-        // de kaldırıldığı için resetBtn artık her zaman null, ama kod
-        // netliği için wiring'i de kaldırıyoruz. resetPortfolio() fonksiyonu
-        // KENDİSİ dokunulmadan kalıyor (finteclubBridge.js'in admin komut
-        // kanalı hâlâ onu doğrudan çağırıyor).
+        if (resetBtn) resetBtn.addEventListener('click', () => {
+            if (confirm('Demo portföyünüz sıfırlanacak (' + fmtTRY(DEFAULT_BALANCE) + '). Onaylıyor musunuz?')) {
+                resetPortfolio();
+            }
+        });
 
         setSide('BUY');
         setOrderType('MARKET');
@@ -2781,31 +2416,15 @@ const TradingEngine = (() => {
             return;
         }
 
-        const riskAmount = effectiveBalance() * (riskPct / 100);
+        const riskAmount = portfolio.balance * (riskPct / 100);
         let qty = Math.floor(riskAmount / perShareRisk);
 
         const leverage = Math.max(1, Number(state.leverage) || 1);
         const commissionPct = getCommissionPct();
-        // (9 Ağustos 2026) BUY için gerçek gerçekleşme fiyatı (ask) mid'den
-        // biraz yüksek — bkz. applyQtyPct'teki aynı not.
-        const marginPrice = state.side === 'BUY' ? execFillPrice('BUY', price) : price;
-        let maxQtyByMargin = Math.floor(effectiveBalance() / (marginPrice * ((1 / leverage) + (commissionPct / 100))));
-        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) bkz. applyQtyPct'teki
-        // aynı not — teminat tavanı da gerçekte uygulanacak (düşürülmüş
-        // olabilecek) kaldıraçla tutarlı olsun diye tek bir ek geçişle düzeltiliyor.
-        if (state.market === 'VIOP') {
-            const tierLev = previewTieredLeverage(marginPrice * maxQtyByMargin, leverage, state.market);
-            if (tierLev < leverage) {
-                maxQtyByMargin = Math.floor(effectiveBalance() / (marginPrice * ((1 / tierLev) + (commissionPct / 100))));
-            }
-        }
-        // (9 Ağustos 2026 — kök neden düzeltmesi) Risk bazlı miktar da aynı
-        // gerçekçi nominal tavana tabi — bkz. applyQtyPct/placeOrder.
-        const maxQtyByNotional = Math.floor(MAX_ORDER_NOTIONAL_TL / price);
-        const maxQty = Math.min(maxQtyByMargin, maxQtyByNotional);
+        const maxQtyByMargin = Math.floor(portfolio.balance / (price * ((1 / leverage) + (commissionPct / 100))));
         let clamped = false;
-        if (qty > maxQty) {
-            qty = Math.max(0, maxQty);
+        if (qty > maxQtyByMargin) {
+            qty = Math.max(0, maxQtyByMargin);
             clamped = true;
         }
 
@@ -2860,14 +2479,14 @@ const TradingEngine = (() => {
         const slPrice = slInput && slInput.value ? Number(slInput.value) : null;
         const price = effectivePrice();
 
-        if (!qty || qty <= 0 || !slPrice || slPrice <= 0 || !price || price <= 0 || !effectiveBalance()) {
+        if (!qty || qty <= 0 || !slPrice || slPrice <= 0 || !price || price <= 0 || !portfolio.balance) {
             previewEl.style.display = 'none';
             return;
         }
 
         const perShareRisk = Math.abs(price - slPrice);
         const riskAmount = perShareRisk * qty;
-        const riskPct = (riskAmount / effectiveBalance()) * 100;
+        const riskPct = (riskAmount / portfolio.balance) * 100;
 
         previewEl.style.display = '';
         previewEl.textContent = `Bu işlemde bakiyenizin yaklaşık %${riskPct.toFixed(2)}'sini (${fmtTRY(riskAmount)}) riske ediyorsunuz.`;
@@ -2988,32 +2607,12 @@ const TradingEngine = (() => {
         const commissionPct = getCommissionPct();
         const leverage = Math.max(1, Number(state.leverage) || 1);
         let qty;
-        let isOpeningNewExposure = true; // (9 Ağustos 2026) mevcut pozisyonu KAPATAN dal nominal tavana tabi değil
         if (state.side === 'BUY') {
             // Bakiyenin %pct'i kadarını TEMİNAT olarak kullan — kaldıraç
             // sayesinde aynı teminatla `leverage` katı kadar nominal
             // pozisyon açılabiliyor.
-            // (9 Ağustos 2026) Gerçekleşme fiyatı artık spread nedeniyle
-            // gösterilen mid'den biraz YÜKSEK (ask) olacağı için, "%100
-            // bakiye" gibi tam bütçeyi kullanan hesaplar burada da ask
-            // fiyatına göre yapılıyor — aksi halde qty hesabı mid ile
-            // yapılıp gerçek gerçekleşme anında birkaç TL'lik spread farkı
-            // yüzünden "yetersiz bakiye" ile sessizce reddedilebilirdi.
-            const execPrice = execFillPrice('BUY', price);
-            const usableMargin = effectiveBalance() * (pct / 100);
-            qty = Math.floor((usableMargin * leverage) / (execPrice * (1 + (commissionPct / 100) * leverage)));
-            // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) İlk geçişte
-            // hesaplanan miktarın nominal değeri, seçili kaldıracın izin
-            // verildiği kademeyi aşıyorsa, miktar placeOrder()'ın gerçekte
-            // uygulayacağı düşük kaldıraçla TEK bir ek geçişte yeniden
-            // hesaplanıyor.
-            if (state.market === 'VIOP') {
-                const tierLev = previewTieredLeverage(execPrice * qty, leverage, state.market);
-                if (tierLev < leverage) {
-                    qty = Math.floor((usableMargin * tierLev) / (execPrice * (1 + (commissionPct / 100) * tierLev)));
-                    showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(tierLev)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
-                }
-            }
+            const usableMargin = portfolio.balance * (pct / 100);
+            qty = Math.floor((usableMargin * leverage) / (price * (1 + (commissionPct / 100) * leverage)));
         } else {
             // (29 Temmuz 2026 — Madde 11) Ticket şu an hangi moddaysa (Normal
             // Seans/VİOP) o defterdeki pozisyona bakılıyor — aksi halde
@@ -3022,29 +2621,9 @@ const TradingEngine = (() => {
             const pos = book(state.market).positions[state.activeSymbol];
             if (pos && pos.side === 'LONG') {
                 qty = Math.floor(pos.qty * (pct / 100));
-                isOpeningNewExposure = false; // var olan LONG'u kapatıyor, yeni pozisyon açmıyor
             } else {
-                const usableMargin = effectiveBalance() * (pct / 100);
+                const usableMargin = portfolio.balance * (pct / 100);
                 qty = Math.floor((usableMargin * leverage) / price);
-                if (state.market === 'VIOP') {
-                    const tierLev = previewTieredLeverage(price * qty, leverage, state.market);
-                    if (tierLev < leverage) {
-                        qty = Math.floor((usableMargin * tierLev) / price);
-                        showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(tierLev)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
-                    }
-                }
-            }
-        }
-        // (9 Ağustos 2026 — kök neden düzeltmesi) Otomatik miktar hesabı,
-        // gerçekçi olmayan büyüklükte (milyar/trilyon TL'lik) bir emri HİÇ
-        // önermesin — placeOrder()'daki asıl güvenlik duvarına gelmeden önce
-        // burada da sınırlanıyor. Mevcut bir pozisyonu kapatan dal (yukarıda
-        // isOpeningNewExposure=false) bu sınıra tabi değil.
-        if (isOpeningNewExposure) {
-            const maxQtyByNotional = Math.floor(MAX_ORDER_NOTIONAL_TL / price);
-            if (qty > maxQtyByNotional) {
-                qty = maxQtyByNotional;
-                showToast(`Emir büyüklüğü gerçekçi bir üst sınırla (₺${fmtTRY(MAX_ORDER_NOTIONAL_TL).replace('₺', '')}) sınırlandırıldı.`);
             }
         }
         const qtyInput = byId('qt-qty');
@@ -3082,12 +2661,8 @@ const TradingEngine = (() => {
             return;
         }
         const commissionPct = getCommissionPct();
+        const leverage = Math.max(1, Number(state.leverage) || 1);
         const notional = price * qty;
-        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) Gösterilen gereken
-        // teminat, placeOrder()'ın bu pozisyon büyüklüğü için GERÇEKTE
-        // uygulayacağı (kademe nedeniyle düşürülmüş olabilecek) kaldıraçla
-        // hesaplanıyor — bkz. previewTieredLeverage.
-        const leverage = previewTieredLeverage(notional, state.leverage, state.market);
         const commission = notional * (commissionPct / 100);
         const margin = notional / leverage;
         const requiredTotal = margin + commission;
@@ -3124,103 +2699,18 @@ const TradingEngine = (() => {
        Order execution
        ════════════════════════════════════════════════ */
 
-    // (6 Ağustos 2026 — "Mehmet Ali" hesap bozulması kök neden düzeltmesi +
-    // Ali İhsan Hocam'ın istediği alım/satım onay popup'ı)
-    //
-    // KÖK NEDEN: Öğrencinin hesabında 230 katrilyon TL gibi anlamsız bir
-    // özkaynak değeri oluşmuştu. İncelemede bulunan gerçek neden: LIMIT
-    // emir tipi, kullanıcının GİRDİĞİ (limit) fiyatı — güncel piyasa
-    // fiyatından ne kadar UZAK olursa olsun — HİÇBİR kontrol yapmadan
-    // doğrudan gerçekleşme fiyatı olarak kullanıyordu (bkz. eski kod: aşağı
-    // taşınan submitOrder()'ın eski hâlinde `price = effectivePrice()`
-    // LIMIT'te doğrudan kullanıcının kutuya yazdığı sayıydı ve bu sayı hiç
-    // sınırlanmadan hem qty hesaplamasında (bkz. applyQtyPct) hem de
-    // placeOrder()'a verilen gerçekleşme fiyatında kullanılıyordu). Örnek:
-    // bir öğrenci "Limit" sekmesinde ASELS için yanlışlıkla/bilmeyerek
-    // 0,01 TL gibi gerçek dışı bir fiyat girip "%100 bakiye" ile miktar
-    // hesaplattığında, qty = (bakiye × kaldıraç) / 0,01 formülü SAYISAL
-    // OLARAK milyarlarca adet hisseye karşılık geliyordu (gereken teminat
-    // da aynı oranda küçük olduğu için bakiye kontrolünü de sorunsuz
-    // geçiyordu!). Emir o anda 0,01 TL'den "gerçekleşiyor", pozisyon
-    // avgPrice=0,01 ile açılıyordu. Bir sonraki fiyat tick'inde gerçek
-    // piyasa fiyatı (ör. 150 TL) ile hesaplanan gerçekleşmemiş K/Z =
-    // (150 - 0,01) × (milyarlarca adet) = astronomik bir sayı oluyor,
-    // equity = balance + usedMargin + openPnl bu sayıyı doğrudan yansıtıyordu.
-    // 20x kaldıraç bu etkiyi büyütüyordu (aynı teminatla DAHA FAZLA adet
-    // alınabildiği için) ama kaldıraç kendisi hatanın nedeni DEĞİL —
-    // kaldıraç sadece hatayı büyüten bir çarpandı.
-    //
-    // DÜZELTME: LIMIT emirler artık GERÇEK bir limit emri gibi davranıyor:
-    // - Girilen limit fiyatı koşulu ŞU AN zaten sağlıyorsa (AL için limit ≥
-    //   güncel fiyat, SAT için limit ≤ güncel fiyat — yani gerçek bir
-    //   borsada da emrin hemen gerçekleşeceği durum), emir HEMEN ama HER
-    //   ZAMAN GÜNCEL (gerçek, sınırlı) PİYASA FİYATINDAN gerçekleşir —
-    //   kullanıcının kutuya yazdığı sayıdan ASLA değil. Bu, tek başına
-    //   yukarıdaki istismarı tamamen ortadan kaldırıyor: gerçekleşme fiyatı
-    //   artık her zaman priceProfiles'ın kendi (tickPrices() içinde
-    //   dayOpen'ın ±%6'sıyla sınırlanan) gerçek fiyatı.
-    // - Koşul HENÜZ sağlanmıyorsa, emir gerçek bir borsadaki gibi BEKLEYEN
-    //   bir limit emri olarak kuyruğa alınır (bkz. queuePendingLimitOrder)
-    //   ve her fiyat tick'inde kontrol edilip (bkz. checkPendingOcoOrders'ın
-    //   genişletilmiş hâli) koşul sağlandığı an yine GÜNCEL PİYASA
-    //   FİYATINDAN gerçekleştirilir.
-    //
-    // AYRICA: Hocanın isteği üzerine artık AL/SAT (Spot ve VİOP'un ikisinde
-    // de) hiçbir emir DOĞRUDAN gerçekleşmiyor — önce bir onay penceresi
-    // açılıp emrin özeti (adet, sembol, fiyat, kaldıraç, gereken teminat)
-    // gösteriliyor, kullanıcı "Onayla" demeden hiçbir pozisyon
-    // değişmiyor/bakiye düşülmüyor. Bu, hem hocanın UX isteğini karşılıyor
-    // hem de yukarıdaki gibi anlamsız/aşırı büyük emirlerin son bir görünür
-    // kontrol noktasından geçmesini sağlıyor (öğrenci "1.000.000.000 adet
-    // ASELS 0,01 TL'den almak istediğinize emin misiniz?" gibi bir özeti
-    // görünce hatayı fark edebilir).
     function submitOrder() {
-        // (9 Ağustos 2026 — admin durdurunca emir engelleme) Bu, tek gerçek
-        // koruma DEĞİL — buton da updateTradeAvailabilityUI() ile pasif hale
-        // getiriliyor — ama olası bir yarış durumuna (ör. buton disabled
-        // olmadan hemen önce tıklanması) veya klavye/programatik tetiklemeye
-        // karşı asıl, atlanamaz kontrol burası. Admin durdurması HER ZAMAN
-        // tam blok (kuyruğa bile alınamaz).
-        if (isTradingHaltedByAdmin()) {
-            const m = tradingBlockedReason();
-            showToast(m); showTicketAlert(m, 'error');
-            return;
-        }
-        // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
-        // ÖNCEDEN piyasa kapalıyken TÜM emir türleri burada reddediliyordu.
-        // Artık kullanıcı isteği üzerine SADECE OCO bu şekilde tam
-        // reddediliyor — Piyasa ve Limit emirleri piyasa kapalıyken de
-        // kabul ediliyor, aşağıda "kuyruğa alınacak" (willQueueAsPending)
-        // olarak işaretlenip gerçek gerçekleştirme piyasa açılınca
-        // checkPendingOcoOrders() üzerinden otomatik yapılıyor — tıpkı
-        // gerçek borsa/aracı kurum uygulamalarındaki (Binance/Midas vb.)
-        // "seans dışı emir" davranışı gibi: emir anında kuyruğa alınır,
-        // gereken teminat ANINDA bakiyeden kilitlenir (bkz.
-        // queuePendingLimitOrder/queuePendingMarketOrder), piyasa açılır
-        // açılmaz o anki güncel/açılış fiyatından gerçekleştirilir.
-        const marketClosedNow = !isMarketOpenForTrading();
-        if (marketClosedNow && state.orderType === 'OCO') {
-            const m = tradingBlockedReason();
-            showToast(m); showTicketAlert(m, 'error');
-            return;
-        }
         if (!state.activeSymbol) { showToast('Önce bir sembol seçin.'); showTicketAlert('Önce bir sembol seçin.', 'error'); return; }
         const qtyInput = byId('qt-qty');
         const qty = qtyInput ? Math.floor(Number(qtyInput.value)) : 0;
-        const enteredPrice = effectivePrice();
+        const price = effectivePrice();
         const commissionPct = getCommissionPct();
 
         if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); showTicketAlert('Geçerli bir miktar girin.', 'error'); return; }
-        if (!enteredPrice || enteredPrice <= 0) { showToast('Fiyat bilgisi alınamadı.'); showTicketAlert('Fiyat bilgisi alınamadı.', 'error'); return; }
+        if (!price || price <= 0) { showToast('Fiyat bilgisi alınamadı.'); showTicketAlert('Fiyat bilgisi alınamadı.', 'error'); return; }
 
         if (state.orderType === 'OCO') {
-            // OCO zaten "anında gerçekleşmeyen, koşula bağlı" bir emir türü
-            // (kurulduğunda hiçbir şey satın alınmıyor/satılmıyor) — hocanın
-            // istediği "AL/SAT'a basınca onay" akışı buraya değil, ANINDA
-            // gerçekleşen Piyasa/Limit emirlerine uygulanıyor. (Piyasa
-            // kapalıyken zaten yukarıda reddedildiği için buraya SADECE
-            // piyasa açıkken ulaşılır.)
-            submitOcoOrder(qty, enteredPrice, commissionPct);
+            submitOcoOrder(qty, price, commissionPct);
             return;
         }
 
@@ -3237,46 +2727,7 @@ const TradingEngine = (() => {
             return;
         }
 
-        // ---- LIMIT emir: gerçekleşme fiyatını belirle (bkz. yukarıdaki kök neden notu) ----
-        let fillPrice = enteredPrice; // MARKET'te effectivePrice() zaten güncel piyasa fiyatı
-        let willQueueAsPending = false;
-        let limitPrice = null;
-        if (state.orderType === 'LIMIT') {
-            const marketPrice = getPrice(state.activeSymbol);
-            if (!marketPrice) { const m = 'Fiyat bilgisi alınamadı.'; showToast(m); showTicketAlert(m, 'error'); return; }
-            limitPrice = enteredPrice;
-            if (marketClosedNow) {
-                // Piyasa kapalıyken koşul o anki (donmuş) fiyata göre zaten
-                // sağlanmış olsa bile HEMEN gerçekleştirilemez — piyasa
-                // açılınca checkPendingOcoOrders() ilk tick'te normal LIMIT
-                // tetik mantığıyla değerlendirir (genelde açılış anında da
-                // hâlâ sağlanıyor olacağından pratikte "açılışta gerçekleşir"
-                // anlamına gelir).
-                willQueueAsPending = true;
-            } else {
-                const conditionAlreadyMet = state.side === 'BUY' ? (limitPrice >= marketPrice) : (limitPrice <= marketPrice);
-                if (conditionAlreadyMet) {
-                    fillPrice = marketPrice; // KÖK DÜZELTME: kullanıcının yazdığı fiyat DEĞİL, gerçek/sınırlı piyasa fiyatı
-                } else {
-                    willQueueAsPending = true;
-                }
-            }
-        } else if (state.orderType === 'MARKET' && marketClosedNow) {
-            // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
-            // Piyasa kapalıyken bir Piyasa (Market) emri artık reddedilmek
-            // yerine kuyruğa alınıyor — bkz. queuePendingMarketOrder().
-            // fillPrice zaten enteredPrice (donmuş son fiyat), sadece
-            // TAHMİNİ teminat hesaplamak ve onay penceresinde göstermek için
-            // kullanılıyor; gerçek gerçekleşme fiyatı piyasa açılınca o anki
-            // güncel fiyattır.
-            willQueueAsPending = true;
-        }
-
-        // Optional Stop-Loss / Take-Profit — bekleyen bir emir için henüz
-        // kesin gerçekleşme fiyatı bilinmediğinden, doğrulama limitPrice
-        // (Limit) ya da fillPrice (kapalıyken kuyruğa alınan Market) baz
-        // alınarak yapılır.
-        const sltpReference = willQueueAsPending ? (limitPrice !== null ? limitPrice : fillPrice) : fillPrice;
+        // Optional Stop-Loss / Take-Profit attached to the position this order opens/adds to.
         const sltpToggle = byId('qt-sltp-toggle');
         let slPrice = null, tpPrice = null;
         if (sltpToggle && sltpToggle.checked) {
@@ -3288,71 +2739,22 @@ const TradingEngine = (() => {
             // Sanity: SL/TP must sit on the correct side of the intended new direction,
             // otherwise it would trigger immediately (or never make sense).
             const willBeLong = state.side === 'BUY';
-            if (slPrice !== null && ((willBeLong && slPrice >= sltpReference) || (!willBeLong && slPrice <= sltpReference))) {
+            if (slPrice !== null && ((willBeLong && slPrice >= price) || (!willBeLong && slPrice <= price))) {
                 const m = `Stop-Loss fiyatı ${willBeLong ? 'giriş fiyatının altında' : 'giriş fiyatının üzerinde'} olmalı.`;
                 showToast(m); showTicketAlert(m, 'error');
                 return;
             }
-            if (tpPrice !== null && ((willBeLong && tpPrice <= sltpReference) || (!willBeLong && tpPrice >= sltpReference))) {
+            if (tpPrice !== null && ((willBeLong && tpPrice <= price) || (!willBeLong && tpPrice >= price))) {
                 const m = `Take-Profit fiyatı ${willBeLong ? 'giriş fiyatının üzerinde' : 'giriş fiyatının altında'} olmalı.`;
                 showToast(m); showTicketAlert(m, 'error');
                 return;
             }
         }
 
-        const trailingToggle = byId('qt-trailing-toggle');
-        const trailingPctInput = byId('qt-trailing-pct');
-        const trailingRequested = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
-        // (10 Ağustos 2026, ikinci tur) Aşırı küçük bir trailing yüzdesi
-        // (ör. %0,01), fiyat gürültüsünün bile anında tetiklediği, fiilen
-        // "kârdaysa hemen kapat" ile aynı işi gören bir "tetik" haline
-        // gelirdi — asgari tutma süresi kuralını dolanmanın başka bir yolu.
-        // Gerçek platformlarda da trailing stop için genelde bir asgari
-        // yüzde/tık zorunludur; burada da MIN_TRAILING_PCT ile aynısı
-        // uygulanıyor.
-        if (trailingRequested && Number(trailingPctInput.value) < MIN_TRAILING_PCT) {
-            const m = `Trailing Stop yüzdesi en az %${MIN_TRAILING_PCT} olmalı (çok küçük bir yüzde, gürültüyle anında tetiklenir).`;
-            showToast(m); showTicketAlert(m, 'error');
-            return;
-        }
-        const useTrailing = trailingRequested;
-
-        openOrderConfirmModal({
-            symbol: state.activeSymbol,
-            side: state.side,
-            qty,
-            market: state.market,
-            leverage: state.leverage,
-            commissionPct,
-            orderType: state.orderType,
-            fillPrice,
-            willQueueAsPending,
-            limitPrice,
-            slPrice,
-            tpPrice,
-            useTrailing,
-            trailingPct: useTrailing ? Number(trailingPctInput.value) : null
-        });
-    }
-
-    // Kullanıcı onay penceresinde "Onayla" dedikten SONRA gerçek işlemi
-    // yapan fonksiyon — eskiden submitOrder()'ın gövdesiydi, artık ondan
-    // ayrıldı ki onay adımı arada devreye girebilsin. `ctx`,
-    // submitOrder()'ın hazırladığı emir bağlamı (bkz. yukarısı).
-    function executeConfirmedOrder(ctx) {
-        if (ctx.willQueueAsPending) {
-            // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
-            // İki farklı kuyruklama nedeni var: Limit fiyat koşulu henüz
-            // sağlanmadı (kind: 'LIMIT') YA DA piyasa kapalı olduğu için bir
-            // Market emri hemen gerçekleştirilemedi (kind: 'MARKET_QUEUED').
-            // ctx.limitPrice sadece gerçek bir LIMIT emrinde dolu olur.
-            if (ctx.orderType === 'LIMIT') {
-                queuePendingLimitOrder(ctx);
-            } else {
-                queuePendingMarketOrder(ctx);
-            }
-            resetTicketAfterOrder();
-            return;
+        if (state.orderType === 'LIMIT') {
+            // Simplified: simulate immediate fill against current market for demo purposes,
+            // since this is a sandbox with no real order book.
+            showToast(`Limit emir ${fmtPrice(price)} seviyesinden gerçekleşti (demo).`);
         }
 
         // (23 Temmuz 2026 düzeltmesi) Var olan bir pozisyon FARKLI bir
@@ -3362,18 +2764,25 @@ const TradingEngine = (() => {
         // saklanan kaldıracı, avgPrice ile aynı şekilde adet-ağırlıklı
         // ortalamaya güncelleniyor; kullanıcı bunu ticket'ta önceden görsün
         // diye bilgilendirici bir not gösteriliyor.
-        // (29 Temmuz 2026 — Madde 11) Ticket'ın seçili modu (ctx.market)
+        // (29 Temmuz 2026 — Madde 11) Ticket'ın seçili modu (state.market)
         // hangi defterin kullanılacağını belirliyor — book() üzerinden.
-        const existingBeforeOrder = book(ctx.market).positions[ctx.symbol];
-        const intendedSide = ctx.side === 'BUY' ? 'LONG' : 'SHORT';
-        if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== ctx.leverage) {
-            const blendedPreview = (existingBeforeOrder.leverage * existingBeforeOrder.qty + ctx.leverage * ctx.qty) / (existingBeforeOrder.qty + ctx.qty);
-            const leverageNote = `Not: ${ctx.symbol} şu an ${fmtLeverage(existingBeforeOrder.leverage)}x kaldıraçla açık — bu ekleme ${fmtLeverage(ctx.leverage)}x ile yapılacak, pozisyonun ortalama kaldıracı ${fmtLeverage(blendedPreview)}x olacak.`;
+        const existingBeforeOrder = book(state.market).positions[state.activeSymbol];
+        const intendedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
+        if (existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage) {
+            const blendedPreview = (existingBeforeOrder.leverage * existingBeforeOrder.qty + state.leverage * qty) / (existingBeforeOrder.qty + qty);
+            const leverageNote = `Not: ${state.activeSymbol} şu an ${fmtLeverage(existingBeforeOrder.leverage)}x kaldıraçla açık — bu ekleme ${fmtLeverage(state.leverage)}x ile yapılacak, pozisyonun ortalama kaldıracı ${fmtLeverage(blendedPreview)}x olacak.`;
             showToast(leverageNote);
+            // (23 Temmuz 2026 düzeltmesi) Bu bilgilendirme mesajı önceden
+            // yalnızca footer'a gidiyordu ve hemen ardından placeOrder()
+            // sonucu (başarı ya da "yetersiz bakiye") onu ezip geçiyordu —
+            // kullanıcı NEDEN kaldıraç seçiminin uygulanmadığını hiç
+            // göremiyordu. Artık ticket içinde ayrıca gösteriliyor; emir
+            // başarısız olursa hemen aşağıdaki showTicketAlert('error')
+            // çağrısı bunun yerini alacak (aynı kutu, tek mesaj kalır).
             showTicketAlert(leverageNote, 'info');
         }
 
-        const result = placeOrder(ctx.symbol, ctx.side, ctx.qty, ctx.fillPrice, ctx.commissionPct, ctx.leverage, ctx.market);
+        const result = placeOrder(state.activeSymbol, state.side, qty, price, commissionPct, state.leverage, state.market);
         if (!result.ok) {
             showToast(result.msg);
             showTicketAlert(result.msg, 'error');
@@ -3383,20 +2792,23 @@ const TradingEngine = (() => {
         // Attach SL/TP (or a Trailing Stop instead of a fixed SL) only if this
         // order actually opened/added to a position in its own direction
         // (not just reducing/closing an opposite one).
-        if (ctx.slPrice !== null || ctx.tpPrice !== null || ctx.useTrailing) {
-            const pos = book(ctx.market).positions[ctx.symbol];
-            const expectedSide = ctx.side === 'BUY' ? 'LONG' : 'SHORT';
+        const trailingToggle = byId('qt-trailing-toggle');
+        const trailingPctInput = byId('qt-trailing-pct');
+        const useTrailing = !!(trailingToggle && trailingToggle.checked && trailingPctInput && Number(trailingPctInput.value) > 0);
+        if (slPrice !== null || tpPrice !== null || useTrailing) {
+            const pos = book(state.market).positions[state.activeSymbol];
+            const expectedSide = state.side === 'BUY' ? 'LONG' : 'SHORT';
             if (pos && pos.side === expectedSide) {
-                if (ctx.useTrailing) {
-                    pos.trailingPct = ctx.trailingPct;
+                if (useTrailing) {
+                    pos.trailingPct = Number(trailingPctInput.value);
                     pos.trailingExtreme = pos.avgPrice; // en iyi fiyat henüz giriş fiyatı
-                    delete pos.sl;
-                } else if (ctx.slPrice !== null) {
-                    pos.sl = ctx.slPrice;
+                    delete pos.sl; // trailing, sabit SL'nin yerini alır
+                } else if (slPrice !== null) {
+                    pos.sl = slPrice;
                     delete pos.trailingPct;
                     delete pos.trailingExtreme;
                 }
-                if (ctx.tpPrice !== null) pos.tp = ctx.tpPrice;
+                if (tpPrice !== null) pos.tp = tpPrice;
                 savePortfolio();
             }
         }
@@ -3404,49 +2816,25 @@ const TradingEngine = (() => {
         renderPositions();
         renderOrders();
         renderAccountSummary();
-        // (9 Ağustos 2026) result.fillPrice, placeOrder() içinde spread
-        // uygulandıktan SONRAKİ gerçek gerçekleşme fiyatı — ctx.fillPrice
-        // (mid) yerine bu gösteriliyor ki kullanıcı gerçekte ne fiyattan
-        // işlem yaptığını görsün.
-        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] ${ctx.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${ctx.qty} adet ${ctx.symbol} @ ₺${fmtPrice(result.fillPrice)}`);
-        // (10 Ağustos 2026 — kademeli kaldıraç) Seçilen kaldıraç, pozisyonun
-        // büyüklüğü nedeniyle düşürüldüyse kullanıcı sessizce şaşırmasın diye
-        // ayrıca bilgilendiriliyor — bkz. placeOrder()/tieredMaxLeverage.
-        if (result.leverageClampedTo) {
-            showToast(`ℹ️ Kaldıracınız bu pozisyon büyüklüğü için ${fmtLeverage(result.leverageClampedTo)}x ile sınırlandırıldı (kademeli kaldıraç kuralı).`);
-        }
+        showToast(`[${state.market === 'VIOP' ? 'VİOP' : 'Spot'}] ${state.side === 'BUY' ? 'Alım' : 'Satım'} emri gerçekleşti: ${qty} adet ${state.activeSymbol} @ ₺${fmtPrice(price)}`);
         // Emir başarıyla gerçekleşti. Bu turda bir kaldıraç notu gösterildiyse
         // (leverageNote) onu ekranda bırakıyoruz — kullanıcının hâlâ görmesi
         // faydalı bir bilgi. Gösterilmediyse, ÖNCEKİ bir başarısız denemeden
         // kalmış olabilecek bir hata kutusu varsa temizleniyor.
-        if (!(existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== ctx.leverage)) {
+        if (!(existingBeforeOrder && existingBeforeOrder.side === intendedSide && existingBeforeOrder.leverage && existingBeforeOrder.leverage !== state.leverage)) {
             const alertEl = byId('qt-ticket-alert');
             if (alertEl && alertEl.classList.contains('qt-alert-error')) {
                 alertEl.style.display = 'none';
                 clearTimeout(ticketAlertTimer);
             }
         }
-        resetTicketAfterOrder();
-    }
-
-    // Emir gerçekleştikten (ya da bekleyen limit emri kurulduktan) sonra
-    // ticket'taki geçici alanları (adet, SL/TP, trailing) temizleyen ortak
-    // yardımcı — eskiden submitOrder()'ın sonunda tek bir yerde tekrarsız
-    // yazılıyordu, artık hem "anında gerçekleşti" hem "bekleyen limit emri
-    // kuruldu" yollarının ikisinden de çağrılabilmesi için ayrı bir
-    // fonksiyona çıkarıldı.
-    function resetTicketAfterOrder() {
-        const qtyInput = byId('qt-qty');
         if (qtyInput) qtyInput.value = '';
-        const sltpToggle = byId('qt-sltp-toggle');
         if (sltpToggle) { sltpToggle.checked = false; }
         const sltpRow = byId('qt-sltp-row');
         if (sltpRow) sltpRow.style.display = 'none';
         const slInput = byId('qt-sl-price'), tpInput = byId('qt-tp-price');
         if (slInput) { slInput.value = ''; slInput.disabled = false; delete slInput.dataset.userEdited; }
         if (tpInput) { tpInput.value = ''; delete tpInput.dataset.userEdited; }
-        const trailingToggle = byId('qt-trailing-toggle');
-        const trailingPctInput = byId('qt-trailing-pct');
         if (trailingToggle) trailingToggle.checked = false;
         if (trailingPctInput) trailingPctInput.value = '';
         const trailingRow = byId('qt-trailing-row');
@@ -3456,250 +2844,6 @@ const TradingEngine = (() => {
         // risk hesaplamasına) hazır, kilitli kalmıyor.
         setRiskCalcEnabled(false);
         updateEstimate();
-    }
-
-    // (6 Ağustos 2026) Henüz koşulu sağlanmamış bir LIMIT emri, OCO'nun
-    // bekleyen-emir defterine (aynı diziye — book(market).pending) `kind:
-    // 'LIMIT'` etiketiyle ekleniyor. checkPendingOcoOrders() (aşağıda
-    // genişletildi) her tick'te bunu da kontrol edip koşul sağlanınca GÜNCEL
-    // PİYASA FİYATINDAN gerçekleştiriyor — asla kullanıcının yazdığı limit
-    // fiyatından değil (bkz. submitOrder()'daki kök neden notu).
-    function queuePendingLimitOrder(ctx) {
-        // (9 Ağustos 2026 — Binance/Midas tarzı anlık teminat kilidi)
-        // ÖNCEDEN bu sadece bir "ön kontrol"dü (estimatedRequired >
-        // effectiveBalance() kontrolü geçilirse HİÇBİR ŞEY bakiyeden
-        // düşülmüyordu) — kullanıcı aynı bakiyeyle art arda birden fazla
-        // bekleyen emir kurup toplamda bakiyesinden fazla teminat taahhüt
-        // edebiliyordu. Gerçek borsa/aracı kurum davranışı (kullanıcının
-        // referans verdiği Binance/Midas gibi): emir GİRER GİRMEZ gereken
-        // teminat anında kilitlenir/düşülür. Aşağıda estimatedRequired kadarı
-        // (pozisyon azaltma/kapatma ağırlıklı emirlerde negatif çıkabilir —
-        // o durumda hiçbir şey kilitlenmiyor) portfolio.balance'tan hemen
-        // düşülüp emrin üzerinde `reservedAmount` olarak saklanıyor; emir
-        // tetiklendiğinde (checkPendingOcoOrders) ya da iptal edildiğinde
-        // (cancelOcoOrder) TAM olarak geri iade ediliyor.
-        const estimatedMargin = estimateOrderMarginRequirement(ctx.symbol, ctx.side, ctx.qty, ctx.limitPrice, ctx.leverage, ctx.market);
-        const estimatedCommission = ctx.limitPrice * ctx.qty * (ctx.commissionPct / 100);
-        const estimatedRequired = estimatedMargin + estimatedCommission;
-        if (estimatedRequired > effectiveBalance()) {
-            const m = isFtcLoggedIn()
-                ? 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').'
-                : 'İşlem açmak için önce FinteLig girişi yapmalısın (profil panelinden).';
-            showToast(m);
-            showTicketAlert(m, 'error');
-            return;
-        }
-        // (9 Ağustos 2026 — kök neden düzeltmesi) Bekleyen limit emri de
-        // gerçekleşme anında AYNI nominal tavana tabi olacağı için (bkz.
-        // placeOrder), burada da erken bir uyarı veriliyor — aksi halde
-        // kullanıcı emri kurar, günlerce/dakikalarca bekler, sonunda
-        // tetiklendiğinde sessizce reddedilirdi.
-        const estimatedOpeningNotional = ctx.limitPrice * ctx.qty;
-        if (estimatedOpeningNotional > MAX_ORDER_NOTIONAL_TL) {
-            const m = 'Emrin büyüklüğü (' + fmtTRY(estimatedOpeningNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.';
-            showToast(m);
-            showTicketAlert(m, 'error');
-            return;
-        }
-
-        const reservedAmount = Math.max(0, estimatedRequired);
-        if (reservedAmount > 0) portfolio.balance -= reservedAmount;
-
-        const b = book(ctx.market);
-        b.pending.push({
-            id: genId(),
-            kind: 'LIMIT',
-            symbol: ctx.symbol,
-            side: ctx.side,
-            qty: ctx.qty,
-            limitPrice: ctx.limitPrice,
-            leverage: ctx.leverage,
-            commissionPct: ctx.commissionPct,
-            market: ctx.market,
-            slPrice: ctx.slPrice,
-            tpPrice: ctx.tpPrice,
-            useTrailing: ctx.useTrailing,
-            trailingPct: ctx.trailingPct,
-            reservedAmount,
-            createdAt: Date.now()
-        });
-        savePortfolio();
-        renderPendingOcoOrders();
-        renderAccountSummary(); // bakiye anında değişti, ekranı hemen tazele
-        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] Limit emir kuruldu: ${ctx.qty} adet ${ctx.symbol} — fiyat ₺${fmtPrice(ctx.limitPrice)} olunca ${ctx.side === 'BUY' ? 'alınacak' : 'satılacak'}. Gereken teminat (₺${fmtTRY(reservedAmount).replace('₺', '')}) şimdiden kilitlendi.`);
-    }
-
-    // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma" özelliği)
-    // Kullanıcı geri bildirimi: "market kapalıyken alım yapar, market
-    // açılınca parayı çeker, kullanıcıya da 'işleminiz sıraya alındı, piyasa
-    // açıldığında bakiyenizden düşecektir' der — Binance/Midas'ta nasılsa
-    // öyle" (teminat anında kilitlenir). queuePendingLimitOrder() ile AYNI
-    // desen — TEK FARK: kind 'MARKET_QUEUED', bir fiyat koşulu YOK, piyasa
-    // açılıp checkPendingOcoOrders() ilk çalıştığı an (o anki güncel/açılış
-    // fiyatından) KOŞULSUZ gerçekleştiriliyor.
-    function queuePendingMarketOrder(ctx) {
-        const estimatedMargin = estimateOrderMarginRequirement(ctx.symbol, ctx.side, ctx.qty, ctx.fillPrice, ctx.leverage, ctx.market);
-        const estimatedCommission = ctx.fillPrice * ctx.qty * (ctx.commissionPct / 100);
-        const estimatedRequired = estimatedMargin + estimatedCommission;
-        if (estimatedRequired > effectiveBalance()) {
-            const m = isFtcLoggedIn()
-                ? 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').'
-                : 'İşlem açmak için önce FinteLig girişi yapmalısın (profil panelinden).';
-            showToast(m);
-            showTicketAlert(m, 'error');
-            return;
-        }
-        const estimatedOpeningNotional = ctx.fillPrice * ctx.qty;
-        if (estimatedOpeningNotional > MAX_ORDER_NOTIONAL_TL) {
-            const m = 'Emrin büyüklüğü (' + fmtTRY(estimatedOpeningNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.';
-            showToast(m);
-            showTicketAlert(m, 'error');
-            return;
-        }
-
-        const reservedAmount = Math.max(0, estimatedRequired);
-        if (reservedAmount > 0) portfolio.balance -= reservedAmount;
-
-        const b = book(ctx.market);
-        b.pending.push({
-            id: genId(),
-            kind: 'MARKET_QUEUED',
-            symbol: ctx.symbol,
-            side: ctx.side,
-            qty: ctx.qty,
-            leverage: ctx.leverage,
-            commissionPct: ctx.commissionPct,
-            market: ctx.market,
-            slPrice: ctx.slPrice,
-            tpPrice: ctx.tpPrice,
-            useTrailing: ctx.useTrailing,
-            trailingPct: ctx.trailingPct,
-            reservedAmount,
-            createdAt: Date.now()
-        });
-        savePortfolio();
-        renderPendingOcoOrders();
-        renderAccountSummary();
-        showToast(`[${ctx.market === 'VIOP' ? 'VİOP' : 'Spot'}] İşleminiz sıraya alındı — piyasa açıldığında ${ctx.qty} adet ${ctx.symbol} ${ctx.side === 'BUY' ? 'alım' : 'satım'} emriniz otomatik gerçekleştirilecek. Gereken teminat (₺${fmtTRY(reservedAmount).replace('₺', '')}) şimdiden bakiyenizden kilitlendi.`);
-    }
-
-    /* ════════════════════════════════════════════════
-       Emir onay penceresi (6 Ağustos 2026 — Ali İhsan Hocam'ın isteği)
-       ════════════════════════════════════════════════ */
-
-    // submitOrder()'ın hazırladığı ctx, "Onayla" tıklanana kadar burada
-    // tutulur — modal kapanınca (iptal ya da onay farketmez) temizlenir.
-    let orderConfirmPendingCtx = null;
-
-    function buildOrderConfirmSummaryHtml(ctx) {
-        const sideLabel = ctx.side === 'BUY' ? 'AL' : 'SAT';
-        const sideClass = ctx.side === 'BUY' ? 'order-confirm-buy' : 'order-confirm-sell';
-        const marketLabel = ctx.market === 'VIOP' ? 'VİOP' : 'Spot';
-        const rows = [];
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Yön</span><span class="order-confirm-row-value ${sideClass}">${sideLabel} · ${marketLabel}</span></div>`);
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Sembol</span><span class="order-confirm-row-value">${ctx.symbol}</span></div>`);
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Adet</span><span class="order-confirm-row-value">${ctx.qty}</span></div>`);
-
-        // (9 Ağustos 2026) Anında gerçekleşecek emirlerde gösterilen fiyat,
-        // placeOrder()'ın GERÇEKTEN uygulayacağı bid/ask (spread'li) fiyatla
-        // birebir aynı — ctx.fillPrice submitOrder()'da donduğundan, bu
-        // "tahmini" değil, kesin gerçekleşecek fiyat.
-        const expectedExecPrice = ctx.willQueueAsPending ? null : execFillPrice(ctx.side, ctx.fillPrice);
-
-        if (ctx.willQueueAsPending) {
-            if (ctx.orderType === 'LIMIT') {
-                rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Limit Fiyatı</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.limitPrice)}</span></div>`);
-            } else {
-                // (9 Ağustos 2026) Piyasa kapalıyken kuyruğa alınan Market
-                // emri — gösterilen fiyat SADECE tahmini teminat hesabı
-                // içindir, gerçek gerçekleşme fiyatı piyasa açılınca o anki
-                // güncel/açılış fiyatıdır.
-                rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Yaklaşık Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.fillPrice)} (açılışta güncellenecek)</span></div>`);
-            }
-        } else {
-            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(expectedExecPrice)}${ctx.orderType === 'LIMIT' ? ' (güncel piyasa)' : ''}</span></div>`);
-        }
-
-        if (ctx.leverage > 1) {
-            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Kaldıraç</span><span class="order-confirm-row-value">${fmtLeverage(ctx.leverage)}x</span></div>`);
-        }
-
-        const referencePrice = ctx.willQueueAsPending ? (ctx.orderType === 'LIMIT' ? ctx.limitPrice : ctx.fillPrice) : expectedExecPrice;
-        const notional = referencePrice * ctx.qty;
-        const commission = notional * (ctx.commissionPct / 100);
-        const margin = notional / Math.max(1, Number(ctx.leverage) || 1);
-        const required = margin + commission;
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">${ctx.willQueueAsPending ? 'Şimdi Kilitlenecek Teminat' : 'Gereken Teminat'}</span><span class="order-confirm-row-value">₺${fmtTRY(required).replace('₺', '')}</span></div>`);
-        rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Nominal Değer</span><span class="order-confirm-row-value">₺${fmtTRY(notional).replace('₺', '')}</span></div>`);
-
-        return rows.join('');
-    }
-
-    function openOrderConfirmModal(ctx) {
-        const backdrop = byId('order-confirm-modal-backdrop');
-        const questionEl = byId('order-confirm-question');
-        const summaryEl = byId('order-confirm-summary');
-        const submitBtn = byId('btn-order-confirm-submit');
-        if (!backdrop) {
-            // Modal DOM'da yoksa (beklenmeyen durum) eski davranışa düş —
-            // emir onaysız gerçekleşsin ki kullanıcı hiç mahsur kalmasın.
-            executeConfirmedOrder(ctx);
-            return;
-        }
-
-        orderConfirmPendingCtx = ctx;
-
-        const actionWord = ctx.side === 'BUY' ? 'ALMAK' : 'SATMAK';
-        const marketLabel = ctx.market === 'VIOP' ? 'VİOP' : 'Spot';
-        if (questionEl) {
-            if (ctx.willQueueAsPending && ctx.orderType === 'LIMIT') {
-                questionEl.textContent = `${ctx.qty} adet ${ctx.symbol} için ${marketLabel} piyasasında ₺${fmtPrice(ctx.limitPrice)} limit fiyatından ${actionWord.toLowerCase()} istediğinize emin misiniz? (fiyat bu seviyeye ulaşınca gerçekleşecek)`;
-            } else if (ctx.willQueueAsPending) {
-                // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma")
-                questionEl.textContent = `Piyasa şu anda kapalı — ${ctx.qty} adet ${ctx.symbol} için ${marketLabel} piyasasında ${actionWord.toLowerCase()} emriniz SIRAYA alınacak, gereken teminat şimdi kilitlenecek ve piyasa açılır açılmaz o anki güncel fiyattan otomatik gerçekleştirilecek. Onaylıyor musunuz?`;
-            } else {
-                questionEl.textContent = `${ctx.qty} adet ${ctx.symbol} hissesini ${marketLabel} piyasasında ₺${fmtPrice(execFillPrice(ctx.side, ctx.fillPrice))} fiyattan ${actionWord.toLowerCase()} istediğinize emin misiniz?`;
-            }
-        }
-        if (summaryEl) summaryEl.innerHTML = buildOrderConfirmSummaryHtml(ctx);
-        if (submitBtn) {
-            submitBtn.textContent = ctx.willQueueAsPending
-                ? (ctx.orderType === 'LIMIT' ? 'Limit Emri Kur' : 'Sıraya Al')
-                : (ctx.side === 'BUY' ? 'Onayla · AL' : 'Onayla · SAT');
-            submitBtn.classList.toggle('order-confirm-sell-btn', ctx.side === 'SELL' && !ctx.willQueueAsPending);
-        }
-
-        closeOtherModals('order-confirm-modal-backdrop');
-        backdrop.classList.add('open');
-    }
-
-    function closeOrderConfirmModal() {
-        const backdrop = byId('order-confirm-modal-backdrop');
-        if (backdrop) backdrop.classList.remove('open');
-        orderConfirmPendingCtx = null;
-    }
-
-    function setupOrderConfirmModal() {
-        const backdrop = byId('order-confirm-modal-backdrop');
-        const closeBtn = byId('btn-close-order-confirm');
-        const cancelBtn = byId('btn-order-confirm-cancel');
-        const submitBtn = byId('btn-order-confirm-submit');
-        if (!backdrop) return;
-
-        const cancel = () => closeOrderConfirmModal();
-        if (closeBtn) closeBtn.addEventListener('click', cancel);
-        if (cancelBtn) cancelBtn.addEventListener('click', cancel);
-        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && backdrop.classList.contains('open')) cancel();
-        });
-        if (submitBtn) {
-            submitBtn.addEventListener('click', () => {
-                const ctx = orderConfirmPendingCtx;
-                closeOrderConfirmModal();
-                if (ctx) executeConfirmedOrder(ctx);
-            });
-        }
     }
 
     // OCO (One-Cancels-Other) bekleyen emir oluşturur: fiyat üst tetiği
@@ -3742,17 +2886,8 @@ const TradingEngine = (() => {
         const estimatedMargin = estimateOrderMarginRequirement(state.activeSymbol, state.side, qty, currentPrice, state.leverage, state.market);
         const estimatedCommission = currentPrice * qty * (commissionPct / 100);
         const estimatedRequired = estimatedMargin + estimatedCommission;
-        if (estimatedRequired > effectiveBalance()) {
+        if (estimatedRequired > portfolio.balance) {
             const m = 'Yetersiz demo bakiye (yaklaşık gereken teminat: ' + fmtTRY(estimatedRequired) + ').';
-            showToast(m);
-            showTicketAlert(m, 'error');
-            return;
-        }
-        // (9 Ağustos 2026 — kök neden düzeltmesi) OCO da tetiklendiğinde aynı
-        // nominal tavana tabi (bkz. placeOrder) — erken uyarı.
-        const estimatedOcoNotional = currentPrice * qty;
-        if (estimatedOcoNotional > MAX_ORDER_NOTIONAL_TL) {
-            const m = 'Emrin büyüklüğü (' + fmtTRY(estimatedOcoNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.';
             showToast(m);
             showTicketAlert(m, 'error');
             return;
@@ -3792,18 +2927,6 @@ const TradingEngine = (() => {
     // (29 Temmuz 2026 — Madde 11) Artık Spot VE VİOP'un kendi bekleyen OCO
     // defterleri ayrı ayrı taranıyor — biri tetiklenirken diğerinin
     // defterine hiç dokunmuyor.
-    //
-    // (6 Ağustos 2026) Aynı bekleyen-emir dizisi artık düz LIMIT emirlerini
-    // de (kind: 'LIMIT', bkz. queuePendingLimitOrder) barındırıyor — OCO'dan
-    // FARKLI bir tetik mantığıyla: AL limit emri fiyat DÜŞÜP limite EN
-    // OLUNCA (price <= limitPrice), SAT limit emri fiyat YÜKSELİP limite
-    // ULAŞINCA (price >= limitPrice) gerçekleşir (OCO'nun üst-kırılınca-AL /
-    // alt-kırılınca-SAT mantığının TERSİ bir kullanım — limit emri "iyi
-    // fiyat beklemek" içindir, breakout değil). ÖNEMLİ: tetiklendiğinde
-    // gerçekleşme fiyatı HER ZAMAN o anki GERÇEK/sınırlı piyasa fiyatı
-    // (`price`) — order.limitPrice DEĞİL — bkz. submitOrder()'daki kök
-    // neden notu (bu, kullanıcının yazdığı keyfi bir fiyattan asla
-    // gerçekleşmemesini garanti eder).
     function checkPendingOcoOrders() {
         ['NORMAL', 'VIOP'].forEach(market => {
             const b = book(market);
@@ -3813,85 +2936,6 @@ const TradingEngine = (() => {
             b.pending.forEach(order => {
                 const price = getPrice(order.symbol);
                 if (!price) { stillPending.push(order); return; }
-
-                if (order.kind === 'LIMIT') {
-                    const triggered = order.side === 'BUY' ? (price <= order.limitPrice) : (price >= order.limitPrice);
-                    if (!triggered) { stillPending.push(order); return; }
-                    changed = true;
-                    // (9 Ağustos 2026 — Binance/Midas tarzı teminat kilidi)
-                    // Kuyruğa alırken (queuePendingLimitOrder) kilitlenen
-                    // reservedAmount önce iade edilir, ardından placeOrder()
-                    // GERÇEK gerçekleşme fiyatına göre kendi teminatını
-                    // yeniden hesaplayıp düşer — reservedAmount sadece limit
-                    // fiyatı üzerinden bir TAHMİNDİ, gerçek (spread'li) fiyat
-                    // biraz farklı çıkabilir, fark burada otomatik dengelenir.
-                    if (order.reservedAmount) portfolio.balance += order.reservedAmount;
-                    const result = placeOrder(order.symbol, order.side, order.qty, price, order.commissionPct, order.leverage, market);
-                    if (result.ok) {
-                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] Limit emir gerçekleşti: ${order.symbol} ${order.side === 'BUY' ? 'AL' : 'SAT'} @ ₺${fmtPrice(result.fillPrice)} (limit ₺${fmtPrice(order.limitPrice)}).`);
-                        if (order.slPrice !== null || order.tpPrice !== null || order.useTrailing) {
-                            const pos = book(market).positions[order.symbol];
-                            const expectedSide = order.side === 'BUY' ? 'LONG' : 'SHORT';
-                            if (pos && pos.side === expectedSide) {
-                                if (order.useTrailing) {
-                                    pos.trailingPct = order.trailingPct;
-                                    pos.trailingExtreme = pos.avgPrice;
-                                    delete pos.sl;
-                                } else if (order.slPrice !== null) {
-                                    pos.sl = order.slPrice;
-                                    delete pos.trailingPct;
-                                    delete pos.trailingExtreme;
-                                }
-                                if (order.tpPrice !== null) pos.tp = order.tpPrice;
-                                savePortfolio();
-                            }
-                        }
-                        renderPositions();
-                        renderOrders();
-                    } else {
-                        showToast(`Limit emir tetiklendi ama gerçekleşemedi: ${result.msg}`);
-                    }
-                    return;
-                }
-
-                // (9 Ağustos 2026 — "piyasa kapalıyken kuyruğa emir alma"
-                // özelliği) Bu fonksiyon SADECE piyasa açıkken çalışır (bkz.
-                // tickPrices()'ın en baştaki DC.isMarketOpenNow() koruması) —
-                // yani buraya bir 'MARKET_QUEUED' emri ulaştıysa, piyasa
-                // (yeniden) açılmış demektir. Bir fiyat KOŞULU beklemiyor,
-                // gördüğü anda o anki güncel/açılış fiyatından KOŞULSUZ
-                // gerçekleştirilir.
-                if (order.kind === 'MARKET_QUEUED') {
-                    changed = true;
-                    if (order.reservedAmount) portfolio.balance += order.reservedAmount;
-                    const result = placeOrder(order.symbol, order.side, order.qty, price, order.commissionPct, order.leverage, market);
-                    if (result.ok) {
-                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] Piyasa açıldı — sıradaki emriniz gerçekleşti: ${order.symbol} ${order.side === 'BUY' ? 'AL' : 'SAT'} @ ₺${fmtPrice(result.fillPrice)}.`);
-                        if (order.slPrice !== null || order.tpPrice !== null || order.useTrailing) {
-                            const pos = book(market).positions[order.symbol];
-                            const expectedSide = order.side === 'BUY' ? 'LONG' : 'SHORT';
-                            if (pos && pos.side === expectedSide) {
-                                if (order.useTrailing) {
-                                    pos.trailingPct = order.trailingPct;
-                                    pos.trailingExtreme = pos.avgPrice;
-                                    delete pos.sl;
-                                } else if (order.slPrice !== null) {
-                                    pos.sl = order.slPrice;
-                                    delete pos.trailingPct;
-                                    delete pos.trailingExtreme;
-                                }
-                                if (order.tpPrice !== null) pos.tp = order.tpPrice;
-                                savePortfolio();
-                            }
-                        }
-                        renderPositions();
-                        renderOrders();
-                    } else {
-                        showToast(`Sıradaki piyasa emri gerçekleşemedi: ${result.msg}`);
-                    }
-                    return;
-                }
-
                 let triggeredSide = null;
                 if (order.upper !== null && price >= order.upper) triggeredSide = 'BUY';
                 else if (order.lower !== null && price <= order.lower) triggeredSide = 'SELL';
@@ -3900,7 +2944,7 @@ const TradingEngine = (() => {
                     changed = true;
                     const result = placeOrder(order.symbol, triggeredSide, order.qty, price, order.commissionPct, order.leverage, market);
                     if (result.ok) {
-                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] OCO tetiklendi: ${order.symbol} ${triggeredSide === 'BUY' ? 'AL' : 'AÇIĞA SAT'} @ ₺${fmtPrice(result.fillPrice)} — diğer tetikleyici iptal edildi.`);
+                        showToast(`[${market === 'VIOP' ? 'VİOP' : 'Spot'}] OCO tetiklendi: ${order.symbol} ${triggeredSide === 'BUY' ? 'AL' : 'AÇIĞA SAT'} @ ₺${fmtPrice(price)} — diğer tetikleyici iptal edildi.`);
                         renderPositions();
                         renderOrders();
                     } else {
@@ -3927,99 +2971,44 @@ const TradingEngine = (() => {
     // + rastgele parça), pratikte çakışma ihtimali yok — bu yüzden iptal
     // ederken hangi deftere ait olduğunu ayrıca bilmeye gerek yok, ikisinde de
     // aranıp bulunduğu defterden çıkarılıyor.
-    function cancelOcoOrder(orderId) {
-        // (9 Ağustos 2026 — Binance/Midas tarzı teminat kilidi) LIMIT ve
-        // MARKET_QUEUED emirleri kurulurken teminat ANINDA kilitleniyor
-        // (bkz. queuePendingLimitOrder/queuePendingMarketOrder) — iptal
-        // edildiğinde bu kilitli tutar TAM olarak bakiyeye geri iade
-        // edilmeli, aksi halde kullanıcı iptal ettiği emrin parasını
-        // kaybetmiş gibi görünür. OCO'nun kendisi hiçbir teminat kilitlemez
-        // (reservedAmount hiç yok), o yüzden onun iptalinde ekstra bir şey
-        // yapılmıyor.
-        let order = null, orderMarket = null;
-        if (portfolio.pendingOrders) {
-            const found = portfolio.pendingOrders.find(o => o.id === orderId);
-            if (found) { order = found; orderMarket = 'NORMAL'; }
-        }
-        if (!order && portfolio.viopPendingOrders) {
-            const found = portfolio.viopPendingOrders.find(o => o.id === orderId);
-            if (found) { order = found; orderMarket = 'VIOP'; }
-        }
-        if (!order) return;
-        if (order.reservedAmount) portfolio.balance += order.reservedAmount;
-        if (orderMarket === 'VIOP') {
-            portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => o.id !== orderId);
-        } else {
+    // (11 Ağustos 2026 — Madde #132: admin canlı izleme/iptal köprüsü) İkinci
+    // (opsiyonel) `reason` parametresi eklendi — admin.html'den gelen bir
+    // iptal komutuyla çağrıldığında ('ADMIN') yarışmacıya bunun kendi isteği
+    // olmadığı açıkça bildiriliyor (closePosition'daki 'ADMIN' dalıyla aynı
+    // şeffaflık ilkesi). Ayrıca artık `found` döndürüyor — bridge, komutu
+    // gerçekten uygulayıp uygulamadığını (emir hâlâ orada mı) bilebilsin.
+    function cancelOcoOrder(orderId, reason) {
+        let found = false;
+        if (portfolio.pendingOrders && portfolio.pendingOrders.some(o => o.id === orderId)) {
             portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
+            found = true;
         }
+        if (portfolio.viopPendingOrders && portfolio.viopPendingOrders.some(o => o.id === orderId)) {
+            portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => o.id !== orderId);
+            found = true;
+        }
+        if (!found) return false;
         savePortfolio();
         renderPendingOcoOrders();
-        renderAccountSummary();
-        const kindLabel = order.kind === 'LIMIT' ? 'Limit emri' : order.kind === 'MARKET_QUEUED' ? 'Sıradaki piyasa emri' : 'OCO emri';
-        showToast(kindLabel + ' iptal edildi' + (order.reservedAmount ? ` — kilitli teminat (₺${fmtTRY(order.reservedAmount).replace('₺', '')}) bakiyenize iade edildi.` : '.'));
+        showToast(reason === 'ADMIN' ? '🔒 Bekleyen emriniz yönetici tarafından iptal edildi.' : 'OCO emri iptal edildi.');
+        return true;
     }
     window.__optipulseCancelOco = cancelOcoOrder; // used by inline onclick in rendered rows
 
     // (29 Temmuz 2026 — Madde 11) Spot ve VİOP'un kendi ayrı DOM
     // konteynerlerine render eden ortak yardımcı — iki liste birbirinden
     // tamamen bağımsız, aynı mantığın iki kez tekrarlanmasını önlüyor.
-    //
-    // (6 Ağustos 2026) Artık aynı liste iki farklı emir TÜRÜNÜ birlikte
-    // gösterebiliyor: OCO (üst/alt tetikleyici çifti) ve düz LIMIT
-    // (kind: 'LIMIT', tek limit fiyatı + yön). İkisi görsel olarak
-    // ayrılıyor ki kullanıcı hangi emrin hangi mantıkla çalıştığını
-    // karıştırmasın.
     function renderOcoListInto(containerId, orders) {
         const body = byId(containerId);
         if (!body) return;
         if (!orders.length) {
-            body.innerHTML = `<div class="qt-empty-state">Bekleyen emir yok</div>`;
+            body.innerHTML = `<div class="qt-empty-state">Bekleyen OCO emri yok</div>`;
             return;
         }
-        body.innerHTML = orders.map(o => {
-            // (9 Ağustos 2026) LIMIT/MARKET_QUEUED emirleri artık kurulduğu
-            // anda gerçek bir teminat kilitliyor (bkz. queuePendingLimitOrder/
-            // queuePendingMarketOrder) — kullanıcının "param nereye gitti"
-            // diye şaşırmaması için kilitli tutar kartta ayrıca gösteriliyor.
-            const reservedRow = o.reservedAmount
-                ? `<div class="oco-card-bottom font-mono" style="margin-top:4px;opacity:0.75;"><span>🔒 Kilitli teminat: ₺${fmtTRY(o.reservedAmount).replace('₺', '')}</span></div>`
-                : '';
-            if (o.kind === 'MARKET_QUEUED') {
-                return `
-                    <div class="oco-card">
-                        <div class="oco-card-top">
-                            <span class="font-bold">${o.symbol} · Piyasa (Sırada) ${o.side === 'BUY' ? 'AL' : 'SAT'}</span>
-                            <button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button>
-                        </div>
-                        <div class="oco-card-bottom font-mono">
-                            <span>Piyasa açılınca gerçekleşir</span>
-                            <span>${o.qty} adet</span>
-                            <span>${o.leverage > 1 ? fmtLeverage(o.leverage) + 'x' : ''}</span>
-                        </div>
-                        ${reservedRow}
-                    </div>
-                `;
-            }
-            if (o.kind === 'LIMIT') {
-                return `
-                    <div class="oco-card">
-                        <div class="oco-card-top">
-                            <span class="font-bold">${o.symbol} · Limit ${o.side === 'BUY' ? 'AL' : 'SAT'}</span>
-                            <button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button>
-                        </div>
-                        <div class="oco-card-bottom font-mono">
-                            <span>Limit ₺${fmtPrice(o.limitPrice)}</span>
-                            <span>${o.qty} adet</span>
-                            <span>${o.leverage > 1 ? fmtLeverage(o.leverage) + 'x' : ''}</span>
-                        </div>
-                        ${reservedRow}
-                    </div>
-                `;
-            }
-            return `
+        body.innerHTML = orders.map(o => `
             <div class="oco-card">
                 <div class="oco-card-top">
-                    <span class="font-bold">${o.symbol} · OCO</span>
+                    <span class="font-bold">${o.symbol}</span>
                     <button class="btn-cancel-oco" onclick="window.__optipulseCancelOco('${o.id}')">İptal</button>
                 </div>
                 <div class="oco-card-bottom font-mono">
@@ -4028,8 +3017,7 @@ const TradingEngine = (() => {
                     <span>${o.qty} adet</span>
                 </div>
             </div>
-        `;
-        }).join('');
+        `).join('');
     }
 
     function renderPendingOcoOrders() {
@@ -4091,13 +3079,7 @@ const TradingEngine = (() => {
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
             const posLeverage = pos.leverage || 1;
-            // (10 Ağustos 2026) placeOrder()'daki lockedMargin düzeltmesiyle
-            // tutarlı olsun diye burada da GERÇEK kilitli marj (varsa)
-            // kullanılıyor — bkz. placeOrder'daki tam açıklama.
-            const totalLockedMargin = (typeof pos.lockedMargin === 'number')
-                ? pos.lockedMargin
-                : (pos.avgPrice * pos.qty) / posLeverage;
-            releasedMargin = totalLockedMargin * (closeQty / pos.qty);
+            releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
             remainingQty -= closeQty;
         }
         if (remainingQty <= 0) return -releasedMargin;
@@ -4107,10 +3089,7 @@ const TradingEngine = (() => {
         // pozisyonun ESKİ kaldıracıyla değil, bilet üzerinde SEÇİLİ olan
         // (bu fonksiyona parametre olarak gelen) kaldıraçla hesaplanıyor —
         // bkz. placeOrder()'daki ayrıntılı açıklama.
-        // (10 Ağustos 2026 — kademeli kaldıraç önizlemesi) ...ve artık
-        // kademeli kaldıraç tavanıyla da (bkz. previewTieredLeverage)
-        // placeOrder()'ın GERÇEKTE uygulayacağıyla tutarlı.
-        const effectiveLeverage = previewTieredLeverage(price * remainingQty, leverage, market);
+        const effectiveLeverage = Math.max(1, Number(leverage) || 1);
         const margin = (price * remainingQty) / effectiveLeverage;
         return margin - releasedMargin;
     }
@@ -4128,17 +3107,10 @@ const TradingEngine = (() => {
         return spot.concat(viop).map(h => ({ ...h }));
     }
 
-    function placeOrder(symbol, side, qty, midPrice, commissionPct, leverage, market) {
+    function placeOrder(symbol, side, qty, price, commissionPct, leverage, market) {
         qty = Math.floor(Number(qty));
-        midPrice = Number(midPrice);
-        if (!qty || qty <= 0 || !midPrice || midPrice <= 0) return { ok: false, msg: 'Geçersiz miktar/fiyat' };
-
-        // (9 Ağustos 2026 — kök neden düzeltmesi) Gerçekleşme fiyatı artık
-        // ARTIK ÇIPLAK piyasa fiyatı (mid) değil, yöne göre kotasyon
-        // farkı (spread) uygulanmış bid/ask — bkz. execFillPrice() ve
-        // yukarıdaki HALF_SPREAD_PCT notu. `price` değişkeni bundan sonra
-        // fonksiyon içinde HEP bu gerçekleşme fiyatını temsil ediyor.
-        const price = execFillPrice(side, midPrice);
+        price = Number(price);
+        if (!qty || qty <= 0 || !price || price <= 0) return { ok: false, msg: 'Geçersiz miktar/fiyat' };
 
         // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Emrin hangi deftere
         // (Spot/VİOP) yazılacağı burada belirleniyor — bkz. book(). Geriye
@@ -4150,38 +3122,13 @@ const TradingEngine = (() => {
         const commissionTotal = price * qty * (commissionPct / 100);
         let remainingQty = qty;
         const pos = b.positions[symbol];
-        let leverageClampedTo = null; // (10 Ağustos 2026) kademeli kaldıraç devreye girdiyse çağırana bildirmek için
 
         // 1. Close/reduce an opposite-direction position first.
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
             const closeCommission = commissionTotal * (closeQty / qty);
             const posLeverage = pos.leverage || 1;
-            // (10 Ağustos 2026 — kök neden düzeltmesi: "kâr gösteriyor ama
-            // bakiye artacağına azalıyor") ESKİ formül: releasedMargin =
-            // avgPrice*closeQty/leverage — burada `leverage`, pozisyona
-            // yapılan TÜM eklemelerin adet-ağırlıklı ORTALAMASI (bkz. aşağıdaki
-            // "2. Open or add" dalı). Bu formül SADECE pozisyona yapılan TÜM
-            // eklemeler AYNI kaldıraçla yapıldıysa gerçekten kilitlenen
-            // toplam marjla eşleşir. Kademeli VİOP kaldıracı (tieredMaxLeverage)
-            // yüzünden aynı sembole art arda YAPILAN eklemeler artık SIKLIKLA
-            // farklı kaldıraçlarda oluyor (pozisyon büyüdükçe otomatik daha
-            // düşük tier'a düşüyor) — bu durumda avgPrice*qty/ortalamaKaldıraç,
-            // gerçekte kilitlenmiş toplam marjdan SİSTEMATİK olarak sapıyor
-            // (örnek: 1000 adet @100 10x'te [marj 10.000] + 1000 adet @110
-            // 5x'te [marj 22.000] = gerçek kilitli marj 32.000 TL, ama eski
-            // formül 105*2000/7.5 = 28.000 TL hesaplıyordu — kapanışta 4.000
-            // TL'lik marj SESSİZCE KAYBOLUYORDU, kâr doğru hesaplansa bile net
-            // bakiye beklenenden düşük çıkıyordu). Düzeltme: pos.lockedMargin
-            // artık her eklemede GERÇEKTEN kilitlenen tutarı birebir topluyor
-            // (bkz. aşağıki "2." dal) ve burada oranla (closeQty/pos.qty)
-            // GERİ VERİLİYOR — ortalama kaldıraçtan yeniden hesaplanmıyor.
-            // pos.lockedMargin yoksa (bu düzeltmeden ÖNCE açılmış eski bir
-            // pozisyon) eski formülle bir kerelik geriye dönük tahmin yapılır.
-            const totalLockedMargin = (typeof pos.lockedMargin === 'number')
-                ? pos.lockedMargin
-                : (pos.avgPrice * pos.qty) / posLeverage;
-            const releasedMargin = totalLockedMargin * (closeQty / pos.qty);
+            const releasedMargin = (pos.avgPrice * closeQty) / posLeverage;
             let realizedPnl;
 
             if (pos.side === 'LONG') {
@@ -4191,7 +3138,6 @@ const TradingEngine = (() => {
             }
             portfolio.balance += releasedMargin + realizedPnl;
 
-            pos.lockedMargin = totalLockedMargin - releasedMargin;
             pos.qty -= closeQty;
             remainingQty -= closeQty;
             if (pos.qty <= 0) delete b.positions[symbol];
@@ -4232,76 +3178,24 @@ const TradingEngine = (() => {
             const existingPos = b.positions[symbol];
             const requestedLeverage = Math.max(1, Number(leverage) || 1);
 
-            // (9 Ağustos 2026 — kök neden düzeltmesi) Tek bir emrin AÇILAN
-            // kısmının nominal değeri (fiyat × adet) gerçekçi bir tavanı
-            // aşamaz — gerçek bir borsada bu büyüklükte bir emri karşılayacak
-            // likidite yok. Kapatma (yukarıdaki 1. adım) bu sınıra TABİ
-            // DEĞİL — açık bir pozisyon her zaman kapatılabilmeli.
-            const openingNotional = price * remainingQty;
-            if (openingNotional > MAX_ORDER_NOTIONAL_TL) {
-                savePortfolio();
-                return { ok: false, msg: 'Emrin büyüklüğü (' + fmtTRY(openingNotional) + ') gerçekçi olmayan bir seviyede — tek bir emir ' + fmtTRY(MAX_ORDER_NOTIONAL_TL) + '\'yi aşamaz.' };
-            }
-
-            // (10 Ağustos 2026 — kademeli kaldıraç) VİOP'ta izin verilen
-            // maksimum kaldıraç, AÇILAN kısmın nominal büyüklüğüne göre
-            // otomatik düşer (bkz. VIOP_LEVERAGE_TIERS/tieredMaxLeverage
-            // yukarıda) — gerçek platformlardaki (Binance vb.) kademeli
-            // kaldıraç/marj sistemine benzer. NORMAL seansta zaten 1x'e
-            // sabitlendiği için bu her zaman no-op'tur.
-            let effectiveRequestedLeverage = requestedLeverage;
-            if (market === 'VIOP') {
-                const tierMax = tieredMaxLeverage(openingNotional);
-                if (effectiveRequestedLeverage > tierMax) {
-                    leverageClampedTo = tierMax;
-                    effectiveRequestedLeverage = tierMax;
-                }
-            }
-
-            const margin = (price * remainingQty) / effectiveRequestedLeverage;
+            const margin = (price * remainingQty) / requestedLeverage;
             const requiredBalance = margin + openCommission;
-            if (effectiveBalance() < requiredBalance) {
+            if (portfolio.balance < requiredBalance) {
                 savePortfolio();
-                const msg = isFtcLoggedIn()
-                    ? 'Yetersiz demo bakiye (gereken teminat: ' + fmtTRY(requiredBalance) + ').'
-                    : 'İşlem açmak için önce FinteLig girişi yapmalısın (profil panelinden).';
-                return { ok: false, msg: msg };
+                return { ok: false, msg: 'Yetersiz demo bakiye (gereken teminat: ' + fmtTRY(requiredBalance) + ').' };
             }
             portfolio.balance -= requiredBalance;
 
             let effectiveLeverage;
             if (!existingPos) {
-                effectiveLeverage = effectiveRequestedLeverage;
-                // (10 Ağustos 2026 — VİOP asgari tutma süresi) openedAt, bu
-                // pozisyon MANUEL olarak ne zaman kapatılabileceğini belirlemek
-                // için closePosition()'da kullanılıyor — bkz. MIN_POSITION_HOLD_MS.
-                // Var olan bir pozisyona EKLEME yapılırken (aşağıdaki else dalı)
-                // kasıtlı olarak DOKUNULMUYOR: pozisyonun "yaşı" ilk açıldığı
-                // ana göre sayılmaya devam eder, her ekleme sayacı sıfırlamaz.
-                // (10 Ağustos 2026 — kök neden düzeltmesi) lockedMargin,
-                // pozisyonda GERÇEKTEN kilitli duran toplam marjı izliyor —
-                // bkz. yukarıdaki "1. Close/reduce" dalındaki tam açıklama.
-                // Taze açılışta bu basitçe az önce hesaplanan `margin`.
-                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage, lockedMargin: margin, openedAt: Date.now() };
+                effectiveLeverage = requestedLeverage;
+                b.positions[symbol] = { side: newSide, qty: remainingQty, avgPrice: price, leverage: effectiveLeverage };
             } else {
                 const p = existingPos;
                 const totalQty = p.qty + remainingQty;
                 const oldLeverage = p.leverage || 1;
-                // (10 Ağustos 2026 — kök neden düzeltmesi) Eklemeden ÖNCEKİ
-                // gerçek kilitli marj — pos.lockedMargin varsa onu kullan,
-                // yoksa (bu düzeltmeden önce açılmış eski pozisyon) eski
-                // formülle bir kerelik tahmin. Yeni eklenen kısmın marjı
-                // (`margin`, yukarıda zaten kendi kaldıracıyla doğru
-                // hesaplandı ve bakiyeden düşüldü) buna DOĞRUDAN eklenir —
-                // ortalama kaldıraç üzerinden YENİDEN hesaplanmaz, bu yüzden
-                // farklı kaldıraçlarla yapılan art arda eklemelerde bile
-                // kilitli toplam marj hep doğru kalır.
-                const existingLockedMargin = (typeof p.lockedMargin === 'number')
-                    ? p.lockedMargin
-                    : (p.avgPrice * p.qty) / oldLeverage;
                 p.avgPrice = (p.avgPrice * p.qty + price * remainingQty) / totalQty;
-                effectiveLeverage = (oldLeverage * p.qty + effectiveRequestedLeverage * remainingQty) / totalQty;
-                p.lockedMargin = existingLockedMargin + margin;
+                effectiveLeverage = (oldLeverage * p.qty + requestedLeverage * remainingQty) / totalQty;
                 p.qty = totalQty;
                 p.leverage = effectiveLeverage;
             }
@@ -4326,11 +3220,7 @@ const TradingEngine = (() => {
         if (window.TradingChart && window.TradingChart.refreshUserTradeMarkers) {
             window.TradingChart.refreshUserTradeMarkers(symbol);
         }
-        // (9 Ağustos 2026) Gerçekleşme fiyatı artık mid'den spread kadar
-        // farklı olabildiği için, çağıranların kendi (spread'siz) mid
-        // değişkenleri yerine GERÇEKTEN gerçekleşen fiyatı gösterebilmesi
-        // için burada da döndürülüyor.
-        return { ok: true, fillPrice: price, leverageClampedTo: leverageClampedTo };
+        return { ok: true };
     }
 
     function closePosition(symbol, reason, market) {
@@ -4341,37 +3231,6 @@ const TradingEngine = (() => {
         market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
         const pos = book(market).positions[symbol];
         if (!pos) return;
-
-        // (10 Ağustos 2026 — VİOP asgari tutma süresi) `reason` OTOMATİK
-        // kapamalarda (SL/TP/TRAILING/LIQUIDATION) dolu gelir — manuel
-        // "Kapat" butonu her zaman null geçer (bkz. __optipulseClosePosition
-        // inline onclick). Bu sınır manuel kapamaya VE Take-Profit'e
-        // uygulanıyor. (10 Ağustos 2026, ikinci tur) TP de dahil edildi,
-        // çünkü aksi halde kullanıcı pozisyonu açar açmaz giriş fiyatının
-        // hemen üstüne bir TP koyup asgari süreyi TAMAMEN dolanabilirdi —
-        // TP, checkStopLossTakeProfit() tarafından her 2 saniyelik tick'te
-        // yeniden kontrol edildiği için koşul sağlandığı an otomatik
-        // tetiklenir, tıpkı manuel "kârdaysa hemen kapat" davranışı gibi.
-        // Stop-Loss/Trailing Stop/Marj çağrısı KESİNLİKLE bu sınıra TABİ
-        // DEĞİL — bunlar kayıptan koruma mekanizmaları, asla
-        // geciktirilmemeli. pos.openedAt olmayan (bu düzeltmeden ÖNCE
-        // açılmış) eski pozisyonlar bloklanmıyor.
-        const holdGatedClose = !reason || reason === 'TP';
-        if (holdGatedClose && pos.openedAt) {
-            const heldMs = Date.now() - pos.openedAt;
-            if (heldMs < MIN_POSITION_HOLD_MS) {
-                if (!reason) {
-                    const remainingSec = Math.ceil((MIN_POSITION_HOLD_MS - heldMs) / 1000);
-                    showToast(`⏳ ${symbol} pozisyonu en az ${Math.round(MIN_POSITION_HOLD_MS / 1000)} saniye açık kalmalı — ${remainingSec} saniye daha bekleyin.`);
-                }
-                // TP tetiklemesi sessizce ertelenir — checkStopLossTakeProfit()
-                // zaten her tick'te tekrar deneyecek, süre dolunca (fiyat hâlâ
-                // TP koşulunu sağlıyorsa) otomatik gerçekleşir. Burada toast
-                // basmıyoruz, aksi halde 2 saniyede bir spam olurdu.
-                return;
-            }
-        }
-
         const price = getPrice(symbol);
         if (!price) return;
         const side = pos.side === 'LONG' ? 'SELL' : 'BUY';
@@ -4380,18 +3239,23 @@ const TradingEngine = (() => {
             renderPositions();
             renderOrders();
             renderAccountSummary();
-            // (9 Ağustos 2026) result.fillPrice — placeOrder()'ın spread
-            // uyguladıktan sonraki GERÇEK kapanış fiyatı.
-            const fp = result.fillPrice;
             const msg = reason === 'SL'
-                ? `🛑 ${symbol} Stop-Loss tetiklendi — pozisyon ₺${fmtPrice(fp)} seviyesinden kapatıldı.`
+                ? `🛑 ${symbol} Stop-Loss tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
                 : reason === 'TP'
-                    ? `🎯 ${symbol} Take-Profit tetiklendi — pozisyon ₺${fmtPrice(fp)} seviyesinden kapatıldı.`
+                    ? `🎯 ${symbol} Take-Profit tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
                     : reason === 'TRAILING'
-                        ? `📉 ${symbol} Trailing Stop tetiklendi — pozisyon ₺${fmtPrice(fp)} seviyesinden kapatıldı.`
+                        ? `📉 ${symbol} Trailing Stop tetiklendi — pozisyon ₺${fmtPrice(price)} seviyesinden kapatıldı.`
                         : reason === 'LIQUIDATION'
-                            ? `⚠️ ${symbol} marj çağrısı — kaldıraçlı pozisyon zarar sınırını aştığı için ₺${fmtPrice(fp)} seviyesinden otomatik likide edildi.`
-                            : `${symbol} pozisyonu kapatıldı.`;
+                            ? `⚠️ ${symbol} marj çağrısı — kaldıraçlı pozisyon zarar sınırını aştığı için ₺${fmtPrice(price)} seviyesinden otomatik likide edildi.`
+                            // (11 Ağustos 2026 — Madde #132: admin canlı izleme/iptal köprüsü)
+                            // admin.html'den "POZİSYONU KAPAT" ile tetiklenen kapanışlar
+                            // burada 'ADMIN' reason'ıyla gelir — şeffaflık için yarışmacıya
+                            // bunun kendi isteği DEĞİL, yönetici tarafından yapıldığı
+                            // açıkça belirtiliyor (diğer otomatik sebepler — SL/TP/
+                            // TRAILING/LIQUIDATION — ile aynı üslupta).
+                            : reason === 'ADMIN'
+                                ? `🔒 ${symbol} pozisyonunuz yönetici tarafından ₺${fmtPrice(price)} seviyesinden kapatıldı.`
+                                : `${symbol} pozisyonu kapatıldı.`;
             showToast(msg);
             if (reason === 'LIQUIDATION') playLiquidationChime();
             else if (reason === 'SL' || reason === 'TP' || reason === 'TRAILING') playSltpChime();
@@ -4464,13 +3328,7 @@ const TradingEngine = (() => {
                 if (leverage <= 1) return;
                 const price = getPrice(symbol);
                 if (!price) return;
-                // (10 Ağustos 2026) Likidasyon eşiği artık GERÇEK kilitli
-                // marja (pos.lockedMargin, varsa) göre hesaplanıyor — bkz.
-                // placeOrder'daki tam açıklama. Karışık kaldıraçlı
-                // eklemelerde eski formül (avgPrice*qty/ortalamaKaldıraç)
-                // yanlış bir marj tabanı verip likidasyonu erken/geç
-                // tetikleyebiliyordu.
-                const margin = (typeof pos.lockedMargin === 'number') ? pos.lockedMargin : (pos.avgPrice * pos.qty) / leverage;
+                const margin = (pos.avgPrice * pos.qty) / leverage;
                 const unrealized = pos.side === 'LONG'
                     ? (price - pos.avgPrice) * pos.qty
                     : (pos.avgPrice - price) * pos.qty;
@@ -4612,21 +3470,6 @@ const TradingEngine = (() => {
             const sltpSub = hasSltp ? `<div class="pos-sltp-sub">${sltpParts.join(' · ')}</div>` : '';
             const leverage = pos.leverage || 1;
             const leverageBadge = leverage > 1 ? `<span class="pos-leverage-badge">${fmtLeverage(leverage)}x</span>` : '';
-            // (10 Ağustos 2026 — asgari tutma süresi, hem Normal hem VİOP)
-            // Buton, asgari süre dolmadan tıklansa da closePosition() zaten
-            // engelliyor (bkz. yukarıda) — ama kullanıcı boşuna denemesin
-            // diye burada da görsel olarak devre dışı bırakılıp kalan saniye
-            // gösteriliyor. tickPrices() 2 saniyede bir renderPositions()
-            // çağırdığı için bu geri sayım otomatik güncelleniyor, ayrı bir
-            // zamanlayıcıya gerek yok.
-            let closeBtnHtml;
-            const heldMs = pos.openedAt ? (Date.now() - pos.openedAt) : null;
-            if (heldMs !== null && heldMs < MIN_POSITION_HOLD_MS) {
-                const remainingSec = Math.ceil((MIN_POSITION_HOLD_MS - heldMs) / 1000);
-                closeBtnHtml = `<button class="btn-close-pos" disabled title="Asgari tutma süresi dolmadı">${remainingSec}sn</button>`;
-            } else {
-                closeBtnHtml = `<button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>`;
-            }
             // (23 Temmuz 2026, on üçüncü oturum devamı) Kart düzeni: üst satırda
             // sembol+yön+kaldıraç solda, K/Z sağda (nowrap — artık "-" işareti
             // ayrı satıra düşmüyor); alt satırda adet/ort. fiyat solda, SL/TP ve
@@ -4644,7 +3487,7 @@ const TradingEngine = (() => {
                         <div class="pos-card-meta font-mono">${pos.qty} adet<span class="pos-card-dot">·</span>Ort. ₺${fmtPrice(pos.avgPrice)}</div>
                         <div class="pos-actions-cell">
                             <button class="btn-sltp-edit ${hasSltp ? 'has-sltp' : ''}" onclick="window.__optipulseOpenSltp('${symbol}', '${market}')" title="Stop-Loss / Take-Profit">SL/TP</button>
-                            ${closeBtnHtml}
+                            <button class="btn-close-pos" onclick="window.__optipulseClosePosition('${symbol}', null, '${market}')">Kapat</button>
                         </div>
                     </div>
                     ${sltpSub}
@@ -4776,30 +3619,12 @@ const TradingEngine = (() => {
         if (moonIcon) moonIcon.style.display = theme === 'light' ? 'none' : 'block';
         if (sunIcon) sunIcon.style.display = theme === 'light' ? 'block' : 'none';
 
+        // The chart canvas paints its own background/grid/text via JS options,
+        // not CSS, so it needs to be told about the theme change explicitly.
         if (window.TradingChart && window.TradingChart.setTheme) window.TradingChart.setTheme(theme);
     }
 
-    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
-    // Kullanıcının kendi Koyu/Açık kişisel tercihi bilerek İKİLİ (2 seçenekli)
-    // kalıyor — bu YENİ üçüncü "Kurumsal Mavi" şablonu kullanıcının kendi
-    // döngüsüne HİÇ eklenmiyor, kullanıcı onu kendi başına seçemiyor. Onun
-    // yerine SADECE FinTeClub admin paneli (finteclub/shared_state.
-    // oplabFintechTheme alanı → finteclubBridge.js → aşağıdaki
-    // setAdminForcedTheme()) tüm kullanıcılara AYNI ANDA zorunlu kılabiliyor
-    // — kullanıcının kendi Koyu/Açık tercihinin ÜZERİNE geçici olarak biniyor,
-    // admin kapatınca kullanıcı otomatik olarak kendi kayıtlı tercihine geri
-    // dönüyor. Bu, kullanıcının kendisinin daha önce tam olarak istemediğini
-    // belirttiği bir tema deneyimini (bkz. proje geçmişi) artık kullanıcıya
-    // DAYATMIYOR — sadece admin'in bilinçli kararıyla, marka/kampanya
-    // tutarlılığı için devreye giriyor.
-    let adminForcedFintechTheme = false;
-
     function toggleTheme() {
-        // Admin zorunlu temayı aktif ettiyse kullanıcının kendi butonu/kısayolu
-        // (klavye 'T', komut paleti) bunu değiştiremez — buton zaten
-        // setAdminForcedTheme() içinde disabled yapılıyor, bu ekstra bir
-        // güvenlik önlemi.
-        if (adminForcedFintechTheme) return;
         applyTheme(getCurrentTheme() === 'light' ? 'dark' : 'light');
     }
 
@@ -4809,34 +3634,6 @@ const TradingEngine = (() => {
         // (it runs before any other JS to avoid a dark/light flash on load).
         applyTheme(getCurrentTheme());
         if (btn) btn.addEventListener('click', toggleTheme);
-    }
-
-    // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
-    // finteclubBridge.js'in shared_state dinleyicisinden çağrılır. active
-    // true olduğunda kullanıcının tercihinden BAĞIMSIZ olarak "fintech"
-    // temasını doğrudan uygular ve tema butonunu devre dışı bırakır; false
-    // olduğunda (admin kapattığında YA DA Firebase'e hiç ulaşılamadığında)
-    // kullanıcının kendi kayıtlı Koyu/Açık tercihine sorunsuzca geri döner.
-    function setAdminForcedTheme(active) {
-        adminForcedFintechTheme = !!active;
-        const btn = byId('btn-theme-toggle');
-        if (adminForcedFintechTheme) {
-            document.documentElement.setAttribute('data-theme', 'fintech');
-            if (window.TradingChart && window.TradingChart.setTheme) window.TradingChart.setTheme('fintech');
-            if (btn) {
-                btn.disabled = true;
-                btn.title = 'Tema yönetici tarafından "Kurumsal Mavi" olarak ayarlandı.';
-            }
-        } else {
-            if (btn) {
-                btn.disabled = false;
-                btn.title = 'Koyu / Açık Tema (T)';
-            }
-            // Zorunlu tema kaldırıldığında kullanıcının kendi (localStorage'da
-            // saklı) tercihine geri dön — applyTheme zaten ikon/grafik
-            // senkronunu da hallediyor.
-            applyTheme(getCurrentTheme());
-        }
     }
 
     /* ════════════════════════════════════════════════
@@ -4989,10 +3786,7 @@ const TradingEngine = (() => {
                 const pos = positions[symbol];
                 const current = getPrice(symbol) || pos.avgPrice;
                 const leverage = pos.leverage || 1;
-                // (10 Ağustos 2026) Özkaynak/kullanılan marj artık GERÇEK
-                // kilitli marja (pos.lockedMargin, varsa) göre — bkz.
-                // placeOrder'daki tam açıklama.
-                const margin = (typeof pos.lockedMargin === 'number') ? pos.lockedMargin : (pos.avgPrice * pos.qty) / leverage;
+                const margin = (pos.avgPrice * pos.qty) / leverage;
                 usedMargin += margin;
                 if (pos.side === 'LONG') {
                     openPnl += (current - pos.avgPrice) * pos.qty;
@@ -5008,9 +3802,9 @@ const TradingEngine = (() => {
                 positionsCount++;
             });
         });
-        const equity = effectiveBalance() + usedMargin + openPnl;
+        const equity = portfolio.balance + usedMargin + openPnl;
         return {
-            balance: effectiveBalance(),
+            balance: portfolio.balance,
             equity,
             openPnl,
             usedMargin,
@@ -5062,31 +3856,7 @@ const TradingEngine = (() => {
         const pnlEl = byId('qt-openpnl');
         const usedMarginEl = byId('qt-used-margin');
         const marginLevelEl = byId('qt-margin-level');
-        if (headerBalEl) headerBalEl.textContent = fmtTRY(effectiveBalance());
-        // (5 Ağustos 2026) Giriş yapılmadan bakiye 0 görünüyor — sebepsiz
-        // "neden 0" kafa karışıklığını önlemek için pill'e açıklayıcı bir
-        // tooltip ekleniyor, sadece kapı aktifken ve giriş yapılmamışken.
-        // (10 Ağustos 2026 — "cihaz değiştirince bakiyem sıfırlanıyor, her
-        // şey gitti" kök neden düzeltmesi) Bu tooltip SADECE fare ile üzerine
-        // gelince (hover) görünüyordu — dokunmatik cihazlarda (telefon/
-        // tablet) hover diye bir şey YOK, yani asıl bu senaryoda (biri
-        // telefondan tablete/bilgisayara GEÇTİĞİNDE, yeni cihazda henüz
-        // giriş yapmadığı için bakiye gerçekten 0 GÖRÜNÜYOR — veri
-        // KAYBOLMUYOR, sadece görünmüyor) kullanıcı bu açıklamayı HİÇBİR
-        // ZAMAN göremiyordu, "her şeyim gitti" sanıyordu. Artık aynı bilgi
-        // pill'in üzerine GÖRÜNÜR bir etiket olarak da yazılıyor (hem
-        // dokunmatik hem masaüstünde görünür), tooltip da yedek olarak
-        // duruyor.
-        const balancePillEl = byId('header-balance-pill');
-        const balanceLabelEl = byId('header-balance-label');
-        const needsLogin = isFtcGateActive() && !isFtcLoggedIn();
-        if (balancePillEl) {
-            balancePillEl.title = needsLogin
-                ? 'Bakiyen kaybolmadı — bu cihazda henüz FinteLig girişi yapmadın. Giriş yapınca gerçek demo bakiyen (diğer cihazlarınla senkronize) geri gelir.'
-                : '';
-            balancePillEl.classList.toggle('pill-login-needed', needsLogin);
-        }
-        if (balanceLabelEl) balanceLabelEl.textContent = needsLogin ? 'Giriş yap' : 'Bakiye';
+        if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
         // (29 Temmuz 2026 — Madde 8) Header'daki Toplam Varlık, bu fonksiyon
         // her çağrıldığında (işlem sonrası, fiyat tick'inde, SL/TP
         // değişiminde vb. — bkz. yukarıdaki çağrı noktaları) otomatik
@@ -5333,7 +4103,6 @@ const TradingEngine = (() => {
         setupPanelSubtabs();
         setupAlertsModal();
         setupSltpModal();
-        setupOrderConfirmModal();
         setupHeatmapModal();
         setupShortcutsModal();
         setupHelpModal();
@@ -5351,19 +4120,6 @@ const TradingEngine = (() => {
         updateAlertBadge();
         sampleEquity();
 
-        // (5 Ağustos 2026 — FinTeClub giriş kapısı) finteclubBridge.js'in
-        // giriş durumu ASENKRON belli oluyor (Firebase); giriş/çıkış
-        // gerçekleştiğinde ya da sayfa yüklenirken oturum bilgisi az sonra
-        // gelince bakiye/özkaynak gösterimi hemen buna göre güncellensin.
-        window.addEventListener('ftc-auth-changed', () => {
-            renderAccountSummary();
-            updateRiskPreview();
-        });
-
-        // Sayfa yüklendiğinde ilk 2 saniyelik tickPrices() beklemeden emir
-        // butonunun doğru (etkin/pasif) durumda başlaması için tek seferlik
-        // erken çağrı — bkz. updateTradeAvailabilityUI() yorumu.
-        updateTradeAvailabilityUI();
         setInterval(tickPrices, TICK_MS);
         setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);
         // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve
@@ -5393,8 +4149,12 @@ const TradingEngine = (() => {
         getChangePercent,
         syncPriceAnchor,
         closePosition,
+        // (11 Ağustos 2026 — Madde #132) Önceden SADECE render edilen satırların
+        // inline onclick'i için window.__optipulseCancelOco olarak dışa açıktı;
+        // finteclubBridge.js'in admin'den gelen iptal komutlarını güvenilir
+        // biçimde çağırabilmesi için resmi API'ye de eklendi.
+        cancelOcoOrder,
         resetPortfolio,
-        setBalance,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
         // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
         // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki
@@ -5419,27 +4179,7 @@ const TradingEngine = (() => {
         // yürüyüşünü beklemek yerine deterministik olarak hemen tetiklemek
         // için burada dışa açılıyor.
         debugCheckIndicatorAlertsNow: () => checkIndicatorAlerts(),
-        debugGetIndicatorAlerts: () => indicatorAlerts.map(a => ({ ...a })),
-        // (6 Ağustos 2026 — emir onay penceresi + LIMIT emir kök neden
-        // düzeltmesi QA yardımcıları) Yalnızca Playwright testlerinde
-        // kullanılıyor, hiçbir üretim kodu bunlara bağımlı değil.
-        debugGetPortfolio: () => JSON.parse(JSON.stringify(portfolio)),
-        debugGetAccountSnapshot: () => computeAccountSnapshot(),
-        debugIsOrderConfirmOpen: () => { const el = byId('order-confirm-modal-backdrop'); return !!(el && el.classList.contains('open')); },
-        debugConfirmPendingOrder: () => { const btn = byId('btn-order-confirm-submit'); if (btn) btn.click(); },
-        debugCancelPendingOrder: () => { const btn = byId('btn-order-confirm-cancel'); if (btn) btn.click(); },
-        debugTickPricesNow: () => tickPrices(),
-        // (9 Ağustos 2026) debugTickPricesNow, tickPrices()'ın TAMAMINI (piyasa
-        // kapalıyken erken çıkan DC.isMarketOpenNow() koruması dahil) çalıştırır
-        // — bu üretimde DOĞRU davranış (piyasa kapalıyken fiyat/emir motoru
-        // donuk kalmalı) ama hafta sonu/mesai dışı çalışan otomatik testleri
-        // belirsizleştiriyor. Bekleyen emir tetikleme mantığını piyasa
-        // saatlerinden bağımsız test edebilmek için ayrı bir QA girişi.
-        debugCheckPendingOrdersNow: () => checkPendingOcoOrders(),
-        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; priceProfiles[symbol].liveAnchor = price; } },
-        // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
-        // finteclubBridge.js'in shared_state dinleyicisi tarafından çağrılır.
-        setAdminForcedTheme
+        debugGetIndicatorAlerts: () => indicatorAlerts.map(a => ({ ...a }))
     });
 })();
 
