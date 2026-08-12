@@ -3737,7 +3737,20 @@ const TradingEngine = (() => {
                 rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Yaklaşık Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.fillPrice)} (açılışta güncellenecek)</span></div>`);
             }
         } else {
-            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(expectedExecPrice)}${ctx.orderType === 'LIMIT' ? ' (güncel piyasa)' : ''}</span></div>`);
+            // (12 Ağustos 2026 — spread netleştirme) Kullanıcı, popup'taki
+            // "Fiyat" ile ekrandaki canlı fiyat arasında (ör. ₺371,25 →
+            // ₺371,40) küçük bir fark olduğunu, bunu bir hata sanarak
+            // bildirdi. Bu fark bir hata DEĞİL — AL emri her zaman ask'tan
+            // (mid'in %HALF_SPREAD_PCT kadar üstünden), SAT emri her zaman
+            // bid'ten (mid'in altından) gerçekleşiyor (bkz. execFillPrice,
+            // 9 Ağustos'ta VİOP hızlı-al-sat suistimaline karşı bilinçli
+            // eklenmiş bir sürtünme katmanı). Kullanıcı bu spread'in
+            // KALMASINI, sadece popup'ta İKİ fiyatın (canlı + gerçekleşme)
+            // ayrı ayrı ve açıkça gösterilmesini istedi.
+            const spreadNote = ctx.side === 'BUY' ? 'ask · alış farkı' : 'bid · satış farkı';
+            const spreadPctStr = HALF_SPREAD_PCT.toFixed(2).replace('.', ',');
+            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Canlı Fiyat</span><span class="order-confirm-row-value">₺${fmtPrice(ctx.fillPrice)}</span></div>`);
+            rows.push(`<div class="order-confirm-row"><span class="order-confirm-row-label">Gerçekleşme Fiyatı${ctx.orderType === 'LIMIT' ? ' (güncel piyasa)' : ''}</span><span class="order-confirm-row-value">₺${fmtPrice(expectedExecPrice)} (${spreadNote} %${spreadPctStr})</span></div>`);
         }
 
         if (ctx.leverage > 1) {
