@@ -2699,7 +2699,40 @@ const TradingEngine = (() => {
        Order execution
        ════════════════════════════════════════════════ */
 
+    // (12 Ağustos 2026 — "giriş yapmadan devam et dediğimizde bakiye özkaynak
+    // sıfır olmalı, alım satım yapılmamalı") finteclubBridge.js zaten
+    // window.FTC_AUTH_STATE.available/loggedIn'i doğru şekilde tutuyordu
+    // (bkz. dosya üstündeki büyük yorum) ama tradingEngine.js bunu HİÇBİR
+    // YERDE okumuyordu — ziyaretçi "giriş yapmadan devam et" dediğinde
+    // varsayılan ₺100.000 demo bakiyesiyle serbestçe alım-satım yapabiliyordu.
+    // available:false (Firebase/CDN engelli) durumunda ESKİ davranışa
+    // (bakiye her zaman gerçek/kullanılabilir) dönülür — bir altyapı sorunu
+    // gerçek kullanıcıyı asla yanlışlıkla kilitlememeli (finteclubBridge.js
+    // ile AYNI felsefe).
+    function isGuestRestricted() {
+        return !!(window.FTC_AUTH_STATE && window.FTC_AUTH_STATE.available === true && window.FTC_AUTH_STATE.loggedIn !== true);
+    }
+
+    // (12 Ağustos 2026 — "alım satım durumu durduruldu diyor ama alım satım
+    // var") finteclubBridge.js zaten window.FTC_TRADING_STATE.halted'i admin'in
+    // "Alım-Satım Durumu" anahtarına göre doğru güncelliyordu, ama
+    // tradingEngine.js bunu hiçbir zaman kontrol etmiyordu — emir gönderimi
+    // her zaman çalışıyordu.
+    function isTradingHaltedByAdmin() {
+        return !!(window.FTC_TRADING_STATE && window.FTC_TRADING_STATE.halted === true);
+    }
+
     function submitOrder() {
+        if (isTradingHaltedByAdmin()) {
+            showToast('Alım-satım şu anda durduruldu.');
+            showTicketAlert('Alım-satım şu anda yönetici tarafından geçici olarak durduruldu.', 'error');
+            return;
+        }
+        if (isGuestRestricted()) {
+            showToast('Alım-satım için giriş yapmalısınız.');
+            showTicketAlert('Alım-satım yapabilmek için FinteLig hesabınızla giriş yapmalısınız.', 'error');
+            return;
+        }
         if (!state.activeSymbol) { showToast('Önce bir sembol seçin.'); showTicketAlert('Önce bir sembol seçin.', 'error'); return; }
         const qtyInput = byId('qt-qty');
         const qty = qtyInput ? Math.floor(Number(qtyInput.value)) : 0;
@@ -3602,11 +3635,32 @@ const TradingEngine = (() => {
 
     const THEME_STORAGE_KEY = 'optipulselab_theme';
 
+    // (12 Ağustos 2026 — "tema mavi olmalı ama sarı, entegrasyon hatası")
+    // finteclubBridge.js admin'in "Tema (Kurumsal Mavi)" anahtarını
+    // setAdminForcedTheme(true/false) ile buraya iletiyordu ama bu fonksiyon
+    // hiç var olmadığı için sessizce (typeof === 'function' koruması
+    // yüzünden) hiçbir şey yapmıyordu — site her zaman kullanıcının kendi
+    // light/dark tercihinde (altın/sarı vurgu paletiyle) kalıyordu. Aşağıdaki
+    // adminForcedTheme bayrağı ve setAdminForcedTheme(), zorlama aktifken
+    // kullanıcının kendi tercihini GEÇİCİ olarak bastırıp <html
+    // data-theme="corporate-blue"> uyguluyor (bkz. styles.css — sadece
+    // --gold ailesi maviye dönüyor, geri kalan koyu tema aynı kalıyor).
+    let adminForcedTheme = false;
+
     function getCurrentTheme() {
         return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     }
 
     function applyTheme(theme) {
+        // Yönetici zorlaması aktifken kullanıcının toggle'dan gelen tercihi
+        // DOM'a uygulanmaz (görsel olarak mavi kalmalı) — ama localStorage'a
+        // normal şekilde kaydedilir, böylece zorlama kalktığı an kullanıcının
+        // en son seçtiği tema hemen devreye girer (aşağıdaki setAdminForcedTheme
+        // (false) dalına bkz.).
+        if (adminForcedTheme) {
+            try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* private mode / quota */ }
+            return;
+        }
         if (theme === 'light') {
             document.documentElement.setAttribute('data-theme', 'light');
         } else {
@@ -3625,6 +3679,10 @@ const TradingEngine = (() => {
     }
 
     function toggleTheme() {
+        if (adminForcedTheme) {
+            showToast('Tema şu anda yönetici tarafından "Kurumsal Mavi" olarak sabitlendi.');
+            return;
+        }
         applyTheme(getCurrentTheme() === 'light' ? 'dark' : 'light');
     }
 
@@ -3634,6 +3692,41 @@ const TradingEngine = (() => {
         // (it runs before any other JS to avoid a dark/light flash on load).
         applyTheme(getCurrentTheme());
         if (btn) btn.addEventListener('click', toggleTheme);
+    }
+
+    // finteclubBridge.js'teki updateForcedThemeState() tarafından her
+    // Firestore snapshot'ında çağrılır (admin.html -> shared_state.
+    // oplabFintechTheme). window.TradingEngine export objesine de eklenmesi
+    // GEREKİYOR — çağıran taraf zaten window.TradingEngine.setAdminForcedTheme
+    // olarak arıyor (bkz. finteclubBridge.js updateForcedThemeState()).
+    function setAdminForcedTheme(forced) {
+        forced = !!forced;
+        if (forced === adminForcedTheme) return; // aynı durum — gereksiz DOM/localStorage yazımı yok
+        adminForcedTheme = forced;
+
+        const toggleBtn = byId('btn-theme-toggle');
+        if (forced) {
+            document.documentElement.setAttribute('data-theme', 'corporate-blue');
+            if (toggleBtn) {
+                toggleBtn.disabled = true;
+                toggleBtn.style.opacity = '0.4';
+                toggleBtn.style.cursor = 'not-allowed';
+                toggleBtn.title = 'Tema yönetici tarafından "Kurumsal Mavi" olarak sabitlendi.';
+            }
+        } else {
+            // Zorlama kalkınca kullanıcının en son kaydedilmiş light/dark
+            // tercihine geri dön (applyTheme artık forced=false olduğundan
+            // normal şekilde DOM'a uygulanır).
+            let stored = 'dark';
+            try { stored = localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark'; } catch (e) { /* private mode */ }
+            applyTheme(stored);
+            if (toggleBtn) {
+                toggleBtn.disabled = false;
+                toggleBtn.style.opacity = '';
+                toggleBtn.style.cursor = '';
+                toggleBtn.title = '';
+            }
+        }
     }
 
     /* ════════════════════════════════════════════════
@@ -3856,14 +3949,22 @@ const TradingEngine = (() => {
         const pnlEl = byId('qt-openpnl');
         const usedMarginEl = byId('qt-used-margin');
         const marginLevelEl = byId('qt-margin-level');
-        if (headerBalEl) headerBalEl.textContent = fmtTRY(portfolio.balance);
+        // (12 Ağustos 2026 — "giriş yapmadan devam et dediğimizde bakiye
+        // özkaynak sıfır olmalı") Ziyaretçi giriş yapmadan devam ettiğinde
+        // gerçek portföy değerleri (localStorage'da) DOKUNULMUYOR — sadece
+        // bu görüntüleme katmanında ₺0,00 gösteriliyor; giriş yapınca aynı
+        // portföy (varsa) veya taze bakiye normal şekilde görünmeye devam
+        // eder. Bu, "delicate" portföy kalıcılık mantığına hiç dokunmadan en
+        // düşük riskli çözüm.
+        const guestRestricted = isGuestRestricted();
+        if (headerBalEl) headerBalEl.textContent = fmtTRY(guestRestricted ? 0 : portfolio.balance);
         // (29 Temmuz 2026 — Madde 8) Header'daki Toplam Varlık, bu fonksiyon
         // her çağrıldığında (işlem sonrası, fiyat tick'inde, SL/TP
         // değişiminde vb. — bkz. yukarıdaki çağrı noktaları) otomatik
         // güncelleniyor; hoca sorusuna somut cevap: portföy GERÇEKTEN
         // otomatik güncelleniyor, bu rozet bunu görünür kılıyor.
-        if (headerEqEl) headerEqEl.textContent = fmtTRY(equity);
-        if (eqEl) eqEl.textContent = fmtTRY(equity);
+        if (headerEqEl) headerEqEl.textContent = fmtTRY(guestRestricted ? 0 : equity);
+        if (eqEl) eqEl.textContent = fmtTRY(guestRestricted ? 0 : equity);
         if (pnlEl) {
             pnlEl.textContent = (openPnl >= 0 ? '+' : '') + fmtTRY(openPnl);
             pnlEl.className = 'acct-value ' + (openPnl >= 0 ? 'profit-text' : 'loss-text');
@@ -4120,6 +4221,14 @@ const TradingEngine = (() => {
         updateAlertBadge();
         sampleEquity();
 
+        // (12 Ağustos 2026 — misafir bakiye/özkaynak sıfırlama) Giriş/çıkış
+        // anında finteclubBridge.js window.FTC_AUTH_STATE'i güncelledikten
+        // sonra bu event'i tetikliyor — header bakiye/özkaynak rozetini
+        // (renderAccountSummary) her ~2sn'lik fiyat tick'ini beklemeden ANINDA
+        // düzeltmek için. Firebase yoksa bu event asla tetiklenmez, o zaman
+        // zaten isGuestRestricted() = false (eski davranış) olur.
+        window.addEventListener('ftc-auth-changed', renderAccountSummary);
+
         setInterval(tickPrices, TICK_MS);
         setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);
         // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve
@@ -4155,6 +4264,11 @@ const TradingEngine = (() => {
         // biçimde çağırabilmesi için resmi API'ye de eklendi.
         cancelOcoOrder,
         resetPortfolio,
+        // (12 Ağustos 2026 — "Kurumsal Mavi" entegrasyon düzeltmesi)
+        // finteclubBridge.js updateForcedThemeState() bunu doğrudan
+        // window.TradingEngine.setAdminForcedTheme olarak çağırıyor — daha
+        // önce burada tanımlı olmadığı için sessizce no-op oluyordu.
+        setAdminForcedTheme,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
         // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
         // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki
