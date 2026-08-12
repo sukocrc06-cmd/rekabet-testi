@@ -674,6 +674,10 @@ const TradingEngine = (() => {
         // (22 Temmuz 2026, on ikinci oturum — madde 7) Profil paneli açıkken
         // bakiye/özkaynak/K-Z rakamları da canlı tik ile birlikte tazelensin.
         if (byId('profile-panel-dropdown')?.classList.contains('open')) renderProfilePanel();
+        // (12 Ağustos 2026 — onay penceresi "eski fiyat" düzeltmesi) Emir
+        // onay penceresi açıkken de gösterdiği fiyat, arka planda değişmeye
+        // devam eden gerçek piyasa fiyatıyla senkron kalsın.
+        refreshOrderConfirmModalIfOpen();
     }
 
     function getPrice(symbol) {
@@ -3677,6 +3681,36 @@ const TradingEngine = (() => {
     // tutulur — modal kapanınca (iptal ya da onay farketmez) temizlenir.
     let orderConfirmPendingCtx = null;
 
+    // (12 Ağustos 2026 — onay penceresi "eski fiyat" düzeltmesi) Önceden
+    // ctx.fillPrice submitOrder()'da BİR KEZ donduruluyordu ve pencere açık
+    // kaldığı sürece (kullanıcı "Onayla"ya basana kadar) hiç güncellenmiyordu
+    // — ama tickPrices() arka planda 2 saniyede bir fiyatı değiştirmeye devam
+    // ediyordu. Sonuç: hem pencerede YANLIŞ/eski bir fiyat gösteriliyordu,
+    // hem de DAHA CİDDİSİ, "Onayla" tıklanınca gerçek işlem de (placeOrder
+    // üzerinden) bu eski fiyattan gerçekleşiyordu — kâr/zarar hesabı yanlış
+    // çıkıyordu. Bu fonksiyon, kuyruğa alınmayacak (anında gerçekleşecek)
+    // Piyasa/Limit emirleri için ctx.fillPrice'ı HER ZAMAN o anki güncel
+    // piyasa fiyatına göre yeniden hesaplar. Kuyruğa alınacak emirlerde
+    // (willQueueAsPending) dokunulmuyor — onlar zaten piyasa açılınca o anki
+    // güncel fiyattan gerçekleşiyor, buradaki fillPrice sadece tahmini
+    // teminat göstergesi.
+    function refreshCtxFillPriceToLive(ctx) {
+        if (!ctx || ctx.willQueueAsPending) return ctx;
+        const liveMarketPrice = getPrice(ctx.symbol);
+        if (!liveMarketPrice) return ctx;
+        if (ctx.orderType === 'LIMIT' && ctx.limitPrice !== null) {
+            // LIMIT emri: submitOrder()'daki KÖK DÜZELTME kuralıyla birebir
+            // aynı — koşul (BUY: limit >= piyasa, SELL: limit <= piyasa) hâlâ
+            // sağlanıyorsa gerçekleşme fiyatı güncel piyasa fiyatıdır.
+            const conditionMet = ctx.side === 'BUY' ? (ctx.limitPrice >= liveMarketPrice) : (ctx.limitPrice <= liveMarketPrice);
+            if (conditionMet) ctx.fillPrice = liveMarketPrice;
+        } else {
+            // MARKET emri: her zaman o anki güncel piyasa fiyatından gerçekleşir.
+            ctx.fillPrice = liveMarketPrice;
+        }
+        return ctx;
+    }
+
     function buildOrderConfirmSummaryHtml(ctx) {
         const sideLabel = ctx.side === 'BUY' ? 'AL' : 'SAT';
         const sideClass = ctx.side === 'BUY' ? 'order-confirm-buy' : 'order-confirm-sell';
@@ -3721,20 +3755,14 @@ const TradingEngine = (() => {
         return rows.join('');
     }
 
-    function openOrderConfirmModal(ctx) {
-        const backdrop = byId('order-confirm-modal-backdrop');
+    // (12 Ağustos 2026) openOrderConfirmModal() ve refreshOrderConfirmModalIfOpen()
+    // arasında paylaşılan render mantığı — tek yerden değiştirilsin diye
+    // ayrıldı (eskiden ikisi ayrı ayrı aynı metni üretiyordu, bu da
+    // kopyalar arasında tutarsızlık riski taşıyordu).
+    function renderOrderConfirmModalContent(ctx) {
         const questionEl = byId('order-confirm-question');
         const summaryEl = byId('order-confirm-summary');
         const submitBtn = byId('btn-order-confirm-submit');
-        if (!backdrop) {
-            // Modal DOM'da yoksa (beklenmeyen durum) eski davranışa düş —
-            // emir onaysız gerçekleşsin ki kullanıcı hiç mahsur kalmasın.
-            executeConfirmedOrder(ctx);
-            return;
-        }
-
-        orderConfirmPendingCtx = ctx;
-
         const actionWord = ctx.side === 'BUY' ? 'ALMAK' : 'SATMAK';
         const marketLabel = ctx.market === 'VIOP' ? 'VİOP' : 'Spot';
         if (questionEl) {
@@ -3754,9 +3782,33 @@ const TradingEngine = (() => {
                 : (ctx.side === 'BUY' ? 'Onayla · AL' : 'Onayla · SAT');
             submitBtn.classList.toggle('order-confirm-sell-btn', ctx.side === 'SELL' && !ctx.willQueueAsPending);
         }
+    }
+
+    function openOrderConfirmModal(ctx) {
+        const backdrop = byId('order-confirm-modal-backdrop');
+        if (!backdrop) {
+            // Modal DOM'da yoksa (beklenmeyen durum) eski davranışa düş —
+            // emir onaysız gerçekleşsin ki kullanıcı hiç mahsur kalmasın.
+            executeConfirmedOrder(ctx);
+            return;
+        }
+
+        orderConfirmPendingCtx = ctx;
+        renderOrderConfirmModalContent(ctx);
 
         closeOtherModals('order-confirm-modal-backdrop');
         backdrop.classList.add('open');
+    }
+
+    // (12 Ağustos 2026) Onay penceresi AÇIKKEN her tickPrices() döngüsünde
+    // çağrılır (bkz. aşağısı) — fiyatı ve gösterilen metni canlı tutar, ki
+    // kullanıcı "Onayla"ya basmadan önce gördüğü fiyat gerçek/güncel fiyat
+    // olsun.
+    function refreshOrderConfirmModalIfOpen() {
+        const backdrop = byId('order-confirm-modal-backdrop');
+        if (!backdrop || !backdrop.classList.contains('open') || !orderConfirmPendingCtx) return;
+        refreshCtxFillPriceToLive(orderConfirmPendingCtx);
+        renderOrderConfirmModalContent(orderConfirmPendingCtx);
     }
 
     function closeOrderConfirmModal() {
@@ -3782,6 +3834,11 @@ const TradingEngine = (() => {
         if (submitBtn) {
             submitBtn.addEventListener('click', () => {
                 const ctx = orderConfirmPendingCtx;
+                // (12 Ağustos 2026) "Onayla" tıklandığı an, bir sonraki
+                // tickPrices() döngüsünü beklemeden SON KEZ güncel fiyata
+                // senkronize et — ki gösterilen fiyat ile gerçekleşen fiyat
+                // (placeOrder'a giden ctx.fillPrice) her zaman birebir aynı olsun.
+                if (ctx) refreshCtxFillPriceToLive(ctx);
                 closeOrderConfirmModal();
                 if (ctx) executeConfirmedOrder(ctx);
             });
