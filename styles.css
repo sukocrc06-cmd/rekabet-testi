@@ -118,30 +118,61 @@
     background-color: var(--bg-main);
 }
 
-/* --- "Kurumsal Mavi" (Corporate Blue) forced theme (12 Ağustos 2026) ---
-   Admin panelindeki "Tema (Kurumsal Mavi)" anahtarı AÇIK olduğunda
-   finteclubBridge.js -> tradingEngine.js setAdminForcedTheme(true) çağrısıyla
-   <html data-theme="corporate-blue"> ayarlanır (bkz. tradingEngine.js).
-   Koyu arka plan/panel/metin renkleri dark tema ile AYNI kalıyor — sadece
-   sitenin baskın altın/sarı vurgu paleti (--gold ailesi) maviye dönüyor;
-   bu sayede o değişkenleri kullanan TÜM buton/kenarlık/rozet/ikon bileşeni
-   tek bir yerden otomatik olarak maviye geçiyor, ayrı ayrı düzeltme
-   gerekmiyor. */
-[data-theme="corporate-blue"] {
-    --gold: #1E88E5;
-    --gold-light: #64B5F6;
-    --gold-dark: #1565C0;
-    --gold-glow: rgba(30, 136, 229, 0.35);
-    --gold-dim: rgba(30, 136, 229, 0.12);
-    --gold-border: rgba(30, 136, 229, 0.2);
-}
-
 /* A few components draw pure-black/white shadows and glass effects that read
    fine in dark mode but need lightening so panels don't look muddy. */
 [data-theme="light"] .content-card,
 [data-theme="light"] .sidebar-panel,
 [data-theme="light"] .trading-panel {
     box-shadow: 0 1px 3px rgba(20, 22, 28, 0.08);
+}
+
+/* --- "Kurumsal Mavi" (fintech) tema override'ları (uygulanma şekli
+   [data-theme="fintech"] on <html>) ---
+   (9 Ağustos 2026 — admin panelinden kontrol) Kullanıcının kendi Koyu/Açık
+   tercihinin YERİNE geçen, SADECE FinTeClub admin panelinden (finteclub/
+   shared_state.oplabFintechTheme alanı → finteclubBridge.js →
+   tradingEngine.js setAdminForcedTheme()) tüm kullanıcılara aynı anda
+   zorunlu kılınabilen TEK bir şablon. Kullanıcının kendi tema butonundan
+   ERİŞİLEMEZ — bilinçli olarak öyle tasarlandı (kullanıcı isteği: "sadece
+   koyu mavi finteclub renk modalı ile aynı şablon, tek şablon, herkese
+   anında zorunlu uygula").
+   Renkler İCAT EDİLMEDİ — admin.html/index.html (FinTeClub)'ın kendi
+   :root renk paletinden (--bg/--bg-soft/--card-bg/--blue/--blue-dark/
+   --green/--red) BİREBİR alındı, ki "aynı şablon" hissi gerçekten doğru
+   olsun. --success/--danger/--warning BİLEREK dokunulmuyor (zaten FinTeClub
+   ile aynı kırmızı/yeşil, ayrıca değiştirmeye gerek yok). Tint ve glass-bg
+   değişkenleri de override EDİLMİYOR — :root'un beyaz-alfa overlay'leri koyu
+   lacivert zeminde de doğru görünür. Grafik canvas'ının kendi ayrı renk
+   mutasyonu var — bkz. tradingChart.js applyChartColorPaletteForTheme() ve
+   multiChartGrid.js applyGridColorPaletteForTheme(). */
+[data-theme="fintech"] {
+    --bg-main: #060913;      /* FinTeClub --bg */
+    --bg-panel: #0a1020;     /* FinTeClub --bg-soft */
+    --bg-sidebar: #080c18;   /* FinTeClub --sidebar-bg */
+    --bg-card: #111a2e;      /* FinTeClub --card-bg */
+    --bg-input: #0d1526;     /* FinTeClub --card-bg-2 */
+
+    --gold: #3d6fee;         /* FinTeClub --blue */
+    --gold-light: #7ea3ff;   /* FinTeClub gradient/accent-text mavi tonu */
+    --gold-dark: #1c2f5e;    /* FinTeClub --blue-dark */
+    --gold-glow: rgba(61, 111, 238, 0.30);   /* FinTeClub --blue-glow */
+    --gold-dim: rgba(61, 111, 238, 0.12);
+    --gold-border: rgba(61, 111, 238, 0.24);
+
+    --text-primary: #f3f5fa;    /* FinTeClub --text */
+    --text-secondary: #8b93ab;  /* FinTeClub --text-dim */
+    --text-muted: #575f75;      /* FinTeClub --text-dimmer */
+    --text-dark: #0a1020;
+}
+
+[data-theme="fintech"] body {
+    background-color: var(--bg-main);
+}
+
+[data-theme="fintech"] .content-card,
+[data-theme="fintech"] .sidebar-panel,
+[data-theme="fintech"] .trading-panel {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* --- Document Resets & Base Styles --- */
@@ -526,6 +557,131 @@ body {
     padding: 6px 8px;
 }
 
+/* (FinTeClub entegrasyonu) Ortak yardımcı sınıf — birkaç yerde element
+   gizlemek için kullanılıyor (finteclubBridge.js). */
+.hidden { display: none !important; }
+
+/* --- FinTeClub Entegrasyonu: "FinteLig Yarışmacısı" rozeti --- */
+.ftc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--success);
+    background-color: rgba(46, 125, 50, 0.14);
+    border: 1px solid rgba(46, 125, 50, 0.35);
+    border-radius: var(--radius-sm);
+    padding: 2px 7px;
+    letter-spacing: 0.02em;
+}
+
+.ftc-verify-status {
+    font-size: 10.5px;
+    margin-top: 6px;
+    line-height: 1.5;
+    min-height: 14px;
+}
+.ftc-verify-status.ftc-status-ok { color: var(--success); }
+.ftc-verify-status.ftc-status-error { color: var(--danger); }
+.ftc-verify-status.ftc-status-pending { color: var(--text-muted); }
+
+/* --- FinTeClub Entegrasyonu: admin erişimi kapattığında tam ekran kilit --- */
+.ftc-oplab-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background-color: rgba(10, 10, 10, 0.94);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.ftc-oplab-gate-box {
+    max-width: 440px;
+    text-align: center;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-lg);
+    padding: 32px 28px;
+}
+.ftc-oplab-gate-title {
+    font-family: var(--font-sans);
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 12px;
+}
+.ftc-oplab-gate-box p {
+    color: var(--text-secondary);
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+/* --- FinTeClub Entegrasyonu: açılışta görünen giriş modalı ---
+   (Gerçek Firebase Authentication, 3. tur) Sayfa yüklendiğinde, giriş
+   yapılmamışsa ve daha önce "giriş yapmadan devam et" denmemişse bu modal
+   görünür. Zorunlu DEĞİLDİR — genel ziyaretçiler dilerse hiç giriş yapmadan
+   geçebilir; sadece FinteLig rozeti/takibi isteyenler için vardır.
+   bkz. finteclubBridge.js showLoginModal()/dismissModalPermanently(). */
+.ftc-login-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    background-color: rgba(10, 10, 10, 0.86);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.ftc-login-modal-box {
+    max-width: 400px;
+    width: 100%;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-lg);
+    padding: 30px 26px;
+    text-align: center;
+}
+.ftc-login-modal-title {
+    font-family: var(--font-sans);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 8px;
+}
+.ftc-login-modal-desc {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+.ftc-login-modal-box .form-input {
+    margin-bottom: 10px;
+    text-align: left;
+    width: 100%;
+}
+.ftc-login-modal-skip {
+    display: block;
+    width: 100%;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--font-sans);
+}
+.ftc-login-modal-skip:hover { color: var(--text-secondary); }
+.ftc-login-modal-welcome {
+    color: var(--success);
+    font-size: 16px;
+    font-weight: 700;
+    padding: 18px 0;
+}
+
 /* --- Header Balance Pill (demo trading balance, top right) --- */
 .header-balance-pill {
     display: flex;
@@ -550,6 +706,20 @@ body {
     font-size: 14px;
     font-weight: 700;
     color: var(--gold);
+}
+
+/* (10 Ağustos 2026 — "cihaz değiştirince bakiyem sıfırlanıyor" kök neden
+   düzeltmesi) Bakiye 0 görünüyorsa ve bunun sebebi bu cihazda henüz giriş
+   yapılmamış olmasıysa (veri kaybı DEĞİL), pill'i turuncu bir "aksiyon
+   gerekli" rengine çevirip etiketi "Giriş yap" yapıyoruz — dokunmatik
+   cihazlarda hover tooltip'i hiç görmeyen kullanıcılar için de görünür. */
+.header-balance-pill.pill-login-needed {
+    background-color: rgba(255, 167, 38, 0.12);
+    border-color: #FFA726;
+}
+.header-balance-pill.pill-login-needed .header-balance-label,
+.header-balance-pill.pill-login-needed .header-balance-value {
+    color: #FFA726;
 }
 
 /* (29 Temmuz 2026 — Madde 8: bakiyenin yanına Toplam Varlık) */
@@ -3463,6 +3633,66 @@ body.compact-mode .status-item {
     color: #FFC107;
 }
 
+/* (6 Ağustos 2026 — emir onay penceresi, Ali İhsan Hocam'ın isteği) */
+.order-confirm-question {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin: 0 0 10px 0;
+}
+
+.order-confirm-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background-color: var(--tint-03);
+    border: 1px solid var(--tint-06);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: 11.5px;
+}
+
+.order-confirm-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.5;
+}
+
+.order-confirm-row-label {
+    color: var(--text-secondary);
+}
+
+.order-confirm-row-value {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-family: 'Fira Code', monospace;
+    text-align: right;
+}
+
+.order-confirm-row-value.order-confirm-buy { color: var(--success); }
+.order-confirm-row-value.order-confirm-sell { color: var(--danger); }
+
+.order-confirm-note {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-top: 2px;
+}
+
+.btn-order-confirm-submit {
+    background-color: var(--success);
+    color: #0B0D10;
+    border-color: var(--success);
+}
+.btn-order-confirm-submit.order-confirm-sell-btn {
+    background-color: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
 .sltp-modal-info {
     font-size: 11px;
     color: var(--text-secondary);
@@ -5005,6 +5235,18 @@ body.compact-mode .status-item {
     color: var(--text-primary);
 }
 
+.btn-trade-submit:disabled {
+    /* (9 Ağustos 2026 — piyasa kapalıyken/admin durdurunca emir engelleme)
+       Piyasa kapalı veya admin alım-satımı durdurmuşken buton disabled
+       oluyor (bkz. tradingEngine.js updateTradeAvailabilityUI()) — bunun
+       AÇIK/kullanılabilir bir buton gibi görünmemesi için. */
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.6);
+    box-shadow: none !important;
+    transform: none !important;
+}
+
 .btn-trade-submit {
     width: 100%;
     padding: 14px 0;
@@ -5239,6 +5481,21 @@ body.compact-mode .status-item {
 
 .btn-close-pos:hover {
     background-color: rgba(244, 67, 54, 0.25);
+}
+
+/* (10 Ağustos 2026 — VİOP asgari tutma süresi) Pozisyon henüz asgari süreyi
+   doldurmadan buton geri sayım gösterip devre dışı kalır — bkz. tradingEngine.js
+   renderPositionsInto/closePosition. */
+.btn-close-pos:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: var(--text-muted);
+}
+
+.btn-close-pos:disabled:hover {
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 .qt-disclaimer {
@@ -5653,128 +5910,4 @@ body.compact-mode .status-item {
     .tour-card {
         width: calc(100vw - 32px);
     }
-}
-
-/* ==========================================================================
-   FinTeClub Girişi / OPLab Kapı Kontrolü (finteclubBridge.js)
-   (12 Ağustos 2026 — canlı sitede bu bölümün stilinin eksik olduğu, gate ve
-   giriş modalının stilsiz düz metin olarak üst üste bindiği fark edildi ve
-   düzeltildi.) .hidden, index.html'deki birkaç elemanın (gate, login modal
-   overlay, "FinteLig Yarışmacısı" rozeti, çıkış butonu) varsayılan gizleme
-   sınıfı — finteclubBridge.js bunu admin durumuna/giriş durumuna göre
-   toggle ediyor (bkz. updateAccessGate(), syncLoginUI()). !important: bu
-   sınıf tek başına diğer bileşen sınıflarından (örn. .btn.btn-secondary)
-   daha düşük özgüllükte olduğu için onlar olmadan geçersiz kalabilir. */
-.hidden {
-    display: none !important;
-}
-
-/* Tam ekran, ortalanmış, koyu arka planlı overlay — header-menu-dropdown/
-   profile-panel-dropdown ile AYNI panel görsel dili (bkz. yukarıda). */
-.ftc-oplab-gate,
-.ftc-login-modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 900;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(4px);
-    padding: 20px;
-}
-
-.ftc-oplab-gate-box,
-.ftc-login-modal-box {
-    width: 100%;
-    max-width: 420px;
-    background-color: var(--bg-panel);
-    border: 1px solid var(--gold-border);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-    padding: 28px 26px;
-    text-align: center;
-}
-
-.ftc-oplab-gate-title,
-.ftc-login-modal-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--gold);
-    margin-bottom: 10px;
-}
-
-.ftc-oplab-gate-box p,
-.ftc-login-modal-desc {
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    margin-bottom: 18px;
-}
-
-#ftc-login-modal-form {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    text-align: left;
-}
-
-.ftc-login-modal-welcome {
-    font-size: 13px;
-    color: var(--text-primary);
-    margin-top: 12px;
-}
-
-.ftc-login-modal-skip {
-    display: block;
-    width: 100%;
-    margin-top: 16px;
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 12.5px;
-    cursor: pointer;
-    text-decoration: underline;
-    text-decoration-color: transparent;
-    transition: var(--transition-fast);
-}
-
-.ftc-login-modal-skip:hover {
-    color: var(--gold-light);
-    text-decoration-color: currentColor;
-}
-
-/* Profil panelindeki ve giriş modalındaki küçük durum yazısı — setVerifyStatus()
-   'pending'/'ok'/'error' kind'larından birini ftc-status-* sınıfı olarak ekliyor. */
-.ftc-verify-status {
-    font-size: 11.5px;
-    min-height: 14px;
-    margin-top: 4px;
-    line-height: 1.4;
-}
-
-.ftc-verify-status.ftc-status-pending {
-    color: var(--text-muted);
-}
-
-.ftc-verify-status.ftc-status-ok {
-    color: #4CAF50;
-}
-
-.ftc-verify-status.ftc-status-error {
-    color: #F44336;
-}
-
-/* Profil panelindeki "✓ FinteLig Yarışmacısı" doğrulanmış rozeti — diğer
-   rozetlerle (.badge-closed vb.) aynı boyut/biçim dilinde, başarı rengiyle. */
-.ftc-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    color: #4CAF50;
-    background-color: rgba(76, 175, 80, 0.12);
-    border: 1px solid rgba(76, 175, 80, 0.3);
-    border-radius: 4px;
-    padding: 2px 8px;
-    margin-top: 4px;
 }
