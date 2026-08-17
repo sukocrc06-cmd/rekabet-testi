@@ -783,9 +783,14 @@ const TradingEngine = (() => {
     function syncPriceAnchor(symbol, lastClose) {
         const p = priceProfiles[symbol];
         if (!p || !lastClose) return;
+        // (17 Ağustos 2026) ARTIK dayOpen burada set edilmiyor — "son kapanış"
+        // (lastClose) günün canlı/en güncel fiyatıdır, GERÇEK önceki gün
+        // kapanışı değildir; ikisini eşitlemek %değişimi anlık olarak (yanlış
+        // biçimde) %0'a sıfırlıyordu. dayOpen artık YALNIZCA syncWatchlistPrices()
+        // içindeki gerçek backend prevClose verisiyle güncelleniyor (bkz. o
+        // fonksiyondaki 17 Ağustos notu) — bu da zaten 40sn içinde devreye girer.
         const applied = applyRealPriceUpdate(symbol, lastClose, (prof, val) => {
             prof.price = val;
-            prof.dayOpen = val;
             prof.liveAnchor = val;
         });
         if (!applied) return;
@@ -981,17 +986,34 @@ const TradingEngine = (() => {
             const price = json.quotes[symbol];
             const p = priceProfiles[symbol];
             if (!p || typeof price !== 'number' || !(price > 0)) return;
-            // Aynı re-merkezleme mantığı burada da geçerli (bkz.
-            // connectLiveFeed'in onmessage'ı): gerçek fiyat mevcut günlük
-            // banttan çok uzaksa dayOpen'ı da yeniden merkezle, aksi halde
-            // bir sonraki simüle tick bu gerçek fiyatı geri "kelepçeler".
-            // (10 Ağustos 2026, dördüncü tur) applyRealPriceUpdate() üzerinden
-            // geçiyor — tek seferlik bozuk bir yfinance verisinin ~97 sembollük
-            // toplu senkronda fiyatı anında sıçratmasını engeller.
+            // (17 Ağustos 2026 — "TradingView'de düşüş varken bizde yükseliş"
+            // kök neden düzeltmesi) ÖNCEDEN dayOpen sadece gerçek fiyat mevcut
+            // %6'lık banttan TAŞARSA yeniden merkezleniyordu — bu bir tahminti,
+            // gerçek "önceki gün kapanışı" değildi. Haftalar süren bu demo
+            // boyunca dayOpen bu yüzden ya haftalar önceki bir dataController.js
+            // tohum değerinde (STOCK_PROFILES.basePrice) ya da geçmişte bir kez
+            // %6 bandı aştığı rastgele bir anda "yakalanmış" bir fiyatta asılı
+            // kalıyordu — gerçek günlük referanstan giderek uzaklaşıyor, hatta
+            // YÖNÜ bile ters çıkabiliyordu. Artık backend (main.py, 17 Ağustos
+            // düzeltmesi) her turda GERÇEK önceki gün kapanışını da (`prevClose`)
+            // döndürüyor — TradingView'ın kullandığı referansla birebir aynı —
+            // bunu doğrudan ve HER senkron turunda (40sn'de bir) kullanıyoruz,
+            // artık tahmine/6%-eşiğine gerek yok. Yeni bir işlem gününe
+            // geçildiğinde de (backend'in kendi period="2d" penceresi otomatik
+            // kaydığı için) ek bir "gün değişti" mantığına gerek kalmadan
+            // kendiliğinden güncelleniyor. Backend bu sembol için (nadir bir
+            // durumda) prevClose döndüremezse eski %6 bant tahminine düşülüyor.
             const applied = applyRealPriceUpdate(symbol, price, (prof, val) => {
-                const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
-                if (val > capUp || val < capDown) {
-                    prof.dayOpen = val;
+                const realPrevClose = (json.prevClose && typeof json.prevClose[symbol] === 'number' && json.prevClose[symbol] > 0)
+                    ? json.prevClose[symbol]
+                    : null;
+                if (realPrevClose !== null) {
+                    prof.dayOpen = realPrevClose;
+                } else {
+                    const capUp = prof.dayOpen * 1.06, capDown = prof.dayOpen * 0.94;
+                    if (val > capUp || val < capDown) {
+                        prof.dayOpen = val;
+                    }
                 }
                 prof.liveAnchor = val;
                 prof.price = +val.toFixed(2);
@@ -2530,9 +2552,13 @@ const TradingEngine = (() => {
             // kullanılıyor — OHLCV geçmişindeki son kapanış da (ör. bir
             // kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
             // karışıklığı yüzünden) tek seferlik bozuk olabilir.
+            // (17 Ağustos 2026) dayOpen ARTIK burada set edilmiyor — chartInfo.
+            // lastClose günün en güncel/canlı fiyatıdır, gerçek önceki gün
+            // kapanışı değil (bkz. syncWatchlistPrices'taki 17 Ağustos notu ve
+            // syncPriceAnchor'daki aynı düzeltme) — dayOpen'ı buna eşitlemek
+            // %değişimi sembol seçilir seçilmez yanlışlıkla %0'a sıfırlıyordu.
             if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
                 prof.price = val;
-                prof.dayOpen = val;
                 prof.liveAnchor = val;
             })) {
                 renderWatchlistPrices();

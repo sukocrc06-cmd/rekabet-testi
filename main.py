@@ -358,8 +358,25 @@ def format_ticker(ticker: str) -> str:
 # artık istemci aralığından KISA (35sn) — çoklu-sekme senaryosunda hâlâ
 # gereksiz ardışık ağ isteklerini önlüyor, ama artık tek bir istemcinin kendi
 # düzenli pollamasını YAVAŞLATMIYOR.
+# (17 Ağustos 2026 — "TradingView'de düşüş varken bizde yükseliş gösteriyor"
+# kök neden düzeltmesi) Bu endpoint ÖNCEDEN sadece o anki son fiyatı
+# döndürüyordu (period="1d") — frontend'in günlük %değişim göstergesi
+# (tradingEngine.js'teki dayOpen) bu yüzden HİÇBİR GERÇEK "önceki gün
+# kapanışı" verisine dayanmıyordu, sadece kendi iç simülasyon anahtarının
+# (dataController.js'teki haftalar önce girilmiş sabit basePrice, ya da
+# %6'lık bandı aştığında rastgele bir anda "yakalanan" bir fiyat) etrafında
+# sürükleniyordu. Sonuç: haftalar geçtikçe bu iç referans gerçek önceki gün
+# kapanışından uzaklaşıyor, hatta YÖNÜ bile ters çıkabiliyordu (TradingView
+# günü düşüşle gösterirken bizim iç referansımız daha da bayat/düşük
+# olduğu için biz yükselişle gösteriyorduk). Düzeltme: period="2d"ye
+# çıkarılıp GERÇEK önceki gün kapanışı da (`prevClose`) ayrıca döndürülüyor
+# — market-ticker endpoint'i (döviz/emtia/BIST100) zaten aynısını yapıyordu,
+# burada da aynı desen uygulandı. Frontend artık dayOpen'ı bu gerçek veriyle
+# HER senkron turunda (40sn'de bir) doğrudan güncelleyecek (bkz.
+# tradingEngine.js → syncWatchlistPrices), böylece %değişim göstergesi
+# TradingView ile aynı, gerçek referansı kullanacak.
 _QUOTE_CACHE_TTL_SEC = 35
-_quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}}
+_quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}, "prevClose": {}}
 
 
 @app.post("/api/v1/quotes")
@@ -371,23 +388,24 @@ def get_quotes(request: QuotesRequest):
     if skipped:
         print(f"[quotes] Bozuk formatlı {len(skipped)} sembol toplu istekten atlandı: {skipped}")
     if not tickers:
-        return {"quotes": {}, "asOf": None}
+        return {"quotes": {}, "prevClose": {}, "asOf": None}
 
     cache_key = ",".join(sorted(tickers))
     now = time.time()
     if _quote_cache["tickers_key"] == cache_key and (now - _quote_cache["ts"]) < _QUOTE_CACHE_TTL_SEC:
-        return {"quotes": _quote_cache["data"], "asOf": _quote_cache["ts"], "cached": True}
+        return {"quotes": _quote_cache["data"], "prevClose": _quote_cache.get("prevClose", {}), "asOf": _quote_cache["ts"], "cached": True}
 
     formatted_map = {}
     for t in tickers:
         formatted_map[format_ticker(t)] = t
 
     quotes = {}
+    prev_closes = {}
     try:
         raw = _yf_call_with_backoff(
             lambda: yf.download(
                 tickers=list(formatted_map.keys()),
-                period="1d",
+                period="2d",
                 interval="1d",
                 group_by="ticker",
                 threads=True,
@@ -414,6 +432,16 @@ def get_quotes(request: QuotesRequest):
                 close_series = close_series.dropna()
                 if len(close_series) > 0:
                     quotes[original] = round(float(close_series.iloc[-1]), 2)
+                # (17 Ağustos 2026) period="2d" olduğu için normal şartlarda
+                # burada 2 satır (dünkü + bugünkü kapanış) olur — sondan bir
+                # önceki satır GERÇEK önceki gün kapanışı. Bazı nadir
+                # durumlarda (ör. sembol yeni işlem görmeye başladıysa, ya da
+                # hafta başı/tatil sonrası tek satır dönerse) sadece 1 satır
+                # gelebilir — bu durumda prevClose'u boş bırakıyoruz, frontend
+                # zaten prevClose yoksa eski (dayOpen'a dokunmama) davranışına
+                # düşecek şekilde yazıldı.
+                if len(close_series) >= 2:
+                    prev_closes[original] = round(float(close_series.iloc[-2]), 2)
             except Exception:
                 continue
         # yfinance kendi "possibly delisted" gürültüsünü artık bastırıyor
@@ -429,7 +457,8 @@ def get_quotes(request: QuotesRequest):
     _quote_cache["ts"] = now
     _quote_cache["tickers_key"] = cache_key
     _quote_cache["data"] = quotes
-    return {"quotes": quotes, "asOf": now, "cached": False}
+    _quote_cache["prevClose"] = prev_closes
+    return {"quotes": quotes, "prevClose": prev_closes, "asOf": now, "cached": False}
 
 
 # (29 Temmuz 2026, on üçüncü oturum devamı — Madde 3 "Kayar menüden güncel
