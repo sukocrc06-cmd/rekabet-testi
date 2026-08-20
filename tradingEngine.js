@@ -4930,9 +4930,161 @@ const TradingEngine = (() => {
         showToast(`İşlem geçmişi CSV olarak indirildi (${combined.length} kayıt).`);
     }
 
+    /* ════════════════════════════════════════════════
+       Trade history Excel (.xlsx) export — markalı, logo gömülü
+       (18 Ağustos 2026, yeni oturum — "işlemleri indirince otomatik
+       böyle bir csv dosyası insin" isteği üzerine: FinteLig/FinTeClub
+       başlık banner'ı + OP Lab & FinTeClub logoları gömülü bir Excel
+       dosyası. Gerçek .csv format görsel/renk/logo TAŞIYAMADIĞI için
+       (düz metindir) bu format .xlsx'e taşındı — veri sütunları
+       (Tarih, Saat, Piyasa, Sembol, Yön, Tip, Adet, Fiyat, Komisyon,
+       K/Z) eski CSV ile birebir aynı, sadece görsel bir üst başlık
+       eklendi. ExcelJS kütüphanesi CDN'den YALNIZCA bu buton
+       tıklandığında (lazy) yükleniyor — sayfa ilk açılışını
+       yavaşlatmaması için. CDN erişilemezse (offline/engellenmiş)
+       eski düz CSV'ye otomatik geri dönülüyor, kullanıcı asla elleri
+       boş kalmıyor. ════════════════════════════════════════════════ */
+
+    let _exceljsLoadPromise = null;
+    function loadExcelJsLib() {
+        if (window.ExcelJS) return Promise.resolve();
+        if (_exceljsLoadPromise) return _exceljsLoadPromise;
+        _exceljsLoadPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('ExcelJS kütüphanesi yüklenemedi (CDN engelli/offline olabilir).'));
+            document.head.appendChild(script);
+        });
+        return _exceljsLoadPromise;
+    }
+
+    function fetchImageAsDataUrl(url) {
+        return fetch(url)
+            .then(r => { if (!r.ok) throw new Error('Logo görseli yüklenemedi: ' + url); return r.blob(); })
+            .then(blob => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result); // full "data:image/png;base64,...." string
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            }));
+    }
+
+    async function exportTradeHistoryXLSX() {
+        const combined = portfolio.history.map(h => ({ ...h, market: 'NORMAL' }))
+            .concat((portfolio.viopHistory || []).map(h => ({ ...h, market: 'VIOP' })));
+        if (!combined.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }
+
+        showToast('Excel hazırlanıyor...');
+
+        try {
+            await loadExcelJsLib();
+            const [oplabDataUrl, ftcDataUrl] = await Promise.all([
+                fetchImageAsDataUrl('oplab-logo.png'),
+                fetchImageAsDataUrl('finteclub-logo.png')
+            ]);
+
+            const wb = new window.ExcelJS.Workbook();
+            wb.creator = 'OptiPulseLab';
+            const ws = wb.addWorksheet('İşlem Geçmişi');
+
+            const headers = ['Tarih', 'Saat', 'Piyasa', 'Sembol', 'Yön', 'Tip', 'Adet', 'Fiyat (₺)', 'Komisyon (₺)', 'K/Z (₺)'];
+            const dataColCount = headers.length; // 10 → sütun B..K
+            const DARK_BG = 'FF0B1120';
+            const GOLD_BG = 'FFFFB93C';
+
+            ws.getColumn(1).width = 20; // A — logo sütunu
+            for (let i = 0; i < dataColCount; i++) ws.getColumn(i + 2).width = 14; // B..K
+
+            // Satır 1-3: "FİNTELİG" banner, B:K birleşik
+            ws.mergeCells(1, 2, 3, 1 + dataColCount);
+            const bannerCell = ws.getCell(1, 2);
+            bannerCell.value = 'FİNTELİG';
+            bannerCell.font = { name: 'Arial', size: 28, bold: true, color: { argb: 'FFFFFFFF' } };
+            bannerCell.alignment = { vertical: 'middle', horizontal: 'center' };
+            for (let r = 1; r <= 5; r++) {
+                for (let c = 1; c <= 1 + dataColCount; c++) {
+                    ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DARK_BG } };
+                }
+            }
+            ws.getRow(1).height = 22;
+            ws.getRow(2).height = 22;
+            ws.getRow(3).height = 22;
+            ws.getRow(4).height = 6;
+            ws.getRow(5).height = 6;
+
+            // Satır 6: sütun başlıkları
+            const headerRowIdx = 6;
+            headers.forEach((h, i) => {
+                const cell = ws.getCell(headerRowIdx, i + 2);
+                cell.value = h;
+                cell.font = { bold: true, color: { argb: 'FF1A1300' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GOLD_BG } };
+                cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                cell.border = { bottom: { style: 'thin', color: { argb: 'FF1A1300' } } };
+            });
+            ws.getRow(headerRowIdx).height = 20;
+            ws.getCell(headerRowIdx, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DARK_BG } };
+
+            // Veri satırları (kronolojik, en eski üstte — eski CSV ile aynı sıralama)
+            const sorted = combined.slice().sort((a, b) => a.ts - b.ts);
+            let rowIdx = headerRowIdx + 1;
+            sorted.forEach(h => {
+                const d = new Date(h.ts);
+                const rowVals = [
+                    d.toLocaleDateString('tr-TR'),
+                    d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                    h.market === 'VIOP' ? 'VİOP' : 'Spot',
+                    h.symbol,
+                    h.side === 'BUY' ? 'AL' : 'SAT',
+                    h.type === 'OPEN' ? 'AÇILIŞ' : 'KAPANIŞ',
+                    h.qty,
+                    Number(h.price.toFixed(2)),
+                    Number((h.commission || 0).toFixed(2)),
+                    h.pnl !== null && h.pnl !== undefined ? Number(h.pnl.toFixed(2)) : ''
+                ];
+                rowVals.forEach((v, i) => {
+                    const cell = ws.getCell(rowIdx, i + 2);
+                    cell.value = v;
+                    if (i === 7 || i === 8 || i === 9) cell.numFmt = '0.00'; // Fiyat, Komisyon, K/Z — hep 2 ondalık
+                    cell.alignment = { horizontal: (i >= 6 ? 'right' : 'center') };
+                });
+                rowIdx++;
+            });
+
+            // Logo sütununun tamamını (banner + veri boyunca) koyu zeminle doldur
+            for (let r = 1; r < rowIdx; r++) {
+                ws.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DARK_BG } };
+            }
+
+            // İki logoyu göm: üstte OP Lab, altında FinTeClub
+            const oplabImgId = wb.addImage({ base64: oplabDataUrl, extension: 'png' });
+            const ftcImgId = wb.addImage({ base64: ftcDataUrl, extension: 'png' });
+            ws.addImage(oplabImgId, { tl: { col: 0.05, row: 0.05 }, ext: { width: 130, height: 130 } });
+            ws.addImage(ftcImgId, { tl: { col: 0.05, row: 7.15 }, ext: { width: 130, height: 130 } });
+
+            const buf = await wb.xlsx.writeBuffer();
+            const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const stamp = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `optipulselab_islem_gecmisi_${stamp}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast(`İşlem geçmişi Excel olarak indirildi (${combined.length} kayıt).`);
+        } catch (err) {
+            console.error('[XLSX export] Excel oluşturulamadı, düz CSV\'ye geri dönülüyor:', err);
+            showToast('Excel oluşturulamadı, CSV olarak indiriliyor...');
+            exportTradeHistoryCSV();
+        }
+    }
+
     function setupCsvExport() {
         const btn = byId('btn-export-history-csv');
-        if (btn) btn.addEventListener('click', exportTradeHistoryCSV);
+        if (btn) btn.addEventListener('click', exportTradeHistoryXLSX);
     }
 
     /* ════════════════════════════════════════════════
