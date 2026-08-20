@@ -22,12 +22,33 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- (op lab tam gelişim — bağımsız kopya, 17 Ağustos 2026)
-         FinTeClub/FinteLig'e bağlı erişim kilidi (ftc-oplab-gate) ve giriş
-         modalı (ftc-login-modal-overlay) bu bağımsız kopyada BİLEREK
-         kaldırıldı — bu kopya finteclubBridge.js'i hiç yüklemiyor, dolayısıyla
-         bu öğeler zaten hiçbir zaman görünmeyecekti; kod temizliği için
-         tamamen çıkarıldı. -->
+    <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
+         getirildi) 17 Ağustos'ta kaldırılmış olan erişim kilidi ve giriş
+         modalı yeniden eklendi — finteclubBridge.js updateAccessGate()/
+         syncLoginUI() bunları admin durumuna göre .hidden sınıfıyla
+         gösterip gizliyor. -->
+    <div class="ftc-oplab-gate hidden" id="ftc-oplab-gate">
+        <div class="ftc-oplab-gate-box">
+            <div class="ftc-oplab-gate-title">Platform Geçici Olarak Kapalı</div>
+            <p>OPLab şu anda yönetici tarafından geçici olarak devre dışı bırakıldı. Lütfen daha sonra tekrar deneyin.</p>
+        </div>
+    </div>
+
+    <div class="ftc-login-modal-overlay hidden" id="ftc-login-modal-overlay">
+        <div class="ftc-login-modal-box">
+            <div class="ftc-login-modal-title">FinteLig Girişi</div>
+            <p class="ftc-login-modal-desc">FinteLig yarışmacısıysan, başvuruda belirlediğin e-posta ve şifreyle giriş yap. Yarışmacı değilsen giriş yapmadan da platformu kullanabilirsin.</p>
+            <div id="ftc-login-modal-form">
+                <input type="email" id="ftc-modal-login-email" class="form-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                <input type="password" id="ftc-modal-login-password" class="form-input" placeholder="Şifren..." autocomplete="current-password">
+                <button type="button" class="btn btn-primary" style="width:100%;margin-top:6px;" id="ftc-modal-login-btn">Giriş Yap</button>
+                <div class="ftc-verify-status" id="ftc-modal-login-status"></div>
+            </div>
+            <div id="ftc-login-modal-welcome" class="ftc-login-modal-welcome hidden"></div>
+            <button type="button" class="ftc-login-modal-skip" id="ftc-login-modal-skip">Giriş yapmadan devam et →</button>
+        </div>
+    </div>
+
     <div class="dashboard-container">
         <!-- HEADER -->
         <header class="dashboard-header" id="main-header">
@@ -194,10 +215,20 @@
                             <label class="profile-settings-label" for="profile-name-input">Profil Ayarları — İsim</label>
                             <input type="text" id="profile-name-input" class="form-input profile-name-input" placeholder="İsminizi girin..." maxlength="40">
                         </div>
-                        <!-- (op lab tam gelişim — bağımsız kopya, 17 Ağustos 2026)
-                             FinTeClub/FinteLig'e bağlı "Girişi" bölümü (ftc-verify-section)
-                             bu bağımsız kopyada BİLEREK kaldırıldı — finteclubBridge.js hiç
-                             yüklenmediği için bu alan zaten işlevsizdi. -->
+                        <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle
+                             geri getirildi) 17 Ağustos'ta kaldırılmış olan "Girişi" bölümü
+                             (ftc-verify-section) yeniden eklendi — finteclubBridge.js'in
+                             init() içindeki loginBtn/logoutBtn/emailInput/pwInput
+                             wiring'i bu ID'leri arıyor. -->
+                        <div class="header-menu-divider"></div>
+                        <div class="profile-panel-section" id="ftc-verify-section">
+                            <label class="profile-settings-label" for="ftc-login-email">FinteLig Girişi</label>
+                            <input type="email" id="ftc-login-email" class="form-input profile-name-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                            <input type="password" id="ftc-login-password" class="form-input profile-name-input" placeholder="Şifren..." style="margin-top:8px;" autocomplete="current-password">
+                            <button type="button" id="ftc-login-btn" class="btn btn-primary" style="width:100%;margin-top:10px;">Giriş Yap</button>
+                            <button type="button" id="ftc-logout-btn" class="btn btn-secondary hidden" style="width:100%;margin-top:8px;">Çıkış Yap</button>
+                            <div class="ftc-verify-status" id="ftc-verify-status"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1606,10 +1637,13 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- TradingView Lightweight Charts (used by the main trading chart) -->
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-    <!-- (op lab tam gelişim — bağımsız kopya, 17 Ağustos 2026)
-         FinTeClub/Firebase script'leri (firebase-app/firestore/auth) bu bağımsız
-         kopyada BİLEREK yüklenmiyor — bu kopya Firestore'a hiçbir zaman yazmaz/
-         okumaz, tamamen localStorage tabanlıdır. -->
+    <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
+         getirildi) 17 Ağustos'ta "bağımsız kopya" kararıyla kaldırılmış
+         olan Firebase SDK script'leri (finteclubBridge.js'in FinTeClub ile
+         AYNI Firestore projesine bağlanabilmesi için) yeniden eklendi. -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <!-- Data Controller -->
     <script src="config.js"></script>
     <script src="dataController.js"></script>
@@ -1629,13 +1663,13 @@
     <script src="tourGuide.js"></script>
     <!-- Application Controller -->
     <script src="app.js"></script>
-    <!-- (op lab tam gelişim — bağımsız kopya, 17 Ağustos 2026)
-         finteclubBridge.js BİLEREK yüklenmiyor — bu kopya FinTeClub/FinteLig
-         admin paneline veya canlı Lig/Zirve sistemine hiçbir şekilde bağlı değil,
-         tamamen bağımsız çalışır (bkz. tradingEngine.js içindeki güvenli
-         varsayılanlar: window.FTC_AUTH_STATE / window.FTC_TRADING_STATE tanımsız
-         olduğunda bakiye her zaman gerçek/görünür, işlemler hiçbir zaman admin
-         tarafından durdurulamaz). -->
+    <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
+         getirildi) 17 Ağustos'ta kaldırılmış olan finteclubBridge.js yeniden
+         eklendi — admin panelindeki OPLab Kontrolü (Erişim Durumu, Alım-Satım
+         Durumu, Tema/Kurumsal Mavi) ve FinteLig giriş/doğrulama akışı bu
+         dosya sayesinde tekrar çalışıyor. Firebase SDK script'leri yukarıda
+         (config.js'ten önce) yüklü olmalı. -->
+    <script src="finteclubBridge.js"></script>
 
 
     <script>
