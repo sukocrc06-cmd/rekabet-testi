@@ -4935,7 +4935,12 @@ const TradingEngine = (() => {
        (18 Ağustos 2026, yeni oturum — "işlemleri indirince otomatik
        böyle bir csv dosyası insin" isteği üzerine: FinteLig/FinTeClub
        başlık banner'ı + OP Lab & FinTeClub logoları gömülü bir Excel
-       dosyası. Gerçek .csv format görsel/renk/logo TAŞIYAMADIĞI için
+       dosyası. (Not: Önce iki elle çizilmiş OP Lab logo denemesi
+       kullanıcıya sunuldu, ikisi de beğenilmedi/kaldırıldı — kullanıcı
+       daha sonra kulübün gerçek e-posta imzasındaki resmi logoları
+       (PDF) gönderdi, o resmi PNG'ler (şeffaf, gerçek OP Lab ve
+       FinTeClub logoları) buraya gömülüyor.) Gerçek .csv format
+       görsel/renk/logo TAŞIYAMADIĞI için
        (düz metindir) bu format .xlsx'e taşındı — veri sütunları
        (Tarih, Saat, Piyasa, Sembol, Yön, Tip, Adet, Fiyat, Komisyon,
        K/Z) eski CSV ile birebir aynı, sadece görsel bir üst başlık
@@ -5057,11 +5062,11 @@ const TradingEngine = (() => {
                 ws.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DARK_BG } };
             }
 
-            // İki logoyu göm: üstte OP Lab, altında FinTeClub
+            // İki resmi logoyu göm: üstte OP Lab, altında FinTeClub
             const oplabImgId = wb.addImage({ base64: oplabDataUrl, extension: 'png' });
             const ftcImgId = wb.addImage({ base64: ftcDataUrl, extension: 'png' });
-            ws.addImage(oplabImgId, { tl: { col: 0.05, row: 0.05 }, ext: { width: 130, height: 130 } });
-            ws.addImage(ftcImgId, { tl: { col: 0.05, row: 7.15 }, ext: { width: 130, height: 130 } });
+            ws.addImage(oplabImgId, { tl: { col: 0.05, row: 0.15 }, ext: { width: 140, height: 140 } });
+            ws.addImage(ftcImgId, { tl: { col: 0.05, row: 7.35 }, ext: { width: 140, height: 140 } });
 
             const buf = await wb.xlsx.writeBuffer();
             const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
