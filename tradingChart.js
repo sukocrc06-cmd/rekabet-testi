@@ -280,6 +280,14 @@ const TradingChart = (() => {
 
     let state = {
         ticker: null,
+        loadSeq: 0,             // (25 Ağustos 2026 — sembol geçişi yarış durumu
+                                // düzeltmesi) her loadSymbol() çağrısında artırılan
+                                // sayaç; bir yükleme başladıktan sonra daha yenisi
+                                // başlarsa eskisi kendini "geçersiz" olarak tanır.
+        dataReady: false,       // true olana kadar candles/dailyCandles GÜVENİLİR
+                                // değildir — canlı tik güncellemeleri bu bayrak
+                                // false iken diziye yazmayı reddeder (bkz.
+                                // updateLastPrice).
         candles: [],           // the currently DISPLAYED resolution's candles (derived)
         dailyCandles: [],      // source-of-truth daily candles (fetched or generated)
         resolution: '1d',      // '15m' | '1h' | '4h' | '1d' | '1w'
@@ -703,10 +711,31 @@ const TradingChart = (() => {
         }
 
         state.ticker = ticker;
+        // (25 Ağustos 2026 — sembol geçişi yarış durumu düzeltmesi) Bu
+        // fonksiyon `await fetchOhlcvCached(ticker)` sırasında askıya alınıyor
+        // (yüzlerce ms - birkaç saniye sürebilir). O sırada tradingEngine.js'in
+        // periyodik/WS canlı tik güncellemeleri (updateLastPrice) hâlâ tetiklenmeye
+        // devam ediyor ve `ticker === state.ticker` kontrolünden geçiyorlardı
+        // (state.ticker az önce yukarıda güncellendi) — ama state.candles/
+        // dailyCandles HÂLÂ ESKİ sembolün verisiydi. Sonuç: yeni sembolün fiyatı
+        // eski sembolün mum dizisinin son barına yazılıyor, hem grafiği (aşırı
+        // volatil/anlamsız görünen sentetik intraday barlar) hem de header'daki
+        // %değişimi (iki farklı sembolün fiyatları karşılaştırıldığı için dev
+        // yanlış bir yüzde) kısa süreliğine bozuyordu — gerçek veri gelince
+        // "kendiliğinden düzeliyormuş" gibi görünüyordu. `mySeq` bunu önler:
+        // updateLastPrice, kendi başladığı yüklemeden DAHA YENİ bir yükleme
+        // varsa (state.loadSeq ilerlediyse) yazmayı reddeder.
+        const mySeq = ++state.loadSeq;
+        state.dataReady = false;
         setSymbolHeader(ticker, null, null);
         fetchFundamentals(ticker); // fire-and-forget, chart yüklemesini beklemez
 
         let candles = await fetchOhlcvCached(ticker);
+
+        // Bu arada daha yeni bir sembol seçimi başladıysa (kullanıcı hızlıca
+        // başka bir sembole tıkladı), bu eski yüklemeyi burada sessizce iptal
+        // et — state'e hiçbir şey yazma, en yeni yüklemenin işini bozma.
+        if (mySeq !== state.loadSeq) return null;
 
         if (!candles || candles.length < 5) {
             // (19 Temmuz 2026, on ikinci oturum) Önceden burada sabit "90"
@@ -762,6 +791,7 @@ const TradingChart = (() => {
         // derives from it — daily/weekly reuse it as-is, intraday explodes it.
         state.dailyCandles = candles;
         state.dayOpenPrice = candles.length ? candles[candles.length - 1].open : null;
+        state.dataReady = true;
 
         applyResolution();
 
@@ -2381,7 +2411,15 @@ const TradingChart = (() => {
 
     function updateLastPrice(ticker, price) {
         if (!chart || !candleSeries) return;
-        if (ticker !== state.ticker || !state.candles.length) return;
+        // (25 Ağustos 2026 — sembol geçişi yarış durumu düzeltmesi) `ticker ===
+        // state.ticker` tek başına yeterli değil: state.ticker, loadSymbol()
+        // içinde ASENKRON veri isteği başlamadan HEMEN ÖNCE güncelleniyor —
+        // yani "hedef sembol bu" demek, "bu sembolün gerçek verisi zaten
+        // yüklendi" demek değil. `dataReady` bayrağı olmadan, sembol
+        // değiştirilirken gelen bir canlı tik, HÂLÂ eski sembole ait olan
+        // state.candles/dailyCandles dizisinin son barına yeni sembolün
+        // fiyatını yazabiliyor ve grafiği kısa süreliğine bozuyordu.
+        if (ticker !== state.ticker || !state.dataReady || !state.candles.length) return;
 
         // Keep the underlying daily source-of-truth candle in sync too, so a
         // mid-session resolution switch (e.g. 1D -> 1H) re-derives from the
