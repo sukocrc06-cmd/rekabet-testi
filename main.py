@@ -196,7 +196,16 @@ async def get_index():
 # HİÇBİR çağrı bulunamadı (grep ile doğrulandı) — tamamen ölü kod olduğu
 # için kaldırıldı. Kullanıcı bu temizliği bu oturumda ayrıca onayladı.
 
-@app.get("/api/v1/health")
+
+# (25 Ağustos 2026 — UptimeRobot keep-alive incelemesi) Bu uç nokta önceden
+# sadece @app.get ile tanımlıydı — yani Starlette sadece GET metoduna izin
+# veriyordu. UptimeRobot'un ücretsiz HTTP(s) monitörü varsayılan olarak HEAD
+# isteği gönderiyor; bu da her kontrolde 405 "Method Not Allowed" ile
+# sonuçlanıp monitörün "Down" görünmesine yol açıyordu (canlı testle
+# doğrulandı: GET->200, HEAD/OPTIONS/POST->405). Kök neden Render'ın soğuk
+# başlangıcı DEĞİLDİ — sadece izin verilen metot eksikliğiydi. GET ile
+# birlikte HEAD'i de kabul edecek şekilde genişletildi.
+@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "ok"}
 
