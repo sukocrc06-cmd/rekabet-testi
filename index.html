@@ -1633,8 +1633,14 @@
         <button type="button" class="drawing-context-item danger" data-action="delete">Sil</button>
     </div>
 
-    <!-- Chart.js (used by the legacy backtest sub-chart in the Analytics drawer) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- (25 Ağustos 2026 — "ilk açılış hızı" incelemesi) Chart.js CDN scripti
+         buradan kaldırıldı: onu kullanan eski Canvas tabanlı backtest/analytics
+         çekmecesi (chartRenderer.js) 23 Temmuz 2026'da tamamen sökülmüştü ama
+         bu script etiketi o temizlikte unutulmuş — kod tabanında hiçbir
+         Chart(...) çağrısı kalmamıştı (grep ile doğrulandı). Diğer tüm
+         scriptler (config.js, tradingChart.js, tradingEngine.js...) ondan
+         SONRA sırayla yüklendiği için bu ~200KB'lık ölü kütüphane her sayfa
+         açılışında uygulamanın başlamasını gereksiz yere geciktiriyordu. -->
     <!-- TradingView Lightweight Charts (used by the main trading chart) -->
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri

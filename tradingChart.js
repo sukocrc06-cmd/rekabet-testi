@@ -2420,8 +2420,20 @@ const TradingChart = (() => {
             }
         }
 
-        const prevClose = state.candles.length > 1 ? state.candles[state.candles.length - 2].close : last.open;
-        setSymbolHeader(ticker, price, prevClose);
+        // (25 Ağustos 2026 — % değişim tutarlılık düzeltmesi) Burada önceden
+        // state.candles (aktif çözünürlüğe göre türetilmiş dizi — 15dk/1sa/4sa
+        // görünümünde GÜNLÜK değil o zaman dilimine ait mumlar) kullanılıyordu.
+        // Bu, 1D dışındaki bir zaman diliminde her canlı tikte header'daki
+        // %değişimin "günün değişimi" yerine "son mumla bir önceki mum
+        // arasındaki fark" olarak hesaplanmasına yol açıyordu — izleme
+        // listesindeki (backend'in gerçek prevClose'undan hesaplanan) yüzdeyle
+        // uyuşmuyordu. İlk render (loadSymbol içindeki setSymbolHeader çağrısı)
+        // zaten doğru şekilde state.dailyCandles kullanıyordu; burası da aynı
+        // kaynağa taşındı ki iki yer arasında asla drift olmasın.
+        const dailyPrev = state.dailyCandles.length > 1
+            ? state.dailyCandles[state.dailyCandles.length - 2].close
+            : last.open;
+        setSymbolHeader(ticker, price, dailyPrev);
     }
 
     /* ────────── Overlay indicators on main chart ────────── */
