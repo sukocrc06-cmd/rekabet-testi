@@ -239,36 +239,85 @@ async def list_stocks():
             content={"status": "error", "message": f"Failed to retrieve stock list: {str(e)}"}
         )
 
+# (27 Ağustos 2026 — "mum grafiği TradingView'la aynı değil" kök neden
+# düzeltmesi) ÖNCEDEN bu uç nokta SADECE günlük (period="max", interval="1d")
+# veri döndürüyordu — 15dk/1sa/4sa gibi gün-içi zaman dilimleri frontend'de
+# (dataController.js → synthesizeIntradayCandles) TAMAMEN rastgele/sentetik
+# olarak üretiliyordu (sadece o günün GERÇEK açılış/kapanış/en yüksek/en
+# düşük değerlerine sadık kalacak şekilde). Artık `interval` sorgu parametresi
+# ile GERÇEK gün-içi veri de istenebiliyor — Yahoo Finance'in izin verdiği
+# geriye dönük pencereyle sınırlı (15dk için ~60 gün, 60dk için ~730 gün;
+# Yahoo'da 4sa yok, frontend 60dk barlarını 4'erli gruplayarak türetiyor).
+# Bu pencerenin DIŞINDAKİ eski geçmiş için sentetik yöntem fallback olarak
+# AYNEN kalıyor — burada hiçbir şey kaldırılmadı, sadece frontend'in
+# tercih edebileceği YENİ, gerçek bir kaynak eklendi.
+_OHLCV_INTERVAL_MAP = {
+    "1d": ("max", "1d"),
+    "15m": ("60d", "15m"),
+    "60m": ("730d", "60m"),
+}
+
+
 @app.get("/api/v1/ohlcv/{ticker}")
-def get_data(ticker: str):
+def get_data(ticker: str, interval: str = "1d"):
     if not _is_valid_ticker_format(ticker):
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": f"Geçersiz sembol formatı: '{ticker}'"}
         )
+    if interval not in _OHLCV_INTERVAL_MAP:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Geçersiz interval: '{interval}' (izin verilen: {list(_OHLCV_INTERVAL_MAP)})"}
+        )
+    period, yf_interval = _OHLCV_INTERVAL_MAP[interval]
     try:
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
-        # (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Önceden
-        # sabit "3mo" (3 ay) isteniyordu; ana grafik bu yüzden çok kısıtlı bir
-        # pencereye hapsolmuştu ve geçmişe gidilemiyordu. Artık yfinance'in
-        # sunduğu TÜM geçmiş isteniyor (period="max" — sembolün borsaya
-        # kotasyon tarihinden bugüne kadarki tüm günlük barlar). Frontend
-        # tarafında (tradingChart.js) intraday (15m/1H/4H) sentetik mumlar
-        # yine de sadece son ~90 günlük bir dilimden türetiliyor — sadece
-        # 1D/1W görünümleri bu tam geçmişi kullanıyor, bu yüzden yükü
-        # gereksiz büyütmüyor.
-        hist = _cached_history(stock, formatted, "max", "1d", timeout=15)
+        # (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Günlük
+        # (1d) için yfinance'in sunduğu TÜM geçmiş isteniyor (period="max" —
+        # sembolün borsaya kotasyon tarihinden bugüne kadarki tüm günlük
+        # barlar). Gün-içi (15m/60m) istekler yukarıdaki haritadaki Yahoo'nun
+        # izin verdiği sabit pencereyle sınırlı — daha uzun bir period
+        # istense bile Yahoo zaten sessizce kırpardı, biz doğrudan gerçek
+        # sınırı istiyoruz ki gereksiz "boş" bir istek yapılmasın.
+        hist = _cached_history(stock, formatted, period, yf_interval, timeout=15)
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
-        data = hist.reset_index().to_dict(orient="records")
+        hist = hist.reset_index()
+        # yfinance, GÜNLÜK barlarda index sütununu "Date", GÜN-İÇİ (intraday)
+        # barlarda ise "Datetime" olarak adlandırıyor — frontend'in tek bir
+        # ayrıştırma yolu kullanabilmesi için ikisini de "Date" adına
+        # normalize ediyoruz.
+        if "Datetime" in hist.columns and "Date" not in hist.columns:
+            hist = hist.rename(columns={"Datetime": "Date"})
+        data = hist.to_dict(orient="records")
 
-        # Convert Timestamp values to string for serialization
+        # Convert Timestamp values to string for serialization. Gün-içi
+        # barlar tz-aware (borsa saat dilimine, Europe/Istanbul'a
+        # yerelleştirilmiş) geliyor — frontend'in `new Date(...)` ile
+        # tarayıcı yerel saatinden ETKİLENMEDEN doğru ayrıştırabilmesi için
+        # AÇIKÇA UTC'ye çevirip ISO 8601 (+00:00 uzantılı) string olarak
+        # yazıyoruz; günlük (tz-naive) barlarda davranış DEĞİŞMEDİ.
         for record in data:
             if "Date" in record:
-                record["Date"] = str(record["Date"])
+                val = record["Date"]
+                tzinfo = getattr(val, "tzinfo", None)
+                if tzinfo is not None:
+                    try:
+                        # (27 Ağustos 2026) `str(...)` yerine kasıtlı olarak
+                        # `isoformat()` kullanılıyor — ikisi de tarayıcıda
+                        # doğru ayrıştırılıyor (test edildi) ama isoformat()
+                        # her zaman "T" ayraçlı, katı ISO 8601 üretir
+                        # ("2026-08-27T07:00:00+00:00"), tarayıcılar arası
+                        # belirsizlik riskini tamamen ortadan kaldırır.
+                        record["Date"] = val.tz_convert("UTC").isoformat()
+                        continue
+                    except Exception:
+                        pass
+                record["Date"] = str(val)
 
-        return {"ticker": ticker, "data": data}
+        return {"ticker": ticker, "interval": interval, "data": data}
     except Exception as e:
         return JSONResponse(
             status_code=500,

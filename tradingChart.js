@@ -316,6 +316,11 @@ const TradingChart = (() => {
         measureShape: null,
         selectedDrawingIndex: -1,
         dayOpenPrice: null,
+        resSeq: 0,              // (27 Ağustos 2026 — gerçek gün-içi veri yükseltmesi)
+                                // her setResolution()/loadSymbol() çağrısında artırılır;
+                                // asenkron gerçek-veri getirimi tamamlandığında hâlâ
+                                // aynı sembol/çözünürlükte miyiz diye bunun ile
+                                // karşılaştırılır — eskiyse sonuç sessizce atılır.
 
         // (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Sinyal Anlatıcısı +
         // Strateji Tekrarı ("zaman makinesi") — bkz. bu dosyanın altındaki
@@ -601,6 +606,133 @@ const TradingChart = (() => {
         return fresh;
     }
 
+    /* ────────── Gerçek gün-içi (intraday) veri (27 Ağustos 2026) ──────────
+     * "TradingView'daki mum bendekiyle aynı değil" geri bildirimi üzerine:
+     * 15dk/1sa/4sa görünümleri ÖNCEDEN her zaman TAMAMEN sentetikti (bkz.
+     * dataController.js → synthesizeIntradayCandles, sadece günlük
+     * açılış/kapanış/en yüksek/en düşük'e sadık kalan rastgele bir "Brownian
+     * bridge"). Backend artık ?interval=15m/60m ile GERÇEK Yahoo Finance
+     * gün-içi verisi de sunuyor (bkz. main.py) — ama Yahoo'nun izin verdiği
+     * geriye dönük pencereyle sınırlı (15dk için ~60 gün, 60dk için ~730 gün).
+     * Bu yüzden strateji şu: o pencerenin İÇİNDEKİ (yakın geçmiş) barlar için
+     * GERÇEK veri, DIŞINDAKİ (daha eski) barlar için ESKİ sentetik yöntem
+     * aynen kullanılmaya devam ediyor — ikisi tek bir dizide birleştiriliyor.
+     * Gerçek veri çekimi her zaman ASENKRON ve BEST-EFFORT: başarısız olursa
+     * (ağ hatası, Yahoo rate-limit, zaman aşımı) sessizce tamamen sentetik
+     * eski davranışa dönülüyor — hiçbir durumda grafik boş kalmıyor ya da
+     * hataya düşmüyor.
+     */
+    const INTRADAY_REAL_CACHE_TTL_MS = 5 * 60 * 1000; // backend'in kendi 300sn'lik önbelleğiyle uyumlu
+    const intradayRealCache = new Map(); // `${ticker}:${backendInterval}` -> { candles, ts }
+
+    // Backend/main.py intraday satırları artık her zaman UTC'ye çevrilip
+    // "...+00:00" son ekiyle ISO 8601 olarak geliyor (bkz. main.py 27 Ağustos
+    // notu) — bu format tarayıcının yerel saat dilimine bakılmaksızın
+    // `Date.parse` ile HER ZAMAN doğru/tekil şekilde ayrıştırılır (parseBackendDate'in
+    // günlük barlar için elle Date.UTC() kullanmasının nedeni olan "ofset
+    // içermeyen string" belirsizliği burada yok, çünkü offset her zaman AÇIK).
+    function parseBackendDateTime(rawDate) {
+        const t = Date.parse(String(rawDate || ''));
+        return isNaN(t) ? null : Math.floor(t / 1000);
+    }
+
+    async function fetchIntradayReal(ticker, backendInterval) {
+        const cacheKey = `${ticker}:${backendInterval}`;
+        const cached = intradayRealCache.get(cacheKey);
+        if (cached && (Date.now() - cached.ts) < INTRADAY_REAL_CACHE_TTL_MS) {
+            return cached.candles;
+        }
+        try {
+            const res = await fetch(
+                `${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/ohlcv/${ticker}?interval=${backendInterval}`,
+                window.optipulseFetchOpts({ signal: AbortSignal.timeout(15000) })
+            );
+            if (!res.ok) return null;
+            const json = await res.json();
+            if (!json || !Array.isArray(json.data) || json.data.length < 3) return null;
+            const rows = json.data.map(r => ({
+                date: parseBackendDateTime(r.Date),
+                open: Number(r.Open || 0),
+                high: Number(r.High || 0),
+                low: Number(r.Low || 0),
+                close: Number(r.Close || 0),
+                volume: Number(r.Volume || 0)
+            })).filter(c => c.date !== null && c.close > 0);
+            if (rows.length < 3) return null;
+            intradayRealCache.set(cacheKey, { candles: rows, ts: Date.now() });
+            return rows;
+        } catch (e) {
+            console.warn(`[TradingChart] Gerçek gün-içi veri (${backendInterval}) alınamadı, sentetik veriye devam ediliyor:`, e.message || e);
+            return null;
+        }
+    }
+
+    // Yahoo'da 4 saatlik (4h) doğrudan bir interval yok — gerçek 60dk
+    // barlarını, BIST seansı içinde (10:00-18:00 TRT = 07:00-15:00 UTC) her
+    // takvim gününde ardışık 4'erli gruplara ayırarak türetiyoruz. Bu,
+    // synthesizeIntradayCandles'ın 4sa için ürettiği "günde 2 bar" şeklini
+    // birebir yansıtır (BIST_SESSION_MINUTES/240 = 2).
+    function aggregateHourlyTo4H(hourlyCandles) {
+        if (!Array.isArray(hourlyCandles) || !hourlyCandles.length) return [];
+        const DAY_SECONDS = 86400;
+        const byDay = new Map(); // dayStart -> bars[] (o günün barları, zaman sırasıyla)
+        hourlyCandles.forEach(c => {
+            const dayStart = Math.floor(c.date / DAY_SECONDS) * DAY_SECONDS;
+            if (!byDay.has(dayStart)) byDay.set(dayStart, []);
+            byDay.get(dayStart).push(c);
+        });
+        const out = [];
+        Array.from(byDay.keys()).sort((a, b) => a - b).forEach(dayStart => {
+            const bars = byDay.get(dayStart).sort((a, b) => a.date - b.date);
+            for (let i = 0; i < bars.length; i += 4) {
+                const group = bars.slice(i, i + 4);
+                out.push({
+                    date: group[0].date,
+                    open: group[0].open,
+                    high: Math.max(...group.map(b => b.high)),
+                    low: Math.min(...group.map(b => b.low)),
+                    close: group[group.length - 1].close,
+                    volume: group.reduce((s, b) => s + (b.volume || 0), 0)
+                });
+            }
+        });
+        return out;
+    }
+
+    // Verilen çözünürlük için GERÇEK gün-içi mumları getirir (varsa) — 15dk
+    // ve 1sa doğrudan backend'den, 4sa ise 1sa barlarının agregasyonundan.
+    // Başarısız olursa (Yahoo'nun penceresi dışı, ağ hatası vb.) null döner
+    // — çağıran taraf bu durumda MEVCUT sentetik türetimi aynen kullanmaya
+    // devam eder, hiçbir davranış bozulmaz.
+    async function fetchRealCandlesForResolution(ticker, resId) {
+        if (resId === '15m') {
+            return await fetchIntradayReal(ticker, '15m');
+        }
+        if (resId === '1h') {
+            return await fetchIntradayReal(ticker, '60m');
+        }
+        if (resId === '4h') {
+            const hourly = await fetchIntradayReal(ticker, '60m');
+            if (!hourly || hourly.length < 4) return null;
+            const fourH = aggregateHourlyTo4H(hourly);
+            return fourH.length >= 3 ? fourH : null;
+        }
+        return null;
+    }
+
+    // Gerçek gün-içi barlar (Yahoo'nun izin verdiği pencere kadar geriye
+    // gider) ile eski sentetik barları (o pencereden ÖNCEKİ, daha eski
+    // günler için) TEK bir zaman-sıralı diziye birleştirir. Sınırda çakışma
+    // olursa (aynı takvim günü hem sentetik hem gerçek tarafta üretilmişse)
+    // gerçek veri her zaman KAZANIR — sentetik tarafın o güne ait barları
+    // elenir.
+    function mergeRealWithSynthetic(realCandles, syntheticCandles) {
+        if (!realCandles || !realCandles.length) return syntheticCandles;
+        const firstRealDate = realCandles[0].date;
+        const olderSynthetic = (syntheticCandles || []).filter(c => c.date < firstRealDate);
+        return olderSynthetic.concat(realCandles);
+    }
+
     // (18 Temmuz 2026, onuncu oturum, beşinci tur — "şirket temel verileri")
     // F/K, piyasa değeri, temettü verimi — backend'in yeni /api/v1/fundamentals
     // ucundan çekiliyor. Grafiğin kendisini HİÇ geciktirmiyor: loadSymbol()
@@ -794,6 +926,13 @@ const TradingChart = (() => {
         state.dataReady = true;
 
         applyResolution();
+
+        // (27 Ağustos 2026) Sembol yüklenirken zaten gün-içi bir çözünürlükte
+        // isek (ör. 4sa açıkken ASELS'ten AKBNK'a geçiliyor), yeni sembol için
+        // de gerçek gün-içi veri yükseltmesini tetikle — aksi halde kullanıcı
+        // çözünürlüğü elle değiştirmeden gerçek veriyi hiç görmezdi.
+        const mySeqRes = ++state.resSeq;
+        upgradeIntradayWithRealData(ticker, state.resolution, mySeqRes);
 
         const last = candles[candles.length - 1];
         const prev = candles.length > 1 ? candles[candles.length - 2] : last;
@@ -1011,9 +1150,15 @@ const TradingChart = (() => {
         return !!(res && res.kind === 'intraday');
     }
 
-    function applyResolution() {
+    // (27 Ağustos 2026 — gerçek gün-içi veri yükseltmesi) `candlesOverride`
+    // opsiyonel: verilirse state.candles bunun için YENİDEN türetilmez,
+    // doğrudan kullanılır — upgradeIntradayWithRealData()'nın, sentetik ilk
+    // render'dan SONRA gerçek veriyle gelen ikinci (daha doğru) render için
+    // kullandığı yol budur. Verilmezse davranış tamamen ESKİSİ GİBİ
+    // (deriveCandlesForResolution() ile sentetik/günlük/haftalık türetim).
+    function applyResolution(candlesOverride) {
         if (!state.dailyCandles.length) return;
-        state.candles = deriveCandlesForResolution();
+        state.candles = candlesOverride || deriveCandlesForResolution();
 
         const intraday = isIntradayResolution();
         if (chart) chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
@@ -1072,11 +1217,32 @@ const TradingChart = (() => {
         if (dualActive) refreshDualChart();
     }
 
+    // (27 Ağustos 2026 — gerçek gün-içi veri yükseltmesi) applyResolution()
+    // ANINDA (sentetik veriyle) render ettikten SONRA, arka planda gerçek
+    // Yahoo Finance gün-içi verisini getirmeyi DENER — başarılı olursa
+    // (hâlâ AYNI sembol/çözünürlükteysek) grafiği bu daha doğru veriyle
+    // sessizce yeniden çizer. Kullanıcı bu sırada araya girip sembolü/
+    // çözünürlüğü değiştirirse (mySeq artık state.resSeq'e eşit değildir)
+    // sonuç sessizce atılır — hiçbir yarış durumu/eski veri sızıntısı
+    // olmaz (bkz. loadSymbol()'deki AYNI desenin loadSeq/dataReady versiyonu).
+    async function upgradeIntradayWithRealData(ticker, resId, mySeq) {
+        if (!isIntradayResolution(resId)) return;
+        const real = await fetchRealCandlesForResolution(ticker, resId);
+        if (!real || !real.length) return;
+        if (mySeq !== state.resSeq || ticker !== state.ticker || resId !== state.resolution) return;
+        const synthetic = deriveCandlesFromDaily(state.dailyCandles, resId);
+        const merged = mergeRealWithSynthetic(real, synthetic);
+        if (merged.length < 5) return;
+        applyResolution(merged);
+    }
+
     function setResolution(id) {
         if (!RESOLUTIONS.some(r => r.id === id) || id === state.resolution) return;
         cancelReplayIfActive(); // farklı bir çözünürlüğe geçince tekrar modu iptal edilir
         state.resolution = id;
+        const mySeq = ++state.resSeq;
         applyResolution();
+        upgradeIntradayWithRealData(state.ticker, id, mySeq);
     }
 
     function setupResolutionBar() {
