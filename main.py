@@ -93,7 +93,20 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # bir in-memory TTL önbelleği kullanılıyor. Kalıcı/dağıtık bir cache değil —
 # tek process içinde, süreç yeniden başlayınca sıfırlanır; bu demo/tek-
 # kullanıcılı bir kurulum için yeterli.
-_HISTORY_CACHE_TTL_SEC = 60
+
+# (27 Ağustos 2026 — "izleme listesi %0'da takılı kalıyor" incelemesi) Bu
+# süre önceden 60sn'ydi. O anda canlı testte /api/v1/ohlcv/ASELS VE
+# /api/v1/ohlcv/THYAO gibi bağımsız sembollerde art arda 500 hatası
+# gözlemlendi (market-ticker gibi daha seyrek çağrılan uçlar ise sorunsuz
+# çalışıyordu) — bu, Yahoo Finance'in Render'ın paylaşımlı IP'sini geçici
+# olarak sınırladığını (rate-limit) gösteriyor. 60sn'lik TTL, günlük
+# (1 gün aralıklı) mum verisi için gereğinden kısa: aynı sembol birkaç
+# dakika içinde tekrar açılırsa/senkronize edilirse her seferinde yeniden
+# Yahoo'ya gidiliyordu. 300sn'ye (5dk) çıkarmak, Yahoo'ya giden istek
+# sıklığını azaltıp hem rate-limit'e daha az sık takılmayı hem de mevcut
+# bir sınırlamanın kendini toparlaması için zaman kazanmayı sağlar —
+# günlük mum verisi için 5 dakikalık bayatlık pratikte fark edilmez.
+_HISTORY_CACHE_TTL_SEC = 300
 _history_cache = {}  # key: (formatted_ticker, period, interval) -> (timestamp, DataFrame)
 
 
@@ -384,6 +397,16 @@ def format_ticker(ticker: str) -> str:
 # HER senkron turunda (40sn'de bir) doğrudan güncelleyecek (bkz.
 # tradingEngine.js → syncWatchlistPrices), böylece %değişim göstergesi
 # TradingView ile aynı, gerçek referansı kullanacak.
+# (27 Ağustos 2026 — rate-limit incelemesi notu) Bu değeri BİLEREK
+# yükseltmedik: 10 Ağustos'taki düzeltme (yukarıdaki not) tam olarak bunun
+# TERSİNİ hedefliyordu — TTL'nin istemci poll aralığından (40sn) KISA
+# kalması gerekiyor, yoksa tek bir açık sekme bile gerçek fiyatın ~80sn+
+# gerisine düşüyor (o zaman şikayet edilen "gerçek fiyattan geride kalma"
+# hatası). Yahoo rate-limit riskini azaltmak için asıl kaldıraç aşağıdaki
+# _HISTORY_CACHE_TTL_SEC (27 Ağustos'ta 60sn'den 300sn'ye çıkarıldı) —
+# tek bir toplu yf.download çağrısı olduğu için (97 sembol TEK istek)
+# quotes zaten Yahoo'yu ohlcv kadar yormuyor; asıl payı ohlcv/canlı-tick
+# tarafı alıyor.
 _QUOTE_CACHE_TTL_SEC = 35
 _quote_cache = {"ts": 0.0, "tickers_key": None, "data": {}, "prevClose": {}}
 

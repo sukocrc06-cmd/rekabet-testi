@@ -811,7 +811,23 @@ const TradingChart = (() => {
         // price instead of a hardcoded fallback — otherwise the "Price
         // Action" backtest chart and this live chart would slowly disagree
         // on what the current price even is.
-        return { ticker, lastClose: last ? last.close : null, dayOpen: last ? last.open : null };
+        //
+        // (27 Ağustos 2026 — "izleme listesi/hızlı işlem paneli %0 gösteriyor,
+        // grafik başlığı %15,99 gösteriyor" tutarsızlığı) `dayOpen` alanı
+        // burada zaten vardı ama günün KENDİ `open`'ıydı — TradingView'ın
+        // kullandığı "bir önceki gün kapanışı" referansı DEĞİL (setSymbolHeader
+        // ve updateLastPrice'ın %değişim için kullandığı gerçek kaynak budur,
+        // bkz. 25 Ağustos düzeltmesi). Ayrı bir `dailyPrevClose` alanı ekliyoruz
+        // — AYNI hesap, tek bir yerde tekrar edilmiş: state.dailyCandles'ın
+        // sondan bir önceki günü. tradingEngine.js'in selectSymbol() fonksiyonu
+        // bunu artık priceProfiles[symbol].dayOpen'a yazıyor; böylece backend'in
+        // /api/v1/quotes'u (Yahoo rate-limit yüzünden) başarısız olduğu anlarda
+        // bile izleme listesi ve hızlı alım-satım paneli, grafiğin zaten
+        // başarıyla çektiği AYNI günlük kapanış verisiyle tutarlı kalır.
+        const dailyPrevCloseForInfo = state.dailyCandles.length > 1
+            ? state.dailyCandles[state.dailyCandles.length - 2].close
+            : (last ? last.open : null);
+        return { ticker, lastClose: last ? last.close : null, dayOpen: last ? last.open : null, dailyPrevClose: dailyPrevCloseForInfo };
     }
 
     function getLastClose() {

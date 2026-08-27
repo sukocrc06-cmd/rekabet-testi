@@ -2552,14 +2552,32 @@ const TradingEngine = (() => {
             // kullanılıyor — OHLCV geçmişindeki son kapanış da (ör. bir
             // kurumsal işlem sonrası ayarlanmış/ayarlanmamış kapanış
             // karışıklığı yüzünden) tek seferlik bozuk olabilir.
-            // (17 Ağustos 2026) dayOpen ARTIK burada set edilmiyor — chartInfo.
-            // lastClose günün en güncel/canlı fiyatıdır, gerçek önceki gün
+            // (17 Ağustos 2026) dayOpen ARTIK chartInfo.lastClose'a eşitlenmiyor
+            // — lastClose günün en güncel/canlı fiyatıdır, gerçek önceki gün
             // kapanışı değil (bkz. syncWatchlistPrices'taki 17 Ağustos notu ve
             // syncPriceAnchor'daki aynı düzeltme) — dayOpen'ı buna eşitlemek
             // %değişimi sembol seçilir seçilmez yanlışlıkla %0'a sıfırlıyordu.
+            //
+            // (27 Ağustos 2026 — "izleme listesi/hızlı işlem paneli %0,
+            // grafik başlığı %15,99" tutarsızlığı) BU SEFER FARKLI bir alan
+            // kullanılıyor: chartInfo.dailyPrevClose (bkz. tradingChart.js'teki
+            // loadSymbol() dönüşü) GERÇEKTEN bir önceki günün kapanışı —
+            // yukarıdaki notun uyardığı "lastClose'u dayOpen'a yazma" hatasının
+            // AYNISI değil. Kök neden: /api/v1/quotes'un periyodik (40sn'de
+            // bir) senkronu şu anda Yahoo Finance rate-limit'ine takılıp ara
+            // sıra 500 döndürüyor, bu yüzden pek çok sembolün dayOpen'ı hiç
+            // güncellenmeden tohum değerinde (fiyatla aynı, %0) kalabiliyor.
+            // Burada, grafiğin AYRICA ve BAŞARIYLA çekmiş olduğu aynı günlük
+            // kapanış verisini kullanarak — Yahoo'ya EK bir istek atmadan —
+            // dayOpen'ı düzeltiyoruz. Sonuç: en azından o an AÇIK/seçili olan
+            // sembol için izleme listesi + hızlı alım-satım paneli + grafik
+            // başlığı üçü de aynı kaynaktan, tutarlı bir % gösterir.
             if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
                 prof.price = val;
                 prof.liveAnchor = val;
+                if (typeof chartInfo.dailyPrevClose === 'number' && chartInfo.dailyPrevClose > 0) {
+                    prof.dayOpen = chartInfo.dailyPrevClose;
+                }
             })) {
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
