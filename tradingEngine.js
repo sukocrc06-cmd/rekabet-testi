@@ -5801,6 +5801,30 @@ const TradingEngine = (() => {
         const restored = lastSymbol && DC.BIST100.find(s => s.symbol === lastSymbol);
         const first = restored || DC.BIST100.find(s => s.symbol === 'THYAO') || DC.BIST100[0];
         if (first) selectSymbol(first.symbol);
+
+        // (27 Ağustos 2026 — yarışma günü hız hazırlığı: "popüler hisseleri
+        // önceden ısıt") Sayfa ilk açıldığında sadece TEK sembol (yukarıdaki
+        // `first`) yükleniyor — geri kalan ~96 BIST100 sembolünün grafik
+        // verisi hiç çekilmemiş oluyor. Bir kullanıcı/jüri bilinen büyük
+        // hisselerden birine (ör. ASELS, GARAN) tıkladığında bu veri İLK KEZ
+        // çekiliyor olduğu için (özellikle şu anki Yahoo rate-limit altında)
+        // yavaş kalabiliyor. Aşağıdaki liste, en olası tıklanacak birkaç
+        // BIST30 hissesinin verisini kullanıcı hiçbir şeye tıklamadan, ARKA
+        // PLANDA ve ARALIKLI (backend'i bir anda yormamak için tek seferde
+        // değil, 1,5sn arayla) önceden ısıtır. TradingChart.prewarmSymbol()
+        // SADECE veriyi kendi önbelleğine (symbolHistoryCache, 3dk TTL)
+        // düşürür — ekranı/aktif grafiği/canlı akışı HİÇ etkilemez, gerçekten
+        // o sembol seçildiğinde loadSymbol() ağdan beklemeden önbellekten
+        // anında yanıt alır. İlk sembol seçimi ve canlı akış (WS) bağlantısı
+        // önce kurulsun diye 6 saniye gecikmeyle başlar (syncWatchlistPrices
+        // için kullanılan 8sn'lik gecikmeyle aynı ilkeyle tutarlı).
+        const PREWARM_SYMBOLS = ['THYAO', 'GARAN', 'AKBNK', 'ASELS', 'SASA', 'KCHOL', 'EREGL', 'BIMAS'];
+        if (window.TradingChart && window.TradingChart.prewarmSymbol) {
+            const toWarm = PREWARM_SYMBOLS.filter(s => !first || s !== first.symbol);
+            toWarm.forEach((sym, i) => {
+                setTimeout(() => window.TradingChart.prewarmSymbol(sym), 6000 + i * 1500);
+            });
+        }
     }
 
     return Object.freeze({

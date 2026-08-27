@@ -5100,9 +5100,30 @@ const TradingChart = (() => {
         };
     }
 
+    // (27 Ağustos 2026 — yarışma günü hız hazırlığı: "popüler hisseleri
+    // önceden ısıt") Aktif grafiği/ekranı HİÇ ETKİLEMEDEN, verilen sembolün
+    // günlük OHLCV'sini arka planda çekip fetchOhlcvCached()'in kendi
+    // önbelleğine (symbolHistoryCache, 3 dakika TTL) düşürür — böylece o
+    // sembol GERÇEKTEN seçildiğinde (loadSymbol çağrıldığında) ağdan
+    // beklemek yerine anında önbellekten gelir. tradingEngine.js sayfa
+    // açılışından birkaç saniye sonra, dikkatlice ARALIKLI şekilde (backend'i
+    // bir anda yormamak için) birkaç sembol için bunu çağırır. Başarısız
+    // olursa (ağ hatası, Yahoo rate-limit) sessizce yutulur — bu sadece bir
+    // ön-yükleme denemesi, hiçbir zaman kullanıcıya görünür bir hataya yol
+    // açmamalı.
+    async function prewarmSymbol(ticker) {
+        try {
+            await fetchOhlcvCached(ticker);
+        } catch (e) {
+            // sessiz — ısıtma denemesi kritik değil, chart yüklemesini
+            // etkilemez.
+        }
+    }
+
     return Object.freeze({
         init,
         loadSymbol,
+        prewarmSymbol,
         updateLastPrice,
         renderOverlays,
         renderAllOscillatorPanes,
