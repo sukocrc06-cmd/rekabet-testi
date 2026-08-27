@@ -290,8 +290,24 @@ async def list_stocks():
 # Bu pencerenin DIŞINDAKİ eski geçmiş için sentetik yöntem fallback olarak
 # AYNEN kalıyor — burada hiçbir şey kaldırılmadı, sadece frontend'in
 # tercih edebileceği YENİ, gerçek bir kaynak eklendi.
+#
+# (27 Ağustos 2026, dördüncü hız turu — "Yahoo Finance canlı engelleme"
+# kök neden düzeltmesi) Canlı testle doğrulandı: /api/v1/ohlcv/ASELS VE
+# /api/v1/ohlcv/THYAO şu anda 500 hatası veriyordu (Yahoo'nun Render'ın
+# paylaşımlı IP'sini geçici engellemesi), oysa /api/v1/market-ticker gibi
+# daha seyrek çağrılan uçlar sorunsuz çalışıyordu — yani sorun spesifik
+# olarak "1d" isteklerinin period="max" ile HER SEFERİNDE (5dk önbellek
+# süresi dolunca) sembolün KOTASYONDAN BUGÜNE TÜM geçmişini (bazı semboller
+# için binlerce satır) çekmeye çalışmasıydı. Bu hem Yahoo'yu daha sık/ağır
+# yoruyor (rate-limit'e daha kolay takılıyoruz) hem de başarılı olsa bile
+# yavaş. Kullanıcı ESKİ/bayat veri göstermek yerine hız+güncellik istediği
+# için (stale-cache fallback KASITLI OLARAK eklenmedi), period "max"'tan
+# "2y"ye (son 2 yıl) düşürüldü — SMA200 gibi uzun vadeli göstergeler için
+# hâlâ fazlasıyla yeterli, istek boyutu küçülüp hem Yahoo'yu daha az
+# zorluyor hem başarılı yanıt çok daha hızlı dönüyor. 2 yıldan eski günlük
+# geçmiş artık gerçek veriyle gelmiyor (kullanıcının bilinçli tercihi).
 _OHLCV_INTERVAL_MAP = {
-    "1d": ("max", "1d"),
+    "1d": ("2y", "1d"),
     "15m": ("60d", "15m"),
     "60m": ("730d", "60m"),
 }

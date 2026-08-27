@@ -5830,7 +5830,18 @@ const TradingEngine = (() => {
         // anında yanıt alır. İlk sembol seçimi ve canlı akış (WS) bağlantısı
         // önce kurulsun diye 6 saniye gecikmeyle başlar (syncWatchlistPrices
         // için kullanılan 8sn'lik gecikmeyle aynı ilkeyle tutarlı).
-        const PREWARM_SYMBOLS = ['THYAO', 'GARAN', 'AKBNK', 'ASELS', 'SASA', 'KCHOL', 'EREGL', 'BIMAS'];
+        //
+        // (27 Ağustos 2026, dördüncü hız turu — "Yahoo Finance canlı
+        // engelleme" kök neden düzeltmesi) Canlı testle DOĞRULANDI: Yahoo
+        // şu anda Render'ın paylaşımlı IP'sini geçici olarak engelliyor
+        // (/api/v1/ohlcv/ASELS ve /api/v1/ohlcv/THYAO 500 döndürdü). Bu
+        // listenin 8 sembol olması, her sayfa açılışında Yahoo'ya 8 EKSTRA
+        // tam-geçmiş isteği daha bindiriyordu — mevcut engellemeye kendi
+        // katkımız olma ihtimali var. Kullanıcının açık isteğiyle 3 sembole
+        // indirildi: hem Yahoo'ya giden toplam istek hacmi azalır hem de
+        // gerçekten seçilecek bir sembol için ağa gitme ihtimali (isabet
+        // oranı) yüksek tutulur.
+        const PREWARM_SYMBOLS = ['THYAO', 'ASELS', 'GARAN'];
         if (window.TradingChart && window.TradingChart.prewarmSymbol) {
             const toWarm = PREWARM_SYMBOLS.filter(s => !first || s !== first.symbol);
             toWarm.forEach((sym, i) => {
