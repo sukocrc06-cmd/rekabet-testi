@@ -825,7 +825,7 @@ const TradingChart = (() => {
         }
     }
 
-    async function loadSymbol(ticker) {
+    async function loadSymbol(ticker, cachedHint) {
         if (!chart || !candleSeries) {
             console.warn('[TradingChart] Chart not initialized (library failed to load?) — skipping loadSymbol.');
             return;
@@ -859,7 +859,24 @@ const TradingChart = (() => {
         // varsa (state.loadSeq ilerlediyse) yazmayı reddeder.
         const mySeq = ++state.loadSeq;
         state.dataReady = false;
-        setSymbolHeader(ticker, null, null);
+        // (27 Ağustos 2026, üçüncü hız turu — "ilk yüklemede beklemeyi
+        // sıfırla") Önceden burada HER ZAMAN setSymbolHeader(ticker, null,
+        // null) çağrılıp fiyat/yüzde alanı "Yükleniyor…" durumuna
+        // düşürülüyordu — tam OHLCV geçmişi (Yahoo rate-limit'i yüzünden
+        // bazen onlarca saniye) gelene kadar kullanıcı boş bir başlık
+        // görüyordu. Oysa tradingEngine.js çağıran taraf, o sembol için
+        // GERÇEK (izleme listesi/quotes senkronundan gelen — UYDURMA
+        // DEĞİL) bir fiyat/dayOpen'ı zaten önbelleğe almış olabiliyor.
+        // `cachedHint` verildiyse başlık ANINDA bu gerçek önbellek
+        // değeriyle dolduruluyor — birkaç saniye bayat olabilir ama asla
+        // sentetik/uydurma değil. Gerçek geçmiş gelip dataReady=true
+        // olduktan sonra ilk canlı tik (updateLastPrice) zaten en güncel
+        // değerle üzerine yazıyor, hiçbir ek temizlik gerekmiyor.
+        if (cachedHint && typeof cachedHint.price === 'number' && typeof cachedHint.dayOpen === 'number' && cachedHint.dayOpen > 0) {
+            setSymbolHeader(ticker, cachedHint.price, cachedHint.dayOpen);
+        } else {
+            setSymbolHeader(ticker, null, null);
+        }
         fetchFundamentals(ticker); // fire-and-forget, chart yüklemesini beklemez
 
         let candles = await fetchOhlcvCached(ticker);

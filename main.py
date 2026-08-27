@@ -222,6 +222,45 @@ async def get_index():
 async def health_check():
     return {"status": "ok"}
 
+# (27 Ağustos 2026 — yarışma günü hız hazırlığı, üçüncü tur: "Render'ı hiç
+# uyutma") Yukarıdaki UptimeRobot düzeltmesi (25 Ağustos) dış bir servise
+# bağımlıydı — kullanıcının UptimeRobot hesabının fiilen aktif/doğru
+# aralıkla çalışıp çalışmadığını buradan doğrulayamıyoruz. Bu, TAMAMEN
+# kod-içi, hiçbir dış hesap/servis gerektirmeyen bir ikinci güvenlik ağı:
+# backend, kendi genel (public) /api/v1/health adresine düzenli aralıklarla
+# KENDİ KENDİNE bir HTTP isteği atıyor. Render'ın ücretsiz katmanı "gelen"
+# HTTP isteği olup olmadığına bakarak uyku kararı veriyor — dışarıya çıkıp
+# aynı genel adresten geri dönen bu istek de "gelen istek" olarak sayılıyor,
+# yani servis kendi kendini uyanık tutmuş oluyor. 10 dakikalık aralık,
+# Render'ın 15 dakikalık boşta-kalma eşiğinin güvenli biçimde altında.
+# Sadece GERÇEK Render ortamında çalışır (Render, her instance'a otomatik
+# RENDER=true ortam değişkeni atıyor) — yerel geliştirmede (python main.py
+# ile 127.0.0.1'de çalıştırırken) bu döngü hiç başlamıyor, gereksiz yere
+# kendi kendine istek atıp konsolu kirletmiyor. Tek bir pinglemenin
+# başarısız olması (geçici ağ hatası vb.) sessizce yutulur — bu döngü asla
+# ana uygulamayı çökertmemeli, sadece "varsa iyi, yoksa zararı yok" bir
+# ek önlem.
+_SELF_PING_URL = os.environ.get(
+    "SELF_PING_URL", "https://rekabet-testi.onrender.com/api/v1/health"
+)
+_SELF_PING_INTERVAL_SEC = 600  # 10 dakika
+
+
+async def _self_ping_loop():
+    while True:
+        await asyncio.sleep(_SELF_PING_INTERVAL_SEC)
+        try:
+            await asyncio.to_thread(session.get, _SELF_PING_URL, timeout=10)
+        except Exception:
+            pass  # sessiz — bu sadece Render'ı uyanık tutmak için, kritik değil
+
+
+@app.on_event("startup")
+async def _start_self_ping():
+    if os.environ.get("RENDER"):
+        asyncio.create_task(_self_ping_loop())
+
+
 @app.get("/api/v1/list-stocks")
 async def list_stocks():
     try:

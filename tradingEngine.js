@@ -2539,7 +2539,19 @@ const TradingEngine = (() => {
         connectLiveFeed(symbol);
 
         if (window.TradingChart) {
-            const chartInfo = await window.TradingChart.loadSymbol(symbol);
+            // (27 Ağustos 2026, üçüncü hız turu — "ilk yüklemede beklemeyi
+            // sıfırla") priceProfiles[symbol] izleme listesi/quotes
+            // senkronundan gelen GERÇEK, zaten bilinen bir fiyat/dayOpen
+            // içerebilir (uydurma/sentetik değil). Bunu loadSymbol()'a
+            // önbellek ipucu olarak geçiyoruz ki başlık, tam OHLCV geçmişi
+            // (bazen Yahoo rate-limit'i yüzünden onlarca saniye sürebiliyor)
+            // gelmeden ANINDA doğru görünsün — chartInfo hazır olduğunda
+            // aşağıdaki mantık zaten en güncel/kesin değerle düzeltiyor.
+            const cachedProfile = priceProfiles[symbol];
+            const cachedHint = (cachedProfile && typeof cachedProfile.price === 'number' && typeof cachedProfile.dayOpen === 'number' && cachedProfile.dayOpen > 0)
+                ? { price: cachedProfile.price, dayOpen: cachedProfile.dayOpen }
+                : null;
+            const chartInfo = await window.TradingChart.loadSymbol(symbol, cachedHint);
             // Re-anchor the simulated demo tick price to the real last close
             // that was just fetched, instead of the hardcoded STOCK_PROFILES
             // fallback seed. Without this, the live trading chart drifts
