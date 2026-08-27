@@ -265,6 +265,31 @@ body {
     }
 }
 
+/* (27 Ağustos 2026 — "hisse seçtikten sonra çok yavaş" algısal hız düzeltmesi)
+   Sembol seçildiğinde veri gelene kadar header fiyatı önceden sabit bir
+   "---" gösteriyordu — hareketsiz olduğu için kullanıcıya "donmuş/bozuk"
+   gibi görünüyordu. Artık "Yükleniyor…" yazısı hafifçe soluklaşıp-parlayarak
+   nabız atıyor; bu gerçek veri hızını DEĞİŞTİRMEZ ama uygulamanın hâlâ
+   çalıştığını/bir şey beklediğini anında hissettirir. */
+.tv-loading-text {
+    animation: tvLoadingTextPulse 1.1s ease-in-out infinite;
+}
+@keyframes tvLoadingTextPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* Sembol değişimi sırasında grafik ESKİ sembolün mumlarını göstermeye devam
+   eder (aniden boşalıp "flaş" etkisi yaratmasın diye kasıtlı) — ama bunun
+   ESKİ veri olduğunu belli etmek için hafifçe soluklaştırılıyor, yeni veri
+   gelince (setSymbolHeader tekrar gerçek bir fiyatla çağrılınca) otomatik
+   olarak normale dönüyor. transition sayesinde ani bir titreme değil,
+   yumuşak bir geçiş oluyor. */
+.tv-chart-refreshing {
+    opacity: 0.55;
+    transition: opacity 0.15s ease-out;
+}
+
 .logo-area h1 {
     font-size: 20px;
     font-weight: 700;

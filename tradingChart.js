@@ -930,9 +930,10 @@ const TradingChart = (() => {
         // (27 Ağustos 2026) Sembol yüklenirken zaten gün-içi bir çözünürlükte
         // isek (ör. 4sa açıkken ASELS'ten AKBNK'a geçiliyor), yeni sembol için
         // de gerçek gün-içi veri yükseltmesini tetikle — aksi halde kullanıcı
-        // çözünürlüğü elle değiştirmeden gerçek veriyi hiç görmezdi.
-        const mySeqRes = ++state.resSeq;
-        upgradeIntradayWithRealData(ticker, state.resolution, mySeqRes);
+        // çözünürlüğü elle değiştirmeden gerçek veriyi hiç görmezdi. (27
+        // Ağustos 2026 — hız düzeltmesi) Artık DEBOUNCE'lı: kullanıcı hızlıca
+        // başka bir sembole geçerse bu istek hiç ateşlenmeden iptal edilir.
+        scheduleIntradayUpgrade(ticker, state.resolution);
 
         const last = candles[candles.length - 1];
         const prev = candles.length > 1 ? candles[candles.length - 2] : last;
@@ -1236,13 +1237,43 @@ const TradingChart = (() => {
         applyResolution(merged);
     }
 
+    // (27 Ağustos 2026 — "hisse seçtikten sonra çok yavaş" hız düzeltmesi)
+    // ÖNCEDEN upgradeIntradayWithRealData() HER sembol/çözünürlük
+    // değişiminde ANINDA (fire-and-forget) tetikleniyordu — hızlıca birkaç
+    // sekme/sembol arasında geçilirse (ör. ASELS→AKBNK→AKCNS art arda),
+    // her biri için ayrı bir Yahoo Finance isteği arka planda birikip zaten
+    // rate-limit'e takılan tek-worker'lı backend'i daha da yoruyordu, bu da
+    // AYNI backend'i paylaşan diğer isteklerin (günlük mum, temel veriler,
+    // izleme listesi senkronu) de yavaşlamasına yol açıyordu. Artık bu
+    // getirim DEBOUNCE'lı: kullanıcı bir sembol/çözünürlükte
+    // INTRADAY_UPGRADE_DEBOUNCE_MS kadar KESİNTİSİZ kalırsa tetiklenir —
+    // hızlı gezinmelerde (her tıklamada clearTimeout ile bir öncekinin
+    // isteği hiç ateşlenmeden iptal edilir) gereksiz istek hiç gitmez,
+    // sadece kullanıcının GERÇEKTEN baktığı sembol için gider.
+    const INTRADAY_UPGRADE_DEBOUNCE_MS = 1500;
+    let intradayUpgradeTimer = null;
+
+    function scheduleIntradayUpgrade(ticker, resId) {
+        if (intradayUpgradeTimer) {
+            clearTimeout(intradayUpgradeTimer);
+            intradayUpgradeTimer = null;
+        }
+        if (!isIntradayResolution(resId)) return;
+        intradayUpgradeTimer = setTimeout(() => {
+            intradayUpgradeTimer = null;
+            const mySeq = ++state.resSeq;
+            upgradeIntradayWithRealData(ticker, resId, mySeq);
+        }, INTRADAY_UPGRADE_DEBOUNCE_MS);
+    }
+
     function setResolution(id) {
         if (!RESOLUTIONS.some(r => r.id === id) || id === state.resolution) return;
         cancelReplayIfActive(); // farklı bir çözünürlüğe geçince tekrar modu iptal edilir
         state.resolution = id;
-        const mySeq = ++state.resSeq;
         applyResolution();
-        upgradeIntradayWithRealData(state.ticker, id, mySeq);
+        // (27 Ağustos 2026 — hız düzeltmesi) Debounce'lı: 15dk/1sa/4sa
+        // arasında hızlıca gidip gelmek her seferinde Yahoo'ya istek attırmaz.
+        scheduleIntradayUpgrade(state.ticker, id);
     }
 
     function setupResolutionBar() {
@@ -2577,7 +2608,23 @@ const TradingChart = (() => {
         // Backend'e giden gerçek istek zaten kendi ".IS" ekleme mantığını
         // (format_ticker()) ayrıca uyguluyor, bu ekranda göstermeye gerek yok.
         if (nameEl) nameEl.textContent = ticker || '---';
-        if (priceEl) priceEl.textContent = price !== null ? '₺' + fmtPrice(price) : '---';
+        // (27 Ağustos 2026 — "hisse seçtikten sonra çok yavaş" algısal hız
+        // düzeltmesi) price === null artık SADECE "---" göstermek yerine,
+        // hafifçe nabız atan bir "Yükleniyor…" durumu gösteriyor — ayrıca
+        // grafik konteynerini de hafifçe soluklaştırıyor (tv-chart-refreshing)
+        // ki kullanıcı sembol değişiminin GERÇEKTEN sürdüğünü, uygulamanın
+        // donmadığını hemen anlasın. Gerçek veri gelince (bu fonksiyon
+        // gerçek bir price ile tekrar çağrılınca) ikisi de otomatik geri
+        // alınır — hiçbir yeni state/temizlik mantığı gerekmiyor.
+        if (priceEl) {
+            if (price !== null) {
+                priceEl.textContent = '₺' + fmtPrice(price);
+                priceEl.classList.remove('tv-loading-text');
+            } else {
+                priceEl.textContent = 'Yükleniyor…';
+                priceEl.classList.add('tv-loading-text');
+            }
+        }
         if (chgEl) {
             if (price !== null && prevClose) {
                 const chg = ((price - prevClose) / prevClose) * 100;
@@ -2586,6 +2633,9 @@ const TradingChart = (() => {
             } else {
                 chgEl.textContent = '';
             }
+        }
+        if (chartContainer) {
+            chartContainer.classList.toggle('tv-chart-refreshing', price === null);
         }
     }
 
