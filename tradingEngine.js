@@ -2569,15 +2569,36 @@ const TradingEngine = (() => {
             // güncellenmeden tohum değerinde (fiyatla aynı, %0) kalabiliyor.
             // Burada, grafiğin AYRICA ve BAŞARIYLA çekmiş olduğu aynı günlük
             // kapanış verisini kullanarak — Yahoo'ya EK bir istek atmadan —
-            // dayOpen'ı düzeltiyoruz. Sonuç: en azından o an AÇIK/seçili olan
+            // dayOpen'ı düzeltiyoruz.
+            //
+            // (27 Ağustos 2026, İKİNCİ düzeltme — "yükleniyor'dan sonra hâlâ
+            // yanlış yüzde geliyor") Yukarıdaki ilk deneme bu atamayı
+            // `!alreadyHasLiveTick && ... && applyRealPriceUpdate(...)`
+            // zincirinin İÇİNE koymuştu. Ama pratikte canlı tik (WebSocket),
+            // TAM OHLCV geçmişinden (özellikle Yahoo rate-limit'e takılıp
+            // yavaşladığında) çoğu zaman DAHA HIZLI geliyor — yani bu satıra
+            // gelindiğinde `alreadyHasLiveTick` çoğunlukla ZATEN true oluyor
+            // ve TÜM blok (fiyat güncellemesiyle birlikte dayOpen düzeltmesi
+            // de) hiç çalışmadan atlanıyordu. Fiyat zaten canlı tikten doğru
+            // geldiği için bu fark edilmiyordu, ama dayOpen hiçbir zaman
+            // düzeltilmediği için %'ler yanlış kalmaya devam ediyordu.
+            // Düzeltme: dayOpen ataması artık `alreadyHasLiveTick`'ten
+            // TAMAMEN BAĞIMSIZ, koşulsuz çalışıyor — price/liveAnchor'ı hiç
+            // etkilemez (o hâlâ aşağıda, suspicious-jump korumalı
+            // applyRealPriceUpdate() içinde ayrı kalıyor), sadece %
+            // referansını düzeltir. Sonuç: en azından o an AÇIK/seçili olan
             // sembol için izleme listesi + hızlı alım-satım paneli + grafik
-            // başlığı üçü de aynı kaynaktan, tutarlı bir % gösterir.
+            // başlığı üçü de aynı kaynaktan, tutarlı bir % gösterir — canlı
+            // tik daha önce gelmiş olsa bile.
+            if (priceProfiles[symbol] && chartInfo && typeof chartInfo.dailyPrevClose === 'number' && chartInfo.dailyPrevClose > 0) {
+                priceProfiles[symbol].dayOpen = chartInfo.dailyPrevClose;
+                renderWatchlistPrices();
+                updateActiveSymbolTicket();
+            }
+
             if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
                 prof.price = val;
                 prof.liveAnchor = val;
-                if (typeof chartInfo.dailyPrevClose === 'number' && chartInfo.dailyPrevClose > 0) {
-                    prof.dayOpen = chartInfo.dailyPrevClose;
-                }
             })) {
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
