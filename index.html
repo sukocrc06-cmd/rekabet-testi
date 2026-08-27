@@ -1664,7 +1664,19 @@
     <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <!-- Data Controller -->
     <script defer src="config.js"></script>
-    <script defer src="dataController.js"></script>
+    <!-- (27 Ağustos 2026, dördüncü hız turu — "minify") Aşağıdaki 7 script
+         artık kaynak (.js) yerine küçültülmüş (.min.js) kopyalarını
+         yüklüyor — terser ile yorumlar/boşluklar temizlenip yerel
+         değişken/fonksiyon adları kısaltıldı (işlevsellik AYNI, sadece
+         indirme boyutu küçüldü — toplamda ~840KB'dan ~275KB'a). window.*
+         üzerinden dışa açılan (TradingChart, TradingEngine, DataController
+         vb.) isimler minifier tarafından HİÇ dokunulmuyor (sadece dosya
+         İÇİNDEKİ yerel isimler kısalıyor), bu yüzden dosyalar arası çağrılar
+         etkilenmiyor. Orijinal, yorumlu .js dosyaları DÜZENLEME kaynağı
+         olarak aynen duruyor — bundan sonra bir değişiklik yapılacaksa
+         orijinal .js dosyası düzenlenip .min.js YENİDEN üretilmeli (terser
+         ile), aksi halde canlıdaki kod eski kalır. -->
+    <script defer src="dataController.min.js"></script>
     <!-- (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
          chartRenderer.js (Canvas tabanlı eski backtest grafik motoru) burada
          yükleniyordu, ama onu kullanan TEK yer app.js'in artık ulaşılamayan
@@ -1672,22 +1684,22 @@
          app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
-    <script defer src="tradingChart.js"></script>
+    <script defer src="tradingChart.min.js"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
-    <script defer src="tradingEngine.js"></script>
+    <script defer src="tradingEngine.min.js"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
-    <script defer src="multiChartGrid.js"></script>
+    <script defer src="multiChartGrid.min.js"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
-    <script defer src="tourGuide.js"></script>
+    <script defer src="tourGuide.min.js"></script>
     <!-- Application Controller -->
-    <script defer src="app.js"></script>
+    <script defer src="app.min.js"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
          getirildi) 17 Ağustos'ta kaldırılmış olan finteclubBridge.js yeniden
          eklendi — admin panelindeki OPLab Kontrolü (Erişim Durumu, Alım-Satım
          Durumu, Tema/Kurumsal Mavi) ve FinteLig giriş/doğrulama akışı bu
          dosya sayesinde tekrar çalışıyor. Firebase SDK script'leri yukarıda
          (config.js'ten önce) yüklü olmalı. -->
-    <script defer src="finteclubBridge.js"></script>
+    <script defer src="finteclubBridge.min.js"></script>
 
 
     <script>
