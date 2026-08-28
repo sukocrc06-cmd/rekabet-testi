@@ -34,7 +34,27 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 import asyncio
 import random
 
-# Global requests session with browser-like User-Agent
+# (28 Ağustos 2026 — Yahoo Finance engellemesi KÖK NEDEN düzeltmesi, dördüncü
+# hız turu devamı) yfinance kaynağı (yfinance/_http.py) incelendiğinde ÇOK
+# ÖNEMLİ bir şey bulundu: yfinance'e HİÇ session verilmezse, kendi
+# new_session()'ı curl_cffi kütüphanesini (zaten yfinance'in kendi zorunlu
+# bağımlılığı — requirements.txt'ye ayrıca eklemeye gerek yok) kullanarak
+# Chrome'un TAM TLS/JA3 parmak izini taklit eden bir oturum kuruyor — bu,
+# yfinance'in KENDİ dokümantasyonunda "Yahoo Finance may rate-limit or block
+# this client" diye özellikle uyarılan, düz `requests` kütüphanesinin
+# TAKLİT EDEMEDİĞİ bir korumadır. Bu proje aşağıdaki `session` nesnesini
+# (düz `requests.Session()`, sadece User-Agent başlığı eklenmiş) TÜM
+# yf.Ticker()/yf.download() çağrılarına `session=session` olarak veriyordu
+# — bu, yfinance'in kendi çok daha güçlü curl_cffi korumasını DEVRE DIŞI
+# BIRAKIP yerine kolayca tespit edilebilen düz bir oturum koyuyordu. Yani
+# bugün defalarca canlı olarak doğruladığımız "Yahoo, Render'ın IP'sini
+# engelliyor" sorununun bir kısmı muhtemelen KENDİ KODUMUZUN sebep olduğu
+# bir kendi-kendini-engelleme hatasıydı. Düzeltme: aşağıdaki tüm
+# yf.Ticker()/yf.download() çağrılarından `session=session` KALDIRILDI —
+# artık her çağrıda yfinance kendi optimal (curl_cffi, Chrome taklitli)
+# oturumunu kendisi kuruyor. `session` nesnesi SADECE aşağıdaki kendi
+# kendine "ısınma" pingi (_self_ping_loop, Yahoo'yla hiç ilgisi yok, kendi
+# backend'imize gidiyor) için tutuluyor.
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -328,7 +348,7 @@ def get_data(ticker: str, interval: str = "1d"):
     period, yf_interval = _OHLCV_INTERVAL_MAP[interval]
     try:
         formatted = format_ticker(ticker)
-        stock = yf.Ticker(formatted, session=session)
+        stock = yf.Ticker(formatted)
         # (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Günlük
         # (1d) için yfinance'in sunduğu TÜM geçmiş isteniyor (period="max" —
         # sembolün borsaya kotasyon tarihinden bugüne kadarki tüm günlük
@@ -405,7 +425,7 @@ def get_fundamentals(ticker: str):
         if cached and (now - cached[0]) < _FUNDAMENTALS_CACHE_TTL_SEC:
             return {"ticker": ticker, **cached[1], "cached": True}
 
-        stock = yf.Ticker(formatted, session=session)
+        stock = yf.Ticker(formatted)
         info = {}
         try:
             # Newer yfinance versions expose get_info(); older ones only have
@@ -546,7 +566,6 @@ def get_quotes(request: QuotesRequest):
                 group_by="ticker",
                 threads=True,
                 progress=False,
-                session=session,
             ),
             label="quotes toplu indirme"
         )
@@ -637,7 +656,6 @@ def get_market_ticker():
                 group_by="ticker",
                 threads=True,
                 progress=False,
-                session=session,
             ),
             label="market-ticker toplu indirme"
         )
@@ -790,7 +808,7 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
     LIVE_POLL_INTERVAL_SEC = 12
     try:
         formatted = format_ticker(ticker)
-        stock = yf.Ticker(formatted, session=session)
+        stock = yf.Ticker(formatted)
 
         # (22 Temmuz 2026, on ikinci oturum, beşinci tur — "canlı veri
         # noktası 20-30 saniye gri kalıyor" sorunu) Bu uç önceden burada
