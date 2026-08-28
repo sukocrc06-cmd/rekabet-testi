@@ -2547,8 +2547,26 @@ const TradingEngine = (() => {
             // (bazen Yahoo rate-limit'i yüzünden onlarca saniye sürebiliyor)
             // gelmeden ANINDA doğru görünsün — chartInfo hazır olduğunda
             // aşağıdaki mantık zaten en güncel/kesin değerle düzeltiyor.
+            // (28 Ağustos 2026 — "önce yanlış fiyat, sonra düzeliyor" hatası
+            // düzeltmesi) Kullanıcı bildirdi: sembol seçilince önce YANLIŞ bir
+            // fiyat/mum görünüp bir an sonra doğrusuna "düzeliyor" — kök neden
+            // bulundu. priceProfiles[symbol], sayfa açılışında `buildPriceProfiles()`
+            // ile HER sembol için `hasRealAnchor: false` bayraklı TAMAMEN
+            // SENTETİK bir tohum fiyatla (STOCK_PROFILES.basePrice, ya da hiç
+            // tanımlı değilse sembol adının hash'inden uydurulan bir sayı) dolu
+            // başlıyor — gerçek bir fiyat GÖRÜLENE kadar (WS tik / 40sn'lik
+            // quotes senkronu / bu sembolün OHLCV'si) `hasRealAnchor` true
+            // olmuyor. Aşağıdaki `cachedHint` kontrolü öncesinde SADECE
+            // price/dayOpen'ın sayı olup olmadığına bakıyordu — ama bunlar HER
+            // ZAMAN sayıdır (tohum değeri de bir sayı), yani `hasRealAnchor`
+            // hiç kontrol edilmeden bu tamamen uydurma tohum değeri "gerçek
+            // önbellek verisi" sanılıp anında gösteriliyordu. Şimdi
+            // `hasRealAnchor === true` şartı da eklendi — bu sembol için henüz
+            // hiç gerçek veri görülmediyse cachedHint `null` kalır ve başlık
+            // eskisi gibi dürüstçe "Yükleniyor…" gösterir, uydurma bir sayı
+            // ASLA ekrana yansımaz.
             const cachedProfile = priceProfiles[symbol];
-            const cachedHint = (cachedProfile && typeof cachedProfile.price === 'number' && typeof cachedProfile.dayOpen === 'number' && cachedProfile.dayOpen > 0)
+            const cachedHint = (cachedProfile && cachedProfile.hasRealAnchor === true && typeof cachedProfile.price === 'number' && typeof cachedProfile.dayOpen === 'number' && cachedProfile.dayOpen > 0)
                 ? { price: cachedProfile.price, dayOpen: cachedProfile.dayOpen }
                 : null;
             const chartInfo = await window.TradingChart.loadSymbol(symbol, cachedHint);
