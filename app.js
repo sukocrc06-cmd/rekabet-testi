@@ -48,7 +48,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = (sel) => document.querySelector(sel);
 
     const el = {
-        engineStatus: $('#engine-status'),
+        // (28 Ağustos 2026 — header sadeleştirme) Önceden ayrı bir metin
+        // rozeti olan #engine-status kaldırıldı; aynı canlı/offline sinyali
+        // artık logonun yanındaki nabız noktasına (#engine-pulse-dot)
+        // taşındı — bkz. checkBackendHeartbeat()/updateEngineTooltip().
+        enginePulseDot: $('#engine-pulse-dot'),
         marketTime: $('#market-time'),
         marketStatusVal: $('#market-status-val'),
         marketStatusSub: $('#market-status-sub')
@@ -154,37 +158,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 return res.json();
             })
             .then(data => {
-                if (data.status === 'ok') {
-                    if (el.engineStatus) {
-                        el.engineStatus.innerText = 'ONLINE';
-                        el.engineStatus.style.color = 'var(--profit)'; // Green
-                    }
-                }
+                backendIsUp = data.status === 'ok';
                 updateEngineTooltip();
             })
             .catch(err => {
                 console.warn('[Heartbeat] Backend server connection failed:', err);
-                if (el.engineStatus) {
-                    el.engineStatus.innerText = 'OFFLINE';
-                    el.engineStatus.style.color = '#F44336'; // Red
-                }
+                backendIsUp = false;
                 updateEngineTooltip();
             });
     }
 
-    // (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi) Aktif
-    // sembol için kurulan WebSocket canlı veri akışının durumunu, mevcut
-    // ENGINE rozetine YENİ bir panel/metin eklemeden, sadece üzerine
-    // gelince görünen bir ipucuyla (native tooltip) gösteriyoruz — rozetin
-    // görünür metni hâlâ sadece backend'in ayakta olup olmadığını (REST
-    // heartbeat) yansıtıyor, ayrıntı isteyen fare ile üzerine gelip bakıyor.
+    // (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi; 28 Ağustos
+    // 2026'da header sadeleştirmesiyle güncellendi) Aktif sembol için kurulan
+    // WebSocket canlı veri akışının durumunu, ayrı bir metin rozeti yerine
+    // logonun yanındaki nabız noktasının (#engine-pulse-dot) rengine ve
+    // tooltip'ine yansıtıyoruz — sağlıklıyken eskisi gibi altın rengi nabız
+    // atmaya devam ediyor, backend'e ulaşılamazsa kırmızıya dönüp
+    // durağanlaşıyor. Ayrıntı (gerçek veri mi/simülasyon mu, ne kadar bayat)
+    // isteyen fare ile üzerine gelip bakıyor.
+    let backendIsUp = true;
     let lastLiveFeedStatus = { active: false, symbol: null, lastTickAt: null };
     function updateEngineTooltip() {
         updateLiveDataDot();
-        if (!el.engineStatus) return;
-        const target = safeGetElement('engine-status-item') || el.engineStatus;
-        const backendUp = el.engineStatus.innerText === 'ONLINE';
-        if (!backendUp) {
+        const target = el.enginePulseDot;
+        if (!target) return;
+        target.classList.toggle('is-offline', !backendIsUp);
+        if (!backendIsUp) {
             target.title = 'Backend sunucusuna ulaşılamıyor — fiyatlar tamamen yerel simülasyondan geliyor.';
             return;
         }

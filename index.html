@@ -34,7 +34,7 @@
          devam eder, canlıya yansıyan düzeltme hiç görünmez.
     -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.min.css?v=20260828">
+    <link rel="stylesheet" href="styles.min.css?v=20260828c">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -71,7 +71,25 @@
                 <button type="button" class="btn btn-icon mobile-drawer-toggle" id="btn-toggle-sidebar" aria-label="Piyasa panelini aç/kapat" title="Piyasa Paneli">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                 </button>
-                <div class="pulse-indicator"></div>
+                <!-- (28 Ağustos 2026 — header sadeleştirme/yenileme) Önceden bu
+                     noktun yanında ayrıca metin olarak "Engine: ONLINE/OFFLINE"
+                     yazan bir rozet vardı — kullanıcı bunu gereksiz teknik gürültü
+                     olarak nitelendirdi ve kaldırılmasını istedi. AMA bu metin
+                     salt dekoratif değildi: checkBackendHeartbeat() (app.js) her
+                     8 saniyede backend'in GERÇEKTEN ayakta olup olmadığını
+                     kontrol edip buraya yazıyordu, ayrıca üzerine gelince o an
+                     gerçek yfinance verisi mi yoksa yerel simülasyon mu
+                     gösterildiğini anlatan bir tooltip taşıyordu — bu proje
+                     boyunca defalarca vurgulanan "asla uydurma veri gerçekmiş
+                     gibi gösterilmesin" ilkesiyle doğrudan ilgili, gerçek bir
+                     sinyal. Metni sessizce atıp bu sinyali de kaybetmek yerine,
+                     zaten var olan bu nabız noktasına taşındı: id eklendi, artık
+                     backend gerçekten çöktüğünde (ki bu ihtimal düşük ama sıfır
+                     değil) kırmızıya dönüp durağanlaşıyor, sağlıklıyken eskisi
+                     gibi altın rengi nabız atıyor — VE aynı tooltip metni artık
+                     bu noktanın üzerine gelince görünüyor. Görsel olarak header
+                     çok daha sade, ama bilgi kaybı yok. -->
+                <div class="pulse-indicator" id="engine-pulse-dot" title="Backend durumu kontrol ediliyor…"></div>
                 <h1>OptiPulse<span>Lab</span></h1>
                 <!-- (18 Temmuz 2026, onuncu oturum, dördüncü tur) "Şu an analiz
                      ediliyor: SEMBOL" etiketi kaldırıldı — aynı bilgi zaten
@@ -81,32 +99,32 @@
                      onerileri.md, Madde 4). -->
             </div>
             <div class="header-status">
-                <div class="status-item" id="engine-status-item">
-                    <span class="status-label">Engine:</span>
-                    <span class="status-value status-online" id="engine-status">ONLINE</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Latency:</span>
-                    <span class="status-value" id="latency-val">1.2ms</span>
-                </div>
-                <div class="status-item text-hide-mobile">
-                    <span class="status-label">Market Time:</span>
-                    <span class="status-value" id="market-time">13:58:19 UTC</span>
-                </div>
-                <div class="status-item text-hide-mobile" id="market-status-container">
-                    <span class="status-label">Market:</span>
-                    <span class="status-value" id="market-status-val" style="font-weight: 600;">CHECKING...</span>
-                    <span id="market-status-sub" style="font-size: 9px; color: var(--text-muted); margin-left: 5px; display: none;">(Displaying last closing data)</span>
-                </div>
-                <!-- (29 Temmuz 2026 — "Piyasa Nabzı / Market Breadth") BIST100
-                     evrenindeki tüm sembollerin günlük açılışa göre kaç tanesinin
-                     yükselişte/düşüşte olduğunu gösteren özet — bkz. tradingEngine.js
-                     computeHeatmapData()/renderMarketBreadth(). Zaten var olan ısı
-                     haritası verisinin (priceProfiles) yeniden kullanımı, YENİ bir
-                     backend isteği gerektirmiyor. -->
-                <div class="status-item text-hide-mobile" id="market-breadth-container" title="BIST100 evreninde günlük açılışa göre yükselen/düşen sembol sayısı">
-                    <span class="status-label">Piyasa Nabzı:</span>
-                    <span class="status-value" id="market-breadth-val" style="font-weight: 600;">--</span>
+                <!-- (28 Ağustos 2026 — header sadeleştirme) "Latency: 1.2ms"
+                     satırı tamamen kaldırıldı — yarışmacı için pratik bir
+                     karşılığı olmayan, salt teknik bir ayrıntıydı. Kalan üç
+                     durum öğesi (Saat/Piyasa/Nabız) artık tek bir hafif
+                     "cam" grup içinde, aralarında ince ayraçlarla — dağınık
+                     ayrı etiketler yerine tek, düzenli bir bilgi şeridi. -->
+                <div class="header-status-group">
+                    <div class="status-item text-hide-mobile">
+                        <span class="status-label">Saat:</span>
+                        <span class="status-value" id="market-time">13:58:19 UTC</span>
+                    </div>
+                    <div class="status-item text-hide-mobile" id="market-status-container">
+                        <span class="status-label">Piyasa:</span>
+                        <span class="status-value" id="market-status-val" style="font-weight: 600;">CHECKING...</span>
+                        <span id="market-status-sub" style="font-size: 9px; color: var(--text-muted); margin-left: 5px; display: none;">(Displaying last closing data)</span>
+                    </div>
+                    <!-- (29 Temmuz 2026 — "Piyasa Nabzı / Market Breadth") BIST100
+                         evrenindeki tüm sembollerin günlük açılışa göre kaç tanesinin
+                         yükselişte/düşüşte olduğunu gösteren özet — bkz. tradingEngine.js
+                         computeHeatmapData()/renderMarketBreadth(). Zaten var olan ısı
+                         haritası verisinin (priceProfiles) yeniden kullanımı, YENİ bir
+                         backend isteği gerektirmiyor. -->
+                    <div class="status-item text-hide-mobile" id="market-breadth-container" title="BIST100 evreninde günlük açılışa göre yükselen/düşen sembol sayısı">
+                        <span class="status-label">Nabız:</span>
+                        <span class="status-value" id="market-breadth-val" style="font-weight: 600;">--</span>
+                    </div>
                 </div>
             </div>
             <div class="header-actions">
@@ -1707,7 +1725,7 @@
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
     <script defer src="tourGuide.min.js?v=20260828"></script>
     <!-- Application Controller -->
-    <script defer src="app.min.js?v=20260828"></script>
+    <script defer src="app.min.js?v=20260828c"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
          getirildi) 17 Ağustos'ta kaldırılmış olan finteclubBridge.js yeniden
          eklendi — admin panelindeki OPLab Kontrolü (Erişim Durumu, Alım-Satım

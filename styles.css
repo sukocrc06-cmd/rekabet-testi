@@ -265,6 +265,17 @@ body {
     }
 }
 
+/* (28 Ağustos 2026 — header sadeleştirme) Bu nokta artık salt dekoratif değil:
+   kaldırılan "Engine: ONLINE/OFFLINE" metin rozetinin yerini alıyor (bkz.
+   app.js → checkBackendHeartbeat/updateEngineTooltip). Backend'e gerçekten
+   ulaşılamadığında kırmızıya dönüp animasyonu durduruyor — sağlıklıyken
+   görünüm eskisiyle birebir aynı (altın rengi, nabız atan). */
+.pulse-indicator.is-offline {
+    background-color: #F44336;
+    box-shadow: 0 0 8px #F44336;
+    animation: none;
+}
+
 /* (27 Ağustos 2026 — "hisse seçtikten sonra çok yavaş" algısal hız düzeltmesi)
    Sembol seçildiğinde veri gelene kadar header fiyatı önceden sabit bir
    "---" gösteriyordu — hareketsiz olduğu için kullanıcıya "donmuş/bozuk"
@@ -308,6 +319,38 @@ body {
     gap: 16px;
     min-width: 0;
     overflow: hidden;
+}
+
+/* (28 Ağustos 2026 — header sadeleştirme/yenileme) Saat/Piyasa/Nabız
+   öğeleri önceden birbirinden bağımsız, boşlukla ayrılmış üç ayrı etiket
+   gibi görünüyordu — artık tek, hafif "cam" bir grup içinde, aralarında
+   ince dikey ayraçlarla tek bir bilgi şeridi oluşturuyorlar. Renkler her
+   üç temada da (koyu/açık/FinTeClub) doğru görünsün diye tema değişkenleri
+   (--tint-04, --gold-border) kullanılıyor, sabit renk yok. */
+.header-status-group {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 14px;
+    background: var(--tint-04);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+}
+
+.header-status-group .status-item + .status-item {
+    position: relative;
+    padding-left: 14px;
+}
+
+.header-status-group .status-item + .status-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1px;
+    height: 12px;
+    background: var(--tint-14);
 }
 
 /* (29 Temmuz 2026 — Madde 3) Tam genişlikte, sürekli kayan piyasa şeridi.
@@ -707,15 +750,22 @@ body {
     padding: 18px 0;
 }
 
-/* --- Header Balance Pill (demo trading balance, top right) --- */
+/* --- Header Balance Pill (demo trading balance, top right) ---
+   (28 Ağustos 2026 — header sadeleştirme/yenileme) Header'da yarışmacının
+   en çok bakacağı rakam bu olduğu için (Latency/Engine metinleri kaldırılıp
+   yer açıldıktan sonra) bilinçli olarak daha büyük/vurgulu/"premium"
+   yapıldı: daha belirgin bir dolgu rengi, hafif bir dış gölge ve biraz
+   daha büyük punto — diğer header öğeleriyle aynı sade paleti kullanıyor
+   (var(--gold)/var(--gold-border)), sadece ölçek ve vurgu arttı. */
 .header-balance-pill {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     background-color: var(--gold-dim);
     border: 1px solid var(--gold-border);
     border-radius: var(--radius-md);
-    padding: 7px 14px;
+    padding: 8px 16px;
+    box-shadow: 0 0 0 1px var(--tint-02) inset, 0 2px 10px rgba(0, 0, 0, 0.12);
 }
 
 .header-balance-label {
@@ -728,9 +778,10 @@ body {
 
 .header-balance-value {
     font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 16px;
+    font-weight: 800;
     color: var(--gold);
+    letter-spacing: 0.2px;
 }
 
 /* (10 Ağustos 2026 — "cihaz değiştirince bakiyem sıfırlanıyor" kök neden
