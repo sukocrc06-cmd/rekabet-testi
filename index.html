@@ -18,8 +18,23 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- (28 Ağustos 2026 — PageSpeed Insights raporu, "verimli önbellek
+         süreleri" bulgusu) Aşağıdaki tüm YEREL statik dosyalar (CSS + JS)
+         artık vercel.json'da UZUN süreli (1 yıl, immutable) tarayıcı
+         önbelleğiyle sunuluyor — normalde bu, bir dosyayı GÜNCELLEDİĞİMİZDE
+         (bu proje neredeyse her gün güncelleniyor) kullanıcıların tarayıcısı
+         eski sürümü bir yıl boyunca göstermeye devam eder demektir (TEHLİKELİ
+         bir "eski sürüme takılı kalma" riski). Bunu önlemek için her dosya
+         referansına bir `?v=TARİH` sürüm parametresi eklendi — bu sadece bir
+         yorum, tarayıcı için farklı bir URL demek, yani farklı bir önbellek
+         girdisi. Dosyalardan HERHANGİ BİRİ (styles.css/.min.css veya
+         tradingChart.js/.min.js vb.) bundan sonra değiştirilirse, buradaki
+         İLGİLİ `?v=...` değeri MUTLAKA artırılmalı — aksi halde kullanıcılar
+         (ve YARIŞMA GÜNÜ jüri) hâlâ eski, önbelleğe alınmış dosyayı görmeye
+         devam eder, canlıya yansıyan düzeltme hiç görünmez.
+    -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.min.css?v=20260828">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -1663,7 +1678,7 @@
     <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <!-- Data Controller -->
-    <script defer src="config.js"></script>
+    <script defer src="config.js?v=20260828"></script>
     <!-- (27 Ağustos 2026, dördüncü hız turu — "minify") Aşağıdaki 7 script
          artık kaynak (.js) yerine küçültülmüş (.min.js) kopyalarını
          yüklüyor — terser ile yorumlar/boşluklar temizlenip yerel
@@ -1676,7 +1691,7 @@
          olarak aynen duruyor — bundan sonra bir değişiklik yapılacaksa
          orijinal .js dosyası düzenlenip .min.js YENİDEN üretilmeli (terser
          ile), aksi halde canlıdaki kod eski kalır. -->
-    <script defer src="dataController.min.js"></script>
+    <script defer src="dataController.min.js?v=20260828"></script>
     <!-- (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
          chartRenderer.js (Canvas tabanlı eski backtest grafik motoru) burada
          yükleniyordu, ama onu kullanan TEK yer app.js'in artık ulaşılamayan
@@ -1684,22 +1699,22 @@
          app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
-    <script defer src="tradingChart.min.js"></script>
+    <script defer src="tradingChart.min.js?v=20260828"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
-    <script defer src="tradingEngine.min.js"></script>
+    <script defer src="tradingEngine.min.js?v=20260828"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
-    <script defer src="multiChartGrid.min.js"></script>
+    <script defer src="multiChartGrid.min.js?v=20260828"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
-    <script defer src="tourGuide.min.js"></script>
+    <script defer src="tourGuide.min.js?v=20260828"></script>
     <!-- Application Controller -->
-    <script defer src="app.min.js"></script>
+    <script defer src="app.min.js?v=20260828"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
          getirildi) 17 Ağustos'ta kaldırılmış olan finteclubBridge.js yeniden
          eklendi — admin panelindeki OPLab Kontrolü (Erişim Durumu, Alım-Satım
          Durumu, Tema/Kurumsal Mavi) ve FinteLig giriş/doğrulama akışı bu
          dosya sayesinde tekrar çalışıyor. Firebase SDK script'leri yukarıda
          (config.js'ten önce) yüklü olmalı. -->
-    <script defer src="finteclubBridge.min.js"></script>
+    <script defer src="finteclubBridge.min.js?v=20260828"></script>
 
 
     <script>
