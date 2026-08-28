@@ -1432,11 +1432,21 @@ const TradingChart = (() => {
                 shape: isBuy ? 'arrowUp' : 'arrowDown',
                 // (29 Temmuz 2026 — sukru geri bildirimi) once "AL 353 @₺376.25"
                 // gibi uzun metin gosteriliyordu; birden fazla islem ayni muma
-                // denk gelince yazilar ust uste binip karmasik gorunuyordu.
-                // Yon zaten ok sekli + renk ile belli oldugu icin metni sadece
-                // adete indirdik; tam fiyat/taraf detayi "Son Islemler"
-                // sekmesinde zaten mevcut.
-                text: String(h.qty),
+                // denk gelince yazilar ust uste binip karmasik gorunuyordu. Metin
+                // sadece adete indirilmisti (bkz. asagidaki 28 Agustos notu).
+                //
+                // (28 Ağustos 2026 — "genel görünüm" yenilemesi, kullanıcı
+                // geri bildirimi) Adet sayıları bile birden fazla işlem aynı
+                // muma denk geldiğinde ("1335, 1325, 282, 268" gibi) üst üste
+                // dizilip grafiği kirletiyordu — kullanıcı bunları gereksiz
+                // buldu. Yön zaten ok şekli (yukarı/aşağı) + renk (mavi/turuncu)
+                // ile belli olduğu için metin tamamen kaldırıldı; tam fiyat/
+                // taraf/adet detayı hâlâ "Son İşlemler" sekmesinde mevcut,
+                // sadece grafiğin ÜZERİNDEKİ sayı etiketleri gitti. Ok
+                // işaretlerinin KENDİSİ bilinçli olarak kalıyor — kullanıcının
+                // geçmişte nerede işlem yaptığını görmesi hâlâ faydalı,
+                // şikayet edilen şey sayılardı.
+                text: '',
                 _userTrade: true
             };
         }).sort((a, b) => a.time - b.time);
