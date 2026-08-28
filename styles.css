@@ -4063,8 +4063,8 @@ body.compact-mode .status-item {
 .tv-fundamentals-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 3px 14px;
+    gap: 6px;
+    padding: 5px 14px;
     font-size: 11px;
     font-family: var(--font-mono);
     color: var(--text-muted);
@@ -4074,8 +4074,25 @@ body.compact-mode .status-item {
     white-space: nowrap;
 }
 
+/* (28 Ağustos 2026 — "genel görünüm" yenilemesi, Madde: hisse istatistik
+   şeridi) Önceden F/K, Piyasa Değeri, Temettü Verimi vb. tek bir düz metin
+   satırında "·" işaretleriyle ayrılıyordu — artık her biri kendi hafif
+   "kart/chip" arka planına sahip, tek bakışta ayrıştırması çok daha kolay.
+   JS tarafı (tradingChart.js → fetchFundamentals) HİÇ değişmedi, sadece
+   görsel katman — her span zaten "Etiket: değer" metnini kendi içinde
+   tutuyordu, sadece artık bir kart gibi görünüyor. Ayraç noktaları artık
+   gereksiz (chip'lerin kendi kenarlığı zaten ayırıyor), bu yüzden gizlendi. */
 .tv-fundamentals-sep {
-    opacity: 0.5;
+    display: none;
+}
+
+.tv-fundamentals-bar > span:not(.tv-fundamentals-sep) {
+    padding: 3px 10px;
+    background: var(--tint-04);
+    border: 1px solid var(--tint-08);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
 /* (29 Temmuz 2026 — "Çoklu Zaman Dilimi Analiz Paneli / MTF Confluence")
@@ -4087,7 +4104,7 @@ body.compact-mode .status-item {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 14px;
+    padding: 5px 14px;
     font-size: 10.5px;
     font-family: var(--font-mono);
     color: var(--text-muted);
@@ -4095,7 +4112,7 @@ body.compact-mode .status-item {
     flex-shrink: 0;
     overflow-x: auto;
     white-space: nowrap;
-    min-height: 22px;
+    min-height: 26px;
 }
 
 .mtf-label {
@@ -4107,29 +4124,38 @@ body.compact-mode .status-item {
     flex-shrink: 0;
 }
 
+/* (28 Ağustos 2026 — "genel görünüm" yenilemesi, Madde: zaman dilimi/uyum
+   rozetleri) Bu rozetler zaten hafif bir arka plana sahipti ama küçük
+   ölçekte (0.08 opaklık) neredeyse görünmüyordu — kullanıcı "tek bakışta
+   okunan, belirgin pill rozetler" istedi. Arka plan/kenarlık belirginliği
+   artırıldı, köşeler tam yuvarlatıldı (gerçek "pill" görünümü) ve en
+   önemlisi: aşağıdaki genel özet (.mtf-overall, "GÜÇLÜ YÜKSELİŞ UYUMU" vb.)
+   önceden SADECE renkli metindi, arka planı/kenarlığı hiç yoktu — artık o
+   da aynı pill diline sahip, kendi yönüne göre renkli bir rozet. */
 .mtf-chip {
-    padding: 2px 7px;
-    border-radius: var(--radius-sm);
+    padding: 3px 10px;
+    border-radius: 999px;
     border: 1px solid var(--tint-08);
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 700;
     white-space: nowrap;
 }
 
 .mtf-chip-up {
     color: var(--success, #4CAF50);
-    border-color: rgba(76,175,80,0.35);
-    background-color: rgba(76,175,80,0.08);
+    border-color: rgba(76,175,80,0.4);
+    background-color: rgba(76,175,80,0.14);
 }
 
 .mtf-chip-down {
     color: var(--danger, #F44336);
-    border-color: rgba(244,67,54,0.35);
-    background-color: rgba(244,67,54,0.08);
+    border-color: rgba(244,67,54,0.4);
+    background-color: rgba(244,67,54,0.14);
 }
 
 .mtf-chip-neutral {
     color: var(--text-muted);
+    background-color: var(--tint-04);
 }
 
 .mtf-chip-na {
@@ -4139,18 +4165,41 @@ body.compact-mode .status-item {
 
 .mtf-overall {
     margin-left: auto;
-    font-weight: 700;
+    font-weight: 800;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.3px;
     flex-shrink: 0;
+    padding: 3px 12px;
+    border-radius: 999px;
+    border: 1px solid transparent;
 }
 
-.mtf-up { color: var(--success, #4CAF50); }
-.mtf-down { color: var(--danger, #F44336); }
-.mtf-up-lean { color: var(--gold, #D4AF37); }
-.mtf-down-lean { color: var(--gold, #D4AF37); }
-.mtf-mixed { color: var(--text-muted); }
+.mtf-up {
+    color: var(--success, #4CAF50);
+    background-color: rgba(76,175,80,0.14);
+    border-color: rgba(76,175,80,0.4);
+}
+.mtf-down {
+    color: var(--danger, #F44336);
+    background-color: rgba(244,67,54,0.14);
+    border-color: rgba(244,67,54,0.4);
+}
+.mtf-up-lean {
+    color: var(--gold, #D4AF37);
+    background-color: var(--gold-dim);
+    border-color: var(--gold-border);
+}
+.mtf-down-lean {
+    color: var(--gold, #D4AF37);
+    background-color: var(--gold-dim);
+    border-color: var(--gold-border);
+}
+.mtf-mixed {
+    color: var(--text-muted);
+    background-color: var(--tint-04);
+    border-color: var(--tint-08);
+}
 
 .tv-resolution-bar {
     display: flex;
