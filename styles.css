@@ -4514,7 +4514,9 @@ body.compact-mode .status-item {
 
 .tv-draw-overlay {
     position: absolute;
-    inset: 0;
+    left: 0;
+    top: 0;
+    /* width/height JS tarafında plot alanına (fiyat skalası hariç) ayarlanır */
     pointer-events: none;
     z-index: 5;
 }

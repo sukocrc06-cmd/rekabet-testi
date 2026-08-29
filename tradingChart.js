@@ -3269,12 +3269,57 @@ const TradingChart = (() => {
     function resizeDrawCanvas() {
         if (!drawCanvas || !chartContainer) return;
         const dpr = window.devicePixelRatio || 1;
+        const plot = getPlotRect();
+        // Overlay, Lightweight Charts'ın sağ fiyat skalasının (ve varsa alt
+        // zaman ekseninin) ÜSTÜNE binmesin diye yalnızca plot alanına
+        // oturtulur. Koordinat sistemi hâlâ soldan 0'dan başladığı için
+        // logicalToCoordinate / priceToCoordinate değerleri birebir uyumlu.
+        drawCanvas.style.left = plot.x + 'px';
+        drawCanvas.style.top = plot.y + 'px';
+        drawCanvas.style.width = plot.width + 'px';
+        drawCanvas.style.height = plot.height + 'px';
+        drawCanvas.width = Math.max(1, plot.width * dpr);
+        drawCanvas.height = Math.max(1, plot.height * dpr);
+        if (drawCtx) drawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Mumların çizildiği alan (sağ fiyat etiketi şeridi HARİÇ). Trend
+    // çizgisi / ışın / yatay çizgi gibi overlay şekilleri bu dikdörtgenin
+    // dışına taşmamalı — aksi halde çizgi "70.00" gibi fiyat skalasının
+    // üzerine biner (kullanıcı geri bildirimi, 29 Ağustos 2026).
+    function getPlotRect() {
+        const fallback = { x: 0, y: 0, width: 0, height: 0 };
+        if (!chartContainer) return fallback;
         const rect = chartContainer.getBoundingClientRect();
-        drawCanvas.style.width = rect.width + 'px';
-        drawCanvas.style.height = rect.height + 'px';
-        drawCanvas.width = rect.width * dpr;
-        drawCanvas.height = rect.height * dpr;
-        drawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        let width = rect.width;
+        let height = rect.height;
+        try {
+            if (chart && typeof chart.timeScale === 'function') {
+                const tw = chart.timeScale().width();
+                if (typeof tw === 'number' && isFinite(tw) && tw > 8) width = tw;
+            }
+        } catch (e) { /* chart henüz hazır değilse container genişliği kullanılır */ }
+        if (width >= rect.width - 1) {
+            try {
+                const pw = chart && typeof chart.priceScale === 'function'
+                    ? chart.priceScale('right').width()
+                    : 0;
+                if (typeof pw === 'number' && isFinite(pw) && pw > 0) {
+                    width = Math.max(0, rect.width - pw);
+                }
+            } catch (e) { /* yok say */ }
+        }
+        return {
+            x: 0,
+            y: 0,
+            width: Math.max(0, width),
+            height: Math.max(0, height)
+        };
+    }
+
+    function isInPlotArea(x, y) {
+        const plot = getPlotRect();
+        return x >= 0 && y >= 0 && x <= plot.width && y <= plot.height;
     }
 
     /* ────────── Chart type dropdown ("Çubuklar" menu) ────────── */
@@ -4065,6 +4110,7 @@ const TradingChart = (() => {
         const rect = drawCanvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+        if (!isInPlotArea(x, y)) return;
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
 
@@ -4122,7 +4168,7 @@ const TradingChart = (() => {
             const rect = drawCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+            if (!isInPlotArea(x, y)) return;
             const dp = pixelToDataPoint(x, y);
             if (dp.time === null || dp.price === null) return;
             state.pendingShape = { type: state.activeTool, points: state.pendingPoints.concat([dp]) };
@@ -4133,7 +4179,7 @@ const TradingChart = (() => {
         const rect = drawCanvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+        if (!isInPlotArea(x, y)) return;
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
 
@@ -4232,7 +4278,14 @@ const TradingChart = (() => {
     function redrawDrawings() {
         if (!drawCtx || !drawCanvas) return;
         const rect = drawCanvas.getBoundingClientRect();
+        drawCtx.save();
+        drawCtx.setTransform((window.devicePixelRatio || 1), 0, 0, (window.devicePixelRatio || 1), 0, 0);
         drawCtx.clearRect(0, 0, rect.width, rect.height);
+
+        const plot = getPlotRect();
+        drawCtx.beginPath();
+        drawCtx.rect(0, 0, plot.width, plot.height);
+        drawCtx.clip();
 
         if (!state.drawingsHidden) {
             state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
@@ -4240,7 +4293,8 @@ const TradingChart = (() => {
         if (state.pendingShape) drawShape(state.pendingShape, false);
         if (state.measureShape) drawShape({ type: 'measure', p1: state.measureShape.p1, p2: state.measureShape.p2 }, false);
 
-        renderSessionCloseMarker(rect);
+        renderSessionCloseMarker(plot);
+        drawCtx.restore();
     }
 
     // Thin dashed vertical marker + label at the most recent bar, shown only
@@ -4332,7 +4386,7 @@ const TradingChart = (() => {
         const a = dataPointToPixel(shape.p1);
         const b = dataPointToPixel(shape.p2);
         if (a.x === null || b.x === null || a.y === null || b.y === null) return;
-        const rect = drawCanvas.getBoundingClientRect();
+        const rect = getPlotRect();
 
         drawCtx.save();
         drawCtx.strokeStyle = isSelected ? '#4FC3F7' : drawColor();
