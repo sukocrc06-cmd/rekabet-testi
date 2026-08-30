@@ -34,7 +34,7 @@
          devam eder, canlıya yansıyan düzeltme hiç görünmez.
     -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.min.css?v=20260830a">
+    <link rel="stylesheet" href="styles.min.css?v=20260830b">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -398,12 +398,20 @@
 
                     <div class="tv-toolbar">
                         <div class="tv-symbol-block">
-                            <!-- (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse
-                                 logoları") tradingChart.js setSymbolHeader() her sembol
-                                 değişiminde bunun içeriğini DataController.buildLogoHtml()
-                                 ile dolduruyor. -->
+                            <!-- (30 Ağustos 2026 — "tam ekranda hisseler arası seçim"
+                                 kullanıcı geri bildirimi) Ok tuşu kısayolu (bkz.
+                                 tradingChart.js cycleFullscreenSymbol) fark edilmiyordu
+                                 — hiçbir görsel ipucu yoktu. Bu iki buton SADECE tam
+                                 ekran modunda görünür (bkz. styles.css .tv-symbol-nav-btn),
+                                 normal görünümde zaten izleme listesinden tıklanarak
+                                 sembol değiştirilebildiği için gizli kalıp arayüzü
+                                 kalabalıklaştırmıyor. Aynı cycleFullscreenSymbol()
+                                 fonksiyonunu çağırırlar — klavye kısayolu da AYNEN çalışmaya
+                                 devam ediyor, bu sadece ona görünür bir alternatif. -->
+                            <button type="button" class="tv-symbol-nav-btn" id="btn-symbol-nav-prev" title="Önceki hisse (↑ / ←)" aria-label="Önceki hisse">‹</button>
                             <span id="tv-symbol-logo"></span>
                             <span id="tv-symbol-name" class="tv-symbol-name">---</span>
+                            <button type="button" class="tv-symbol-nav-btn" id="btn-symbol-nav-next" title="Sonraki hisse (↓ / →)" aria-label="Sonraki hisse">›</button>
                             <span id="live-data-dot" class="live-data-dot" title="Simülasyon fiyatı"></span>
                             <span id="tv-last-price" class="tv-last-price">---</span>
                             <span id="tv-price-change" class="tv-price-change"></span>
@@ -1727,7 +1735,7 @@
          app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
-    <script defer src="tradingChart.min.js?v=20260830a"></script>
+    <script defer src="tradingChart.min.js?v=20260830b"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
     <script defer src="tradingEngine.min.js?v=20260830a"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->

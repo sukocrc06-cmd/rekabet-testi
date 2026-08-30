@@ -2359,6 +2359,16 @@ const TradingChart = (() => {
     function setupFullscreenControl() {
         const btn = byId('btn-toggle-fullscreen');
         if (btn) btn.addEventListener('click', () => toggleFullscreen());
+        // (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" görünür buton,
+        // kullanıcı geri bildirimi: "klavye yerine görünür buton istiyorum")
+        // Ok tuşu kısayolunun (aşağıdaki keydown dinleyicisi) fare/dokunmatik
+        // eşdeğeri — İKİSİ DE cycleFullscreenSymbol()'ü çağırıyor, davranış
+        // birebir aynı. Butonlar CSS ile sadece tam ekran modunda görünür
+        // (bkz. styles.css .tv-fullscreen-mode .tv-symbol-nav-btn).
+        const prevBtn = byId('btn-symbol-nav-prev');
+        const nextBtn = byId('btn-symbol-nav-next');
+        if (prevBtn) prevBtn.addEventListener('click', () => cycleFullscreenSymbol(-1));
+        if (nextBtn) nextBtn.addEventListener('click', () => cycleFullscreenSymbol(1));
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && fullscreenActive) { toggleFullscreen(false); return; }
             // (18 Temmuz 2026, onuncu oturum, ikinci tur) "F" kısayolu tam

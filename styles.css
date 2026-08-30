@@ -2605,6 +2605,38 @@ body.compact-mode .status-item {
     letter-spacing: 0.3px;
 }
 
+/* (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" görünür buton)
+ * Normal görünümde GİZLİ — sembol değiştirmenin zaten bir yolu var
+ * (izleme listesi). SADECE tam ekran modunda (kenar çubuğu gizlendiği
+ * için başka bir yol kalmıyor) görünür oluyor, bkz. aşağıdaki
+ * .tv-fullscreen-mode kuralı. */
+.tv-symbol-nav-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.tv-symbol-nav-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+    background-color: var(--gold-dim);
+}
+
+.tv-fullscreen-mode .tv-symbol-nav-btn {
+    display: inline-flex;
+}
+
 /* (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük görsel
    gösterge") Sembol adının yanında, o an ekrandaki fiyatın backend'in
    gerçek yfinance verisinden mi (yeşil, yanıp sönen nokta) yoksa yerel
