@@ -2586,6 +2586,9 @@ body.compact-mode .status-item {
     align-items: baseline;
     gap: 10px;
     flex-shrink: 0;
+    /* (30 Ağustos 2026 — sembol seçici açılır listesi) .tv-symbol-picker-popover
+       bu bloğa göre konumlanıyor (position:absolute). */
+    position: relative;
 }
 
 /* (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
@@ -2635,6 +2638,20 @@ body.compact-mode .status-item {
 
 .tv-fullscreen-mode .tv-symbol-nav-btn {
     display: inline-flex;
+}
+
+/* (30 Ağustos 2026 — sembol seçici açılır listesi) .qt-symbol-search-popover'ın
+   left:14px/right:14px kuralı Hızlı Alım Satım panelinin GENİŞ (tüm panel
+   eninde) konteynerine göreydi — burada konumlandığı .tv-symbol-block çok
+   daha dar (sadece logo+isim+fiyat kadar), o yüzden kendi sabit genişliğini
+   tanımlıyor; .qt-symbol-search-popover/-results/-row/-empty sınıflarının
+   geri kalan görsel stilini (renk/hover/yazı tipi) DEĞİŞTİRMEDEN aynen
+   miras alıyor. */
+.tv-symbol-picker-popover {
+    left: 0;
+    right: auto;
+    width: 260px;
+    z-index: 45;
 }
 
 /* (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük görsel

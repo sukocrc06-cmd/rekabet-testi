@@ -177,6 +177,20 @@ const TradingEngine = (() => {
         // bildirimi çıkıyor; tıklanırsa sembol tek adımda geri ekleniyor.
         showWatchlistUndoToast(symbol);
     }
+    // (30 Ağustos 2026 — "tam ekranda tıklayınca liste çıksın, seçip direkt
+    // gideyim" kullanıcı isteği) tradingChart.js'teki yeni sembol seçici
+    // açılır listesinin (bkz. setupSymbolPickerDropdown) tıklama davranışı —
+    // renderWatchlistRows()'un ARAMA MODU satır tıklamasıyla BİREBİR AYNI
+    // (sembolü izleme listesine ekle + grafik sembolü yap) — kullanıcı ne
+    // ararsa arasın (izleme listesinde olsun ya da olmasın), seçtiği an hem
+    // grafiğe hem izleme listesine (dolayısıyla ok tuşu/‹ › gezinmesine de)
+    // dahil oluyor.
+    function jumpToSymbol(symbol) {
+        addToWatchlist(symbol);
+        selectSymbol(symbol);
+        renderWatchlistRows();
+        renderWatchlistPrices();
+    }
 
     let watchlistUndoTimer = null;
     function showWatchlistUndoToast(symbol) {
@@ -5922,6 +5936,9 @@ const TradingEngine = (() => {
         // fullscreen modunda klavye ok tuşlarıyla izleme listesinde bir
         // önceki/sonraki sembole geçebilsin diye.
         getWatchlistSymbolsOrdered,
+        // (30 Ağustos 2026) tradingChart.js'teki tam ekran sembol seçici
+        // açılır listesinin "seçince direkt git" davranışı için.
+        jumpToSymbol,
         // (29 Temmuz 2026 — Madde 20) tradingChart.js'teki debugGet*/debugIs*
         // ailesiyle AYNI amaç: salt-okunur/tetikleyici QA yardımcıları,
         // yalnızca Playwright testlerinde kullanılıyor, hiçbir üretim kodu

@@ -34,7 +34,7 @@
          devam eder, canlıya yansıyan düzeltme hiç görünmez.
     -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.min.css?v=20260830b">
+    <link rel="stylesheet" href="styles.min.css?v=20260830c">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -411,6 +411,19 @@
                             <button type="button" class="tv-symbol-nav-btn" id="btn-symbol-nav-prev" title="Önceki hisse (↑ / ←)" aria-label="Önceki hisse">‹</button>
                             <span id="tv-symbol-logo"></span>
                             <span id="tv-symbol-name" class="tv-symbol-name">---</span>
+                            <!-- (30 Ağustos 2026 — "tıklasam liste çıksa seçip direkt
+                                 gitsem" kullanıcı isteği) ‹ › tek tek gezindirir; bu ▾
+                                 butonu ise tüm BIST100'de arayıp DOĞRUDAN istediğin
+                                 sembole atlamanı sağlıyor — mevcut Hızlı Alım Satım
+                                 panelindeki sembol arama popover'ıyla (bkz.
+                                 setupQuickTicketSymbolSearch) AYNI görsel dil/desen,
+                                 sadece tam ekranda ve TradingEngine.jumpToSymbol()
+                                 çağırıyor (bkz. tradingChart.js setupSymbolPickerDropdown). -->
+                            <button type="button" class="tv-symbol-nav-btn" id="btn-symbol-picker" title="Sembol listesinden ara ve seç" aria-label="Sembol seç">▾</button>
+                            <div class="qt-symbol-search-popover tv-symbol-picker-popover" id="symbol-picker-popover" style="display:none;">
+                                <input type="text" id="symbol-picker-input" class="form-input" placeholder="Sembol veya şirket adı...">
+                                <div class="qt-symbol-search-results" id="symbol-picker-results"></div>
+                            </div>
                             <button type="button" class="tv-symbol-nav-btn" id="btn-symbol-nav-next" title="Sonraki hisse (↓ / →)" aria-label="Sonraki hisse">›</button>
                             <span id="live-data-dot" class="live-data-dot" title="Simülasyon fiyatı"></span>
                             <span id="tv-last-price" class="tv-last-price">---</span>
@@ -1735,9 +1748,9 @@
          app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
-    <script defer src="tradingChart.min.js?v=20260830b"></script>
+    <script defer src="tradingChart.min.js?v=20260830c"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
-    <script defer src="tradingEngine.min.js?v=20260830a"></script>
+    <script defer src="tradingEngine.min.js?v=20260830b"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
     <script defer src="multiChartGrid.min.js?v=20260828"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->

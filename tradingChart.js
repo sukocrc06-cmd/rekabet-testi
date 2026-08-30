@@ -2356,6 +2356,73 @@ const TradingChart = (() => {
         }
     }
 
+    // (30 Ağustos 2026 — "burda tıklasam liste çıksa seçip direkt gitsem"
+    // kullanıcı isteği) ‹ › butonları izleme listesinde tek tek ileri/geri
+    // gezindiriyordu; bu ise sembol adının yanındaki ▾ butonuyla açılan,
+    // arama kutulu bir popover — kullanıcı ne yazarsa TÜM BIST100 içinde
+    // arıyor (sadece izleme listesiyle sınırlı değil, mevcut Hızlı Alım
+    // Satım panelindeki sembol aramasıyla — bkz. tradingEngine.js
+    // setupQuickTicketSymbolSearch — AYNI kapsam) ve tıklanan sembole
+    // TradingEngine.jumpToSymbol() ile DOĞRUDAN atlıyor (o sembolü henüz
+    // izleme listende yoksa otomatik ekliyor, tıpkı sol paneldeki "Sembol
+    // Ara" kutusunun davranışı gibi — tutarlılık için).
+    function setupSymbolPickerDropdown() {
+        const btn = byId('btn-symbol-picker');
+        const popover = byId('symbol-picker-popover');
+        const input = byId('symbol-picker-input');
+        const results = byId('symbol-picker-results');
+        if (!btn || !popover || !input || !results) return;
+
+        const renderResults = () => {
+            const term = input.value.trim().toLowerCase();
+            const source = (window.DataController && window.DataController.BIST100) || [];
+            const list = (term
+                ? source.filter(({ symbol, name }) => symbol.toLowerCase().includes(term) || name.toLowerCase().includes(term))
+                : source
+            ).slice(0, 30);
+            if (!list.length) {
+                results.innerHTML = '<div class="qt-symbol-search-empty">Eşleşen sembol bulunamadı.</div>';
+                return;
+            }
+            results.innerHTML = list.map(({ symbol, name }) => (
+                '<div class="qt-symbol-search-row" data-symbol="' + symbol + '">' +
+                    '<span><span class="wl-symbol">' + symbol + '</span><span class="wl-name">' + name + '</span></span>' +
+                '</div>'
+            )).join('');
+        };
+
+        const close = () => { popover.style.display = 'none'; };
+        const open = () => {
+            if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
+            if (window.__optipulseCloseOtherSimpleDropdowns) window.__optipulseCloseOtherSimpleDropdowns();
+            popover.style.display = '';
+            input.value = '';
+            renderResults();
+            setTimeout(() => input.focus(), 20);
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (popover.style.display === 'none') open(); else close();
+        });
+        input.addEventListener('input', renderResults);
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation(); // (aşağıdaki tam ekran ok tuşu dinleyicisiyle çakışmasın)
+            if (e.key === 'Escape') close();
+        });
+        results.addEventListener('click', (e) => {
+            const row = e.target.closest('.qt-symbol-search-row');
+            if (!row) return;
+            close();
+            if (window.TradingEngine && typeof window.TradingEngine.jumpToSymbol === 'function') {
+                window.TradingEngine.jumpToSymbol(row.dataset.symbol);
+            }
+        });
+        document.addEventListener('click', (e) => {
+            if (popover.style.display !== 'none' && !popover.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+    }
+
     function setupFullscreenControl() {
         const btn = byId('btn-toggle-fullscreen');
         if (btn) btn.addEventListener('click', () => toggleFullscreen());
@@ -2369,6 +2436,7 @@ const TradingChart = (() => {
         const nextBtn = byId('btn-symbol-nav-next');
         if (prevBtn) prevBtn.addEventListener('click', () => cycleFullscreenSymbol(-1));
         if (nextBtn) nextBtn.addEventListener('click', () => cycleFullscreenSymbol(1));
+        setupSymbolPickerDropdown();
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && fullscreenActive) { toggleFullscreen(false); return; }
             // (18 Temmuz 2026, onuncu oturum, ikinci tur) "F" kısayolu tam
