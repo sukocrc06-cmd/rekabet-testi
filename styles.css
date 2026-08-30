@@ -2586,9 +2586,6 @@ body.compact-mode .status-item {
     align-items: baseline;
     gap: 10px;
     flex-shrink: 0;
-    /* (30 Ağustos 2026 — sembol seçici açılır listesi) .tv-symbol-picker-popover
-       bu bloğa göre konumlanıyor (position:absolute). */
-    position: relative;
 }
 
 /* (22 Temmuz 2026, on ikinci oturum, altıncı tur — "hisse logoları")
@@ -2608,11 +2605,16 @@ body.compact-mode .status-item {
     letter-spacing: 0.3px;
 }
 
-/* (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" görünür buton)
+/* (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" özelliği)
  * Normal görünümde GİZLİ — sembol değiştirmenin zaten bir yolu var
  * (izleme listesi). SADECE tam ekran modunda (kenar çubuğu gizlendiği
  * için başka bir yol kalmıyor) görünür oluyor, bkz. aşağıdaki
- * .tv-fullscreen-mode kuralı. */
+ * .tv-fullscreen-mode kuralı.
+ * (30 Ağustos 2026 — ikinci güncelleme, kullanıcı geri bildirimi: "okları
+ * kaldır") Önceden burada ‹/› (bir önceki/sonraki) butonları da vardı;
+ * arama kutulu ▾ seçici (aşağıda) onları gereksiz kıldığı için kaldırıldı
+ * — kalan tek buton bu ▾ sembol seçici tetikleyicisi. Sınıf adı geriye
+ * dönük uyumluluk için aynı bırakıldı. */
 .tv-symbol-nav-btn {
     display: none;
     align-items: center;
@@ -2640,18 +2642,32 @@ body.compact-mode .status-item {
     display: inline-flex;
 }
 
-/* (30 Ağustos 2026 — sembol seçici açılır listesi) .qt-symbol-search-popover'ın
-   left:14px/right:14px kuralı Hızlı Alım Satım panelinin GENİŞ (tüm panel
-   eninde) konteynerine göreydi — burada konumlandığı .tv-symbol-block çok
-   daha dar (sadece logo+isim+fiyat kadar), o yüzden kendi sabit genişliğini
-   tanımlıyor; .qt-symbol-search-popover/-results/-row/-empty sınıflarının
-   geri kalan görsel stilini (renk/hover/yazı tipi) DEĞİŞTİRMEDEN aynen
-   miras alıyor. */
+/* (30 Ağustos 2026 — sembol seçici açılır listesi, ikinci düzeltme)
+ * İLK sürüm .qt-symbol-search-popover'ın position:absolute kuralını
+ * miras alıyordu — bu popover'ın konumlandığı .tv-symbol-block,
+ * overflow-x:auto (ki CSS kuralına göre bu overflow-y'yi de zımnen
+ * "auto" yapıyor) + sabit height:48px olan .tv-toolbar'ın İÇİNDE
+ * olduğundan, açılır liste görünmez şekilde KIRPILIYORDU (kullanıcı
+ * "liste hiç görünmüyor" diye bildirdi — ekran görüntüsünde sadece arama
+ * kutusu görünüyor, altındaki sonuç listesi yoktu). Çözüm: chart-type/
+ * header-menu dropdown'larıyla AYNI, kanıtlanmış desene geçildi —
+ * position:fixed + JS'te getBoundingClientRect() ile hesaplanan top/left
+ * (bkz. tradingChart.js setupSymbolPickerDropdown) — fixed konumlandırma
+ * hiçbir atadaki overflow tarafından kırpılmaz. */
 .tv-symbol-picker-popover {
-    left: 0;
-    right: auto;
+    display: none;
+    position: fixed;
+    z-index: 620;
     width: 260px;
-    z-index: 45;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    padding: 8px;
+}
+
+.tv-symbol-picker-popover.open {
+    display: block;
 }
 
 /* (18 Temmuz 2026, dokuzuncu oturum — "canlı veri durumu için küçük görsel

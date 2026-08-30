@@ -2373,13 +2373,18 @@ const TradingChart = (() => {
         const results = byId('symbol-picker-results');
         if (!btn || !popover || !input || !results) return;
 
+        // (30 Ağustos 2026 — "otomatik sıralansın" kullanıcı isteği) Kaynak
+        // dizi (DC.BIST100) zaten sembole göre alfabetik tanımlı, ama bu
+        // burada AÇIKÇA/garanti altına alınıyor — filtre uygulansa da
+        // uygulanmasa da (boş arama kutusunda TÜM liste dahil) sonuç HER
+        // ZAMAN alfabetik sırayla görünür.
         const renderResults = () => {
             const term = input.value.trim().toLowerCase();
             const source = (window.DataController && window.DataController.BIST100) || [];
-            const list = (term
+            const filtered = term
                 ? source.filter(({ symbol, name }) => symbol.toLowerCase().includes(term) || name.toLowerCase().includes(term))
-                : source
-            ).slice(0, 30);
+                : source;
+            const list = filtered.slice().sort((a, b) => a.symbol.localeCompare(b.symbol)).slice(0, 30);
             if (!list.length) {
                 results.innerHTML = '<div class="qt-symbol-search-empty">Eşleşen sembol bulunamadı.</div>';
                 return;
@@ -2391,11 +2396,26 @@ const TradingChart = (() => {
             )).join('');
         };
 
-        const close = () => { popover.style.display = 'none'; };
+        // (30 Ağustos 2026 — kırpılma hatası düzeltmesi) İLK sürüm bu
+        // popover'ı .qt-symbol-search-popover'ın position:absolute +
+        // style.display açma/kapama desenini birebir kopyalamıştı — ama o
+        // desen Hızlı Alım Satım panelinde (kırpma yapan bir atası olmayan
+        // sade bir konteynerde) işe yarıyordu. Burada popover, sabit
+        // height + overflow-x:auto olan (bu da CSS'e göre overflow-y'yi
+        // zımnen "auto" yapıp DİKEY KIRPMAYA da neden olan) .tv-toolbar'ın
+        // İÇİNDE olduğu için liste görünmez şekilde kırpılıyordu (kullanıcı
+        // "liste hiç görünmüyor" diye bildirdi). Çözüm: chart-type/
+        // header-menu açılır menüleriyle AYNI kanıtlanmış desen —
+        // position:fixed + getBoundingClientRect() ile hesaplanan top/left,
+        // fixed konumlandırma hiçbir atadaki overflow tarafından kırpılmaz.
+        const close = () => popover.classList.remove('open');
         const open = () => {
             if (window.__optipulseCloseOtherModals) window.__optipulseCloseOtherModals();
             if (window.__optipulseCloseOtherSimpleDropdowns) window.__optipulseCloseOtherSimpleDropdowns();
-            popover.style.display = '';
+            const rect = btn.getBoundingClientRect();
+            popover.style.top = (rect.bottom + 6) + 'px';
+            popover.style.left = rect.left + 'px';
+            popover.classList.add('open');
             input.value = '';
             renderResults();
             setTimeout(() => input.focus(), 20);
@@ -2403,7 +2423,7 @@ const TradingChart = (() => {
 
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (popover.style.display === 'none') open(); else close();
+            if (popover.classList.contains('open')) close(); else open();
         });
         input.addEventListener('input', renderResults);
         input.addEventListener('keydown', (e) => {
@@ -2419,23 +2439,22 @@ const TradingChart = (() => {
             }
         });
         document.addEventListener('click', (e) => {
-            if (popover.style.display !== 'none' && !popover.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+            if (popover.classList.contains('open') && !popover.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && popover.classList.contains('open')) close();
         });
     }
 
     function setupFullscreenControl() {
         const btn = byId('btn-toggle-fullscreen');
         if (btn) btn.addEventListener('click', () => toggleFullscreen());
-        // (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" görünür buton,
-        // kullanıcı geri bildirimi: "klavye yerine görünür buton istiyorum")
-        // Ok tuşu kısayolunun (aşağıdaki keydown dinleyicisi) fare/dokunmatik
-        // eşdeğeri — İKİSİ DE cycleFullscreenSymbol()'ü çağırıyor, davranış
-        // birebir aynı. Butonlar CSS ile sadece tam ekran modunda görünür
-        // (bkz. styles.css .tv-fullscreen-mode .tv-symbol-nav-btn).
-        const prevBtn = byId('btn-symbol-nav-prev');
-        const nextBtn = byId('btn-symbol-nav-next');
-        if (prevBtn) prevBtn.addEventListener('click', () => cycleFullscreenSymbol(-1));
-        if (nextBtn) nextBtn.addEventListener('click', () => cycleFullscreenSymbol(1));
+        // (30 Ağustos 2026 — "okları da kaldır" kullanıcı isteği) Burada
+        // önceden ‹/› (bir önceki/sonraki sembol) görünür butonları vardı;
+        // kullanıcı arama kutulu ▾ seçiciyi (setupSymbolPickerDropdown)
+        // yeterli bulup bu iki butonun kaldırılmasını istedi. Ok tuşu
+        // klavye kısayolu (aşağıdaki keydown dinleyicisi, cycleFullscreenSymbol)
+        // görsel bir karşılığı olmadan sessizce çalışmaya devam ediyor.
         setupSymbolPickerDropdown();
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && fullscreenActive) { toggleFullscreen(false); return; }
