@@ -34,7 +34,7 @@
          devam eder, canlıya yansıyan düzeltme hiç görünmez.
     -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.min.css?v=20260829a">
+    <link rel="stylesheet" href="styles.min.css?v=20260830a">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -299,14 +299,16 @@
                     </button>
                 </div>
 
-                <!-- Exchange Selector -->
+                <!-- Borsa -->
+                <!-- (30 Ağustos 2026 — "genel görünüm" sadeleştirmesi, kullanıcı
+                     isteği) NASDAQ/NYSE hiçbir zaman gerçekten çalışmıyordu
+                     (tıklanınca sadece "yakında eklenecek" uyarısı veriyordu);
+                     tek gerçek seçenek olan BIST100'ü aktif buton görünümüyle
+                     bırakmak yerine sabit bir etiketle gösteriyoruz — kafa
+                     karıştıran, işlevsiz bir "seçim" arayüzü olmasın. -->
                 <div class="form-group">
-                    <label>Borsa Seçimi</label>
-                    <div class="exchange-selector" role="group" aria-label="Exchange selection">
-                        <button type="button" class="exchange-btn active" data-exchange="BIST">BIST</button>
-                        <button type="button" class="exchange-btn" data-exchange="NASDAQ">NASDAQ</button>
-                        <button type="button" class="exchange-btn" data-exchange="NYSE">NYSE</button>
-                    </div>
+                    <label>Borsa</label>
+                    <div class="exchange-static-badge">BIST100</div>
                 </div>
 
                 <!-- Symbol Search -->
@@ -486,13 +488,21 @@
                     <div class="tv-mtf-bar" id="tv-mtf-bar" title="Fiyat/SMA20/SMA50 hizasına göre her zaman diliminin trend yönü"></div>
 
                     <!-- Zaman dilimi şeridi: TradingView'daki gerçek konumu — ana araç
-                         çubuğunun hemen altında, mum grafiğinin üstünde. -->
+                         çubuğunun hemen altında, mum grafiğinin üstünde.
+                         (30 Ağustos 2026 — madde 4, "daha fazla çözünürlük ekle"
+                         kullanıcı seçimi) 5dk/30dk/2sa/1Ay eklendi — hepsi
+                         tradingChart.js'teki RESOLUTIONS dizisiyle birebir
+                         eşleşiyor, bkz. o yorumdaki gerçek/sentetik veri notu. -->
                     <div class="tv-resolution-bar" id="tv-resolution-bar" role="group" aria-label="Zaman dilimi">
+                        <button type="button" class="tv-res-btn" data-res="5m">5m</button>
                         <button type="button" class="tv-res-btn" data-res="15m">15m</button>
+                        <button type="button" class="tv-res-btn" data-res="30m">30m</button>
                         <button type="button" class="tv-res-btn" data-res="1h">1H</button>
+                        <button type="button" class="tv-res-btn" data-res="2h">2H</button>
                         <button type="button" class="tv-res-btn" data-res="4h">4H</button>
                         <button type="button" class="tv-res-btn active" data-res="1d">1D</button>
                         <button type="button" class="tv-res-btn" data-res="1w">1W</button>
+                        <button type="button" class="tv-res-btn" data-res="1mo">1Ay</button>
                     </div>
 
                     <!-- (22 Temmuz 2026, on ikinci oturum, üçüncü tur) Strateji Tekrarı
@@ -1709,7 +1719,7 @@
          olarak aynen duruyor — bundan sonra bir değişiklik yapılacaksa
          orijinal .js dosyası düzenlenip .min.js YENİDEN üretilmeli (terser
          ile), aksi halde canlıdaki kod eski kalır. -->
-    <script defer src="dataController.min.js?v=20260828"></script>
+    <script defer src="dataController.min.js?v=20260830a"></script>
     <!-- (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
          chartRenderer.js (Canvas tabanlı eski backtest grafik motoru) burada
          yükleniyordu, ama onu kullanan TEK yer app.js'in artık ulaşılamayan
@@ -1717,9 +1727,9 @@
          app.js'ten temizlendiği için bu dosya da artık hiçbir yerden
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
-    <script defer src="tradingChart.min.js?v=20260829a"></script>
+    <script defer src="tradingChart.min.js?v=20260830a"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
-    <script defer src="tradingEngine.min.js?v=20260828b"></script>
+    <script defer src="tradingEngine.min.js?v=20260830a"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
     <script defer src="multiChartGrid.min.js?v=20260828"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->

@@ -148,6 +148,14 @@ const TradingEngine = (() => {
     function saveWatchlistSymbols(set) {
         try { localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(Array.from(set || watchlistSymbols))); } catch (e) { /* private mode vb. */ }
     }
+    // (30 Ağustos 2026 — "tam ekranda hisseler arası gezinme" özelliği)
+    // tradingChart.js'in tam ekran modunda klavye ok tuşlarıyla bir
+    // önceki/sonraki sembole geçebilmesi için, izleme listesindeki
+    // sembolleri renderWatchlistRows() ile AYNI sırayla (DC.BIST100'ün
+    // kanonik sırası, izleme listesine göre filtrelenmiş) döndürür.
+    function getWatchlistSymbolsOrdered() {
+        return DC.BIST100.filter(({ symbol }) => watchlistSymbols.has(symbol)).map(({ symbol }) => symbol);
+    }
     function addToWatchlist(symbol) {
         if (watchlistSymbols.has(symbol)) return;
         watchlistSymbols.add(symbol);
@@ -655,8 +663,31 @@ const TradingEngine = (() => {
 
         renderWatchlistPrices();
         updateActiveSymbolTicket();
-        if (state.activeSymbol && window.TradingChart) {
-            window.TradingChart.updateLastPrice(state.activeSymbol, priceProfiles[state.activeSymbol].price);
+        // (28 Ağustos 2026 — "grafik yüklenirken önce sahte fiyat, sonra gerçek
+        // fiyat geliyor" hatası, kök neden düzeltmesi) Bu döngü (tickPrices)
+        // HER sembol için, GERÇEK veri görülmüş olsun ya da olmasın, sürekli
+        // rastgele bir fiyat yürüyüşü hesaplıyor — bu bilinçli bir tasarım
+        // (piyasa "canlı" hissettirsin diye). AMA aşağıdaki satır bunu
+        // koşulsuz olarak doğrudan GRAFİĞE (candleSeries) yazıyordu. Yarış
+        // durumu: bir sembol seçildiğinde loadSymbol() gerçek OHLCV'yi
+        // çekip grafiği GERÇEK son kapanışla çizdikten hemen sonra, ama
+        // priceProfiles[symbol]'ü gerçek fiyata yeniden çıpalayan
+        // applyRealPriceUpdate() (selectSymbol() içinde, loadSymbol'dan
+        // SONRA) çalışmadan ÖNCE, bu periyodik tickPrices() zamanlayıcısı
+        // araya girebiliyordu — o anda priceProfiles[symbol].price HÂLÂ
+        // sayfa açılışındaki TAMAMEN SENTETİK tohum değerinden (ör. ASELS
+        // için ~351.50, rastgele yürüyüşle ~350.57'ye kaymış) geliyordu ve
+        // bu satır onu doğrudan grafiğin GERÇEK son mumunun üzerine
+        // yazıyordu — kullanıcı önce doğru fiyatı, hemen ardından bu sahte
+        // değeri, bir tık sonra da (applyRealPriceUpdate çalışınca) tekrar
+        // doğrusunu görüyordu. Aynı projede header için zaten uygulanmış
+        // olan `hasRealAnchor` kontrolü burada da eklendi: bu sembol için
+        // henüz hiçbir gerçek veri görülmediyse (hasRealAnchor !== true),
+        // grafiğe HİÇ yazılmıyor — sentetik bir fiyat artık asla grafiğin
+        // gerçek mumlarının üzerine yazılamaz.
+        const activeProfile = state.activeSymbol ? priceProfiles[state.activeSymbol] : null;
+        if (activeProfile && activeProfile.hasRealAnchor === true && window.TradingChart) {
+            window.TradingChart.updateLastPrice(state.activeSymbol, activeProfile.price);
         }
         renderPositions();
         renderAccountSummary();
@@ -5741,19 +5772,14 @@ const TradingEngine = (() => {
         });
     }
 
-    /* ────────── Exchange selector (BIST active, others "coming soon") ────────── */
-    function setupExchangeSelector() {
-        document.querySelectorAll('.exchange-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                if (btn.dataset.exchange !== 'BIST') {
-                    showToast(`${btn.dataset.exchange} borsası yakında eklenecek.`);
-                    return;
-                }
-                document.querySelectorAll('.exchange-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            });
-        });
-    }
+    /* ────────── Exchange selector ──────────
+       (30 Ağustos 2026 — "genel görünüm" sadeleştirmesi, kullanıcı isteği)
+       NASDAQ/NYSE butonları hiçbir zaman gerçek işlevi olmayan, tıklanınca
+       "yakında eklenecek" toast'ı gösteren yer tutuculardı; kullanıcı bunları
+       kafa karıştırıcı buldu ve kaldırılmasını istedi. Sadece BIST100
+       desteklendiğinden index.html'de artık interaktif buton grubu yerine
+       sabit bir "BIST100" etiketi var — bu fonksiyonun yapacağı bir iş
+       kalmadı, init()'teki çağrısıyla birlikte kaldırıldı. */
 
     /* ════════════════════════════════════════════════
        Init
@@ -5776,7 +5802,6 @@ const TradingEngine = (() => {
         setupWatchlistSearch();
         setupTicket();
         setupQuickTicketSymbolSearch();
-        setupExchangeSelector();
         setupPanelSubtabs();
         setupAlertsModal();
         setupSltpModal();
@@ -5893,6 +5918,10 @@ const TradingEngine = (() => {
         // kullanıcının gerçek al-sat noktalarını ok işaretiyle gösterebilmesi
         // için.
         getTradeHistoryForSymbol,
+        // (30 Ağustos 2026 — "tam ekranda hisseler arası gezinme") tradingChart.js
+        // fullscreen modunda klavye ok tuşlarıyla izleme listesinde bir
+        // önceki/sonraki sembole geçebilsin diye.
+        getWatchlistSymbolsOrdered,
         // (29 Temmuz 2026 — Madde 20) tradingChart.js'teki debugGet*/debugIs*
         // ailesiyle AYNI amaç: salt-okunur/tetikleyici QA yardımcıları,
         // yalnızca Playwright testlerinde kullanılıyor, hiçbir üretim kodu

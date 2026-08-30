@@ -65,7 +65,13 @@ const DataController = (() => {
         ALBRK: { name: 'Albaraka Türk', sector: 'Bankacılık', basePrice: 8.13, volatility: 0.03, drift: 0.0007, avgVolume: 110160000, logoDomain: 'albaraka.com.tr' },
         ALFAS: { name: 'Alfa Solar Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 44.96, volatility: 0.029, drift: 0.0008, avgVolume: 24282000, logoDomain: 'alfasolarenerji.com' },
         ARCLK: { name: 'Arçelik', sector: 'Dayanıklı Tüketim',  basePrice: 97.60, volatility: 0.017, drift: 0.0008, avgVolume: 4470000, logoDomain: 'arcelik.com.tr' },
-        ASELS: { name: 'Aselsan', sector: 'Savunma Sanayii',  basePrice: 351.50, volatility: 0.017, drift: 0.0007, avgVolume: 1899000, logoDomain: 'aselsan.com' },
+        // (30 Ağustos 2026 — "Aselsan logosu yanlış/düşük kaliteli" geri
+        // bildirimi) `logoDomain` yanlıştı: aselsan.com Aselsan'ın resmi
+        // sitesi DEĞİL — şirketin gerçek kurumsal alan adı aselsan.com.tr
+        // (bkz. aselsan.com.tr/en). Logo.dev muhtemelen aselsan.com için
+        // alakasız/düşük kaliteli bir görsel (o alan adının kendi favicon'u
+        // vb.) döndürüyordu. Doğru alan adına düzeltildi.
+        ASELS: { name: 'Aselsan', sector: 'Savunma Sanayii',  basePrice: 351.50, volatility: 0.017, drift: 0.0007, avgVolume: 1899000, logoDomain: 'aselsan.com.tr' },
         ASTOR: { name: 'Astor Enerji', sector: 'Enerji (Üretim/Dağıtım)',  basePrice: 286.50, volatility: 0.016, drift: 0.0006, avgVolume: 2059500, logoDomain: 'astoras.com.tr' },
         BERA: { name: 'Bera Holding', sector: 'Holding ve Yatırım',  basePrice: 14.87, volatility: 0.022, drift: 0.0003, avgVolume: 59490000, logoDomain: 'beraholding.com.tr' },
         BIMAS: { name: 'BİM Mağazalar', sector: 'Perakende Ticaret',  basePrice: 386.00, volatility: 0.017, drift: 0.0007, avgVolume: 936000, logoDomain: 'bim.com.tr' },
@@ -615,6 +621,39 @@ const DataController = (() => {
             const bucket = weeks.get(key);
             return {
                 date: key,
+                open: bucket[0].open,
+                high: Math.max(...bucket.map(c => c.high)),
+                low: Math.min(...bucket.map(c => c.low)),
+                close: bucket[bucket.length - 1].close,
+                volume: bucket.reduce((s, c) => s + (c.volume || 0), 0)
+            };
+        });
+    }
+
+    /**
+     * (30 Ağustos 2026 — "TradingView tarzı zaman dilimi sistemi" madde 4)
+     * aggregateWeeklyCandles ile AYNI OHLC-rollup mantığı, sadece takvim
+     * AYI'na göre gruplanmış — 1 Aylık ("1mo") çözünürlük için. Ayrı bir
+     * backend isteği gerekmiyor: zaten çekilmiş olan günlük (2 yıllık,
+     * gerçek) barlar tek geçişte aylara toplanıyor, tıpkı haftalık gibi.
+     * @param {Array} dailyCandles
+     * @returns {Array} monthly candles, same shape as daily
+     */
+    function aggregateMonthlyCandles(dailyCandles) {
+        if (!Array.isArray(dailyCandles) || !dailyCandles.length) return [];
+        const months = new Map();
+
+        dailyCandles.forEach(c => {
+            const d = new Date(c.date * 1000);
+            const key = d.getUTCFullYear() * 100 + d.getUTCMonth(); // e.g. 202608
+            if (!months.has(key)) months.set(key, []);
+            months.get(key).push(c);
+        });
+
+        return Array.from(months.keys()).sort((a, b) => a - b).map(key => {
+            const bucket = months.get(key);
+            return {
+                date: bucket[0].date, // ayın ilk gerçek işlem günü — Lightweight Charts eksen için yeterli
                 open: bucket[0].open,
                 high: Math.max(...bucket.map(c => c.high)),
                 low: Math.min(...bucket.map(c => c.low)),
@@ -1451,6 +1490,7 @@ const DataController = (() => {
         generateAllOHLCV,
         synthesizeIntradayCandles,
         aggregateWeeklyCandles,
+        aggregateMonthlyCandles,
 
         // Strategy
         computeSMA,

@@ -104,15 +104,27 @@ const TradingChart = (() => {
 
     // Resolution selector (functional, not decorative) — the underlying data
     // is always daily bars, so 'intraday' entries are synthesized client-side
-    // via DataController.synthesizeIntradayCandles() and 'weekly' is an
-    // OHLC roll-up via aggregateWeeklyCandles(). See dataController.js's
-    // "Timeframe Resolution Engine" section for the full explanation.
+    // via DataController.synthesizeIntradayCandles() and 'weekly'/'monthly'
+    // are OHLC roll-ups via aggregateWeeklyCandles()/aggregateMonthlyCandles().
+    // See dataController.js's "Timeframe Resolution Engine" section for the
+    // full explanation.
+    // (30 Ağustos 2026 — "TradingView tarzı zaman dilimi sistemi" madde 4,
+    // kullanıcı seçimi: "daha fazla çözünürlük ekle") 5dk/30dk/2sa/1Ay
+    // eklendi. 5dk/30dk backend'den GERÇEK Yahoo verisiyle beslenir (bkz.
+    // fetchRealCandlesForResolution, main.py _OHLCV_INTERVAL_MAP — Yahoo'nun
+    // izin verdiği pencere ~60 gün); 2sa gerçek 1sa barlarının, 1Ay ise
+    // günlük (2 yıllık, zaten gerçek) barların istemci tarafında toplanmasıyla
+    // elde edilir — ayrı bir backend isteği gerektirmez.
     const RESOLUTIONS = [
+        { id: '5m',  kind: 'intraday', minutes: 5 },
         { id: '15m', kind: 'intraday', minutes: 15 },
+        { id: '30m', kind: 'intraday', minutes: 30 },
         { id: '1h',  kind: 'intraday', minutes: 60 },
+        { id: '2h',  kind: 'intraday', minutes: 120 },
         { id: '4h',  kind: 'intraday', minutes: 240 },
         { id: '1d',  kind: 'daily' },
-        { id: '1w',  kind: 'weekly' }
+        { id: '1w',  kind: 'weekly' },
+        { id: '1mo', kind: 'monthly' }
     ];
 
     // (19 Temmuz 2026, on ikinci oturum — "tam geçmiş erişimi") Backend
@@ -667,12 +679,15 @@ const TradingChart = (() => {
         }
     }
 
-    // Yahoo'da 4 saatlik (4h) doğrudan bir interval yok — gerçek 60dk
+    // Yahoo'da 2 saatlik/4 saatlik doğrudan bir interval yok — gerçek 60dk
     // barlarını, BIST seansı içinde (10:00-18:00 TRT = 07:00-15:00 UTC) her
-    // takvim gününde ardışık 4'erli gruplara ayırarak türetiyoruz. Bu,
-    // synthesizeIntradayCandles'ın 4sa için ürettiği "günde 2 bar" şeklini
-    // birebir yansıtır (BIST_SESSION_MINUTES/240 = 2).
-    function aggregateHourlyTo4H(hourlyCandles) {
+    // takvim gününde ardışık N'erli gruplara ayırarak türetiyoruz. Bu,
+    // synthesizeIntradayCandles'ın aynı çözünürlük için ürettiği "günde
+    // BIST_SESSION_MINUTES/60/N bar" şeklini birebir yansıtır.
+    // (30 Ağustos 2026 — madde 4, "daha fazla çözünürlük" — eskiden sadece
+    // 4 saate özel (aggregateHourlyTo4H) idi, 2 saat de eklenince genel N
+    // parametreli hale getirildi; davranış 4h için birebir AYNI kaldı.)
+    function aggregateHourlyToNH(hourlyCandles, n) {
         if (!Array.isArray(hourlyCandles) || !hourlyCandles.length) return [];
         const DAY_SECONDS = 86400;
         const byDay = new Map(); // dayStart -> bars[] (o günün barları, zaman sırasıyla)
@@ -684,8 +699,8 @@ const TradingChart = (() => {
         const out = [];
         Array.from(byDay.keys()).sort((a, b) => a - b).forEach(dayStart => {
             const bars = byDay.get(dayStart).sort((a, b) => a.date - b.date);
-            for (let i = 0; i < bars.length; i += 4) {
-                const group = bars.slice(i, i + 4);
+            for (let i = 0; i < bars.length; i += n) {
+                const group = bars.slice(i, i + n);
                 out.push({
                     date: group[0].date,
                     open: group[0].open,
@@ -699,22 +714,37 @@ const TradingChart = (() => {
         return out;
     }
 
-    // Verilen çözünürlük için GERÇEK gün-içi mumları getirir (varsa) — 15dk
-    // ve 1sa doğrudan backend'den, 4sa ise 1sa barlarının agregasyonundan.
-    // Başarısız olursa (Yahoo'nun penceresi dışı, ağ hatası vb.) null döner
-    // — çağıran taraf bu durumda MEVCUT sentetik türetimi aynen kullanmaya
-    // devam eder, hiçbir davranış bozulmaz.
+    // Verilen çözünürlük için GERÇEK gün-içi mumları getirir (varsa) — 5dk/
+    // 15dk/30dk/1sa doğrudan backend'den (Yahoo'nun izin verdiği pencere
+    // kadar geriye), 2sa/4sa ise 1sa barlarının agregasyonundan. Başarısız
+    // olursa (Yahoo'nun penceresi dışı, ağ hatası vb.) null döner — çağıran
+    // taraf bu durumda MEVCUT sentetik türetimi aynen kullanmaya devam eder,
+    // hiçbir davranış bozulmaz.
+    // (30 Ağustos 2026 — madde 4) 5dk/30dk eklendi; main.py'deki
+    // _OHLCV_INTERVAL_MAP'e karşılık gelen "5m"/"30m" girişleriyle birlikte.
     async function fetchRealCandlesForResolution(ticker, resId) {
+        if (resId === '5m') {
+            return await fetchIntradayReal(ticker, '5m');
+        }
         if (resId === '15m') {
             return await fetchIntradayReal(ticker, '15m');
+        }
+        if (resId === '30m') {
+            return await fetchIntradayReal(ticker, '30m');
         }
         if (resId === '1h') {
             return await fetchIntradayReal(ticker, '60m');
         }
+        if (resId === '2h') {
+            const hourly = await fetchIntradayReal(ticker, '60m');
+            if (!hourly || hourly.length < 2) return null;
+            const twoH = aggregateHourlyToNH(hourly, 2);
+            return twoH.length >= 3 ? twoH : null;
+        }
         if (resId === '4h') {
             const hourly = await fetchIntradayReal(ticker, '60m');
             if (!hourly || hourly.length < 4) return null;
-            const fourH = aggregateHourlyTo4H(hourly);
+            const fourH = aggregateHourlyToNH(hourly, 4);
             return fourH.length >= 3 ? fourH : null;
         }
         return null;
@@ -1141,12 +1171,19 @@ const TradingChart = (() => {
     // yolla işleyebilmesi için. deriveCandlesForRes() (ana grafik) davranışı
     // birebir aynı kalıyor, sadece bu ortak koda yönleniyor.
     function deriveCandlesFromDaily(dailyCandles, resId) {
-        const res = RESOLUTIONS.find(r => r.id === resId) || RESOLUTIONS[3];
+        // (30 Ağustos 2026 — madde 4 düzeltmesi) Fallback ARTIK sabit bir
+        // dizi indeksi (RESOLUTIONS[3]) DEĞİL — RESOLUTIONS'a yeni girişler
+        // (5dk/30dk/2sa/1Ay) eklenince "1d"nin dizideki konumu kaymıştı,
+        // indeksle referans vermek sessizce YANLIŞ çözünürlüğe (ör. 1sa)
+        // düşerdi. id'ye göre açıkça arıyoruz.
+        const res = RESOLUTIONS.find(r => r.id === resId) || RESOLUTIONS.find(r => r.id === '1d');
         if (res.kind === 'intraday') {
             const recentSlice = dailyCandles.slice(-INTRADAY_SOURCE_WINDOW_DAYS);
             return window.DataController.synthesizeIntradayCandles(recentSlice, res.minutes);
         } else if (res.kind === 'weekly') {
             return window.DataController.aggregateWeeklyCandles(dailyCandles);
+        } else if (res.kind === 'monthly') {
+            return window.DataController.aggregateMonthlyCandles(dailyCandles);
         }
         return dailyCandles;
     }
@@ -2292,6 +2329,33 @@ const TradingChart = (() => {
         });
     }
 
+    // (30 Ağustos 2026 — "tam ekran modunda hisseler arası seçim" özelliği,
+    // kullanıcı isteği) Tam ekrandayken kenar çubuğu (izleme listesi) CSS ile
+    // tamamen gizleniyor (bkz. .tv-fullscreen-mode), yani önceden sembol
+    // değiştirmenin HİÇBİR yolu yoktu — kullanıcı tam ekrandan çıkıp sembolü
+    // değiştirip tekrar tam ekrana girmek zorundaydı. Klavye ok tuşları
+    // (↑/↓ VEYA ←/→, ikisi de aynı işi yapar) izleme listesindeki bir
+    // önceki/sonraki sembole anında geçiş sağlıyor — ekstra bir arayüz
+    // elemanı eklemeden (kullanıcı seçenekleri arasından bilinçli olarak bu
+    // en sade yaklaşımı seçti). Sadece tam ekran modundayken aktif; normal
+    // görünümde ok tuşları başka amaçlarla (ör. grafik kaydırma) kullanılmaya
+    // devam edebilsin diye burada dokunulmuyor.
+    function cycleFullscreenSymbol(direction) {
+        const TE = window.TradingEngine;
+        if (!TE || typeof TE.getWatchlistSymbolsOrdered !== 'function' || typeof TE.selectSymbol !== 'function') return;
+        const list = TE.getWatchlistSymbolsOrdered();
+        if (!list || list.length < 2) return;
+        const current = state.ticker;
+        let idx = list.indexOf(current);
+        if (idx === -1) idx = 0;
+        const nextIdx = (idx + direction + list.length) % list.length;
+        const nextSymbol = list[nextIdx];
+        if (nextSymbol && nextSymbol !== current) {
+            TE.selectSymbol(nextSymbol);
+            if (typeof TE.showToast === 'function') TE.showToast(`${nextSymbol} seçildi`);
+        }
+    }
+
     function setupFullscreenControl() {
         const btn = byId('btn-toggle-fullscreen');
         if (btn) btn.addEventListener('click', () => toggleFullscreen());
@@ -2311,6 +2375,19 @@ const TradingChart = (() => {
                 const anyModalOpen = document.querySelector('.indicator-modal-backdrop.open');
                 if (anyModalOpen) return;
                 toggleFullscreen();
+            }
+            // Tam ekranda sembol gezinme (yukarıdaki cycleFullscreenSymbol
+            // yorumuna bkz.). Fullscreen değilken veya bir input/modal
+            // aktifken devreye girmiyor ki normal kullanımı bozmasın.
+            if (fullscreenActive && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+                const tag = (e.target && e.target.tagName) || '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+                const anyModalOpen = document.querySelector('.indicator-modal-backdrop.open');
+                if (anyModalOpen) return;
+                e.preventDefault();
+                const forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
+                cycleFullscreenSymbol(forward ? 1 : -1);
             }
         });
     }

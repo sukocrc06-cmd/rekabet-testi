@@ -366,9 +366,18 @@ async def list_stocks():
 # hâlâ fazlasıyla yeterli, istek boyutu küçülüp hem Yahoo'yu daha az
 # zorluyor hem başarılı yanıt çok daha hızlı dönüyor. 2 yıldan eski günlük
 # geçmiş artık gerçek veriyle gelmiyor (kullanıcının bilinçli tercihi).
+# (30 Ağustos 2026 — "TradingView tarzı zaman dilimi sistemi" madde 4,
+# kullanıcı seçimi: "daha fazla çözünürlük ekle") 5dk ve 30dk eklendi —
+# Yahoo Finance ikisini de 15dk ile AYNI ~60 günlük pencerede veriyor,
+# bkz. yukarıdaki 27 Ağustos notu. 2sa/4sa ve 1Ay için burada YENİ bir
+# giriş YOK: frontend bunları sırasıyla "60m" barlarının (2sa/4sa) ve
+# günlük "1d" barlarının (1Ay) kendi tarafında toplayarak (aggregate)
+# türetiyor — Yahoo'da zaten bu iki interval doğrudan yok.
 _OHLCV_INTERVAL_MAP = {
     "1d": ("2y", "1d"),
+    "5m": ("60d", "5m"),
     "15m": ("60d", "15m"),
+    "30m": ("60d", "30m"),
     "60m": ("730d", "60m"),
 }
 
