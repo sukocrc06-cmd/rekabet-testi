@@ -147,6 +147,16 @@ const TourGuide = (() => {
             // (birinci tur özelliği — bu turda tanıtım turuna eklendi) Header,
             // sol izleme listesi ve sağ işlem panelini gizleyip grafiği tüm
             // viewport'a büyütüyor.
+            // (30 Ağustos 2026 — "tam ekranda hisseler arası seçim" özelliği,
+            // kullanıcı isteği üzerine üç turda olgunlaştı — bu turda tanıtım
+            // turuna eklendi) Tam ekranda kenar çubuğu (izleme listesi)
+            // tamamen gizlendiği için önceden sembol değiştirmenin HİÇBİR
+            // yolu yoktu. Artık: (1) ok tuşları (↑/↓ veya ←/→) izleme
+            // listesinde bir önceki/sonraki sembole anında geçiriyor, (2)
+            // sembol adının yanındaki ▾ butonu TÜM BIST100'de arayıp
+            // doğrudan istenen sembole atlatan bir liste açıyor. Bunu
+            // göstermek için ring artık fullscreen düğmesi yerine, bu yeni
+            // ▾ butonu da içeren sembol bloğuna (.tv-symbol-block) bakıyor.
             {
                 setup: async () => {
                     closeAllAppModals();
@@ -158,9 +168,9 @@ const TourGuide = (() => {
                     const btn = byId('btn-toggle-fullscreen');
                     if (btn && btn.classList.contains('active')) btn.click();
                 },
-                selector: '#btn-toggle-fullscreen',
-                title: 'Tam Ekran Grafik Modu',
-                desc: 'Tam şu anda gördüğünüz gibi — header, izleme listesi ve işlem paneli gizlenip grafik tüm ekranı kaplıyor. Aynı düğmeye tekrar basarak ya da "Esc" ile normal görünüme dönebilirsiniz (turdan sonra otomatik geri dönecek).'
+                selector: '.tv-symbol-block',
+                title: 'Tam Ekran Grafik Modu + Hızlı Sembol Değiştirme',
+                desc: 'Tam şu anda gördüğünüz gibi — header, izleme listesi ve işlem paneli gizlenip grafik tüm ekranı kaplıyor. Kenar çubuğu olmadan da sembol değiştirebilirsiniz: sembol adının yanındaki ▾ butonuna basıp TÜM BIST100 içinde arayıp doğrudan istediğiniz hisseye atlayabilir, ya da klavyeden ↑/↓ (veya ←/→) ile izleme listenizdeki bir önceki/sonraki sembole anında geçebilirsiniz. "Esc" ile normal görünüme dönebilirsiniz (turdan sonra otomatik geri dönecek).'
             },
             // (22 Temmuz 2026, on ikinci oturum, üçüncü tur özelliği — bu turda
             // tanıtım turuna eklendi) Sinyal Anlatıcısı: motorların AL/SAT
@@ -236,6 +246,24 @@ const TourGuide = (() => {
                 selector: '#tv-fundamentals-bar',
                 title: 'Şirket Temel Verileri',
                 desc: 'Sembol başlığının hemen altında F/K oranı, piyasa değeri, temettü verimi, 52 haftalık en düşük/en yüksek fiyat aralığı, ortalama işlem hacmi, beta (piyasaya göre oynaklık) ve hisse başına kazanç görünüyor — hepsi yfinance\'ten gerçek veri, ama genelde birkaç dakika gecikmeli ve yatırım tavsiyesi değildir.'
+            },
+            // (29 Temmuz 2026 özelliği — daha önce turda hiç yoktu, bu turda
+            // eklendi) Çoklu Zaman Dilimi (MTF) uyum paneli — 4 saatlik/
+            // günlük/haftalık trend yönünü tek bakışta özetliyor.
+            {
+                setup: async () => { closeAllAppModals(); },
+                selector: '#tv-mtf-bar',
+                title: 'Çoklu Zaman Dilimi Uyum Paneli',
+                desc: 'Bu şerit, aktif hissenin 4 Saatlik, Günlük ve Haftalık zaman dilimlerindeki trend yönünü (fiyat > SMA20 > SMA50 ise yükseliş, tersi düşüş, aksi nötr) özetler ve sağda "GÜÇLÜ YÜKSELİŞ UYUMU" gibi genel bir sonuç rozetiyle birleştirir — üçü de aynı yöndeyse güçlü bir uyum, aksi halde "KARIŞIK / NET DEĞİL" olduğunu gösterir. Rozetler ana çözünürlük seçicinin de kullandığı AYNI gerçek veriden türetiliyor.'
+            },
+            // (30 Ağustos 2026 özelliği — bu turda eklendi) 5dk/30dk/2sa/1Ay
+            // çözünürlükleri eklendi; ayrıca 15dk/1sa/4sa'nın aslında zaten
+            // GERÇEK gün-içi veriyle beslendiği ilk kez tur metninde açıklanıyor.
+            {
+                setup: async () => { closeAllAppModals(); },
+                selector: '#tv-resolution-bar',
+                title: 'Genişletilmiş Zaman Dilimi Seçenekleri',
+                desc: '5 Dakika, 15 Dakika, 30 Dakika, 1 Saat, 2 Saat ve 4 Saatlik görünümler artık sadece o günün gerçek açılış/kapanışına sadık kalan bir tahmin değil — Yahoo Finance\'ten GERÇEK gün-içi veriyle besleniyor (Yahoo\'nun izin verdiği pencere kadar geriye; o pencerenin dışındaki eski tarihler için sentetik türetime düşülüyor, davranış hiçbir zaman bozulmuyor). Günlük ve Haftalık zaten tamamen gerçek geçmiş veriden; şimdi eklenen Aylık (1Ay) görünüm de aynı gerçek günlük veriden türetiliyor.'
             },
             {
                 setup: async () => { closeAllAppModals(); byId('btn-open-alerts')?.click(); await wait(150); },
@@ -376,7 +404,7 @@ const TourGuide = (() => {
             {
                 finish: true,
                 title: 'Tur Tamamlandı',
-                desc: 'Bu turda 26 özelliği gördünüz: sadeleşen header + ☰ menü, çoklu grafik sekmeleri, 2x2 grafik ızgarası, Dual-Chart, tam ekran grafik modu, Sinyal Anlatıcısı, Strateji Tekrarı (Zaman Makinesi), canlı veri göstergesi (yeşil/gri nokta), sol dikey çizim rayı, çoklu osilatör paneli, genişletilmiş göstergeler (Ichimoku/PSAR/Pivot/SuperTrend/CCI/Keltner/Donchian/MFI), şirket temel verileri, fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi (manuel + hızlı çipler), OCO/Trailing Stop, emir defteri, son işlemler, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, komut paleti, klavye kısayolları, Yardım/Hakkında ve koyu/açık tema. Turu istediğiniz an "☰" menüsündeki "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
+                desc: 'Bu turda 26 özelliği gördünüz: sadeleşen header + ☰ menü, çoklu grafik sekmeleri, 2x2 grafik ızgarası, Dual-Chart, tam ekran grafik modu (▾ ile hızlı sembol arama + ok tuşuyla gezinme dahil), Sinyal Anlatıcısı, Strateji Tekrarı (Zaman Makinesi), canlı veri göstergesi (yeşil/gri nokta), sol dikey çizim rayı, çoklu osilatör paneli, genişletilmiş göstergeler (Ichimoku/PSAR/Pivot/SuperTrend/CCI/Keltner/Donchian/MFI), şirket temel verileri, çoklu zaman dilimi uyum paneli, genişletilmiş zaman dilimi seçenekleri (5dk-1Ay, gerçek gün-içi veri), fiyat alarmları, sade izleme listesi, Stop-Loss/Take-Profit, kaldıraç/marj sistemi (manuel + hızlı çipler), OCO/Trailing Stop, performans analitiği, sektörel ısı haritası, CSV dışa aktarma, komut paleti, klavye kısayolları, Yardım/Hakkında ve koyu/açık tema. Turu istediğiniz an "☰" menüsündeki "Tanıtım Turu" düğmesinden yeniden başlatabilirsiniz.'
             }
         ];
     }
