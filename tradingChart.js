@@ -300,6 +300,15 @@ const TradingChart = (() => {
                                 // değildir — canlı tik güncellemeleri bu bayrak
                                 // false iken diziye yazmayı reddeder (bkz.
                                 // updateLastPrice).
+        dailyDataIsSynthetic: false, // (2 Eylül 2026 — "motor sürekli çalışmıyor,
+                                // kökten çöz" kök neden düzeltmesi) true ise
+                                // state.dailyCandles gerçek yfinance verisi DEĞİL,
+                                // backend'e o an ulaşılamadığı (Yahoo rate-limit/
+                                // Render soğuk başlangıç/geçici ağ sorunu) için
+                                // üretilen tamamen sentetik yedek veridir — bkz.
+                                // scheduleRealDataRetry() bu bayrak true olduğunda
+                                // arka planda periyodik olarak gerçek veriyi tekrar
+                                // denemeye başlar, kullanıcı hiçbir şey yapmadan.
         candles: [],           // the currently DISPLAYED resolution's candles (derived)
         dailyCandles: [],      // source-of-truth daily candles (fetched or generated)
         resolution: '1d',      // '15m' | '1h' | '4h' | '1d' | '1w'
@@ -618,6 +627,87 @@ const TradingChart = (() => {
         return fresh;
     }
 
+    // (2 Eylül 2026 — "motor sürekli çalışmıyor, kökten çöz" kök neden
+    // düzeltmesi) ÖNCEDEN, loadSymbol() içindeki iki denemeli
+    // fetchOhlcvWithRetry() de başarısız olursa (Yahoo rate-limit, Render
+    // soğuk başlangıcı, geçici ağ sorunu — hiçbiri "backend gerçekten kalıcı
+    // olarak bozuk" anlamına gelmiyor) grafik KALICI OLARAK sentetik veriye
+    // düşüyordu — backend/Yahoo saniyeler sonra tekrar sağlıklı hale gelse
+    // bile, kullanıcı elle sayfayı yenilemedikçe ya da sembolü tekrar
+    // seçmedikçe bir daha asla gerçek veriye dönmüyordu. Bu, "motorum
+    // sürekli çalışırdı, durmazdı" şikayetinin kök nedeniydi: WebSocket
+    // canlı tik tarafı zaten kendi kendini iyileştiren sonsuz bir geri
+    // çekilmeli (backoff) yeniden bağlanma döngüsüne sahipti (bkz.
+    // tradingEngine.js connectLiveFeed/RECONNECT_*), ama günlük OHLCV
+    // geçmişi tarafında bunun bir eşdeğeri yoktu. Artık aynı ilke günlük
+    // geçmiş için de uygulanıyor: sentetik veriye düşüldüğünde, arka planda
+    // (ekranı/kullanıcıyı hiç rahatsız etmeden) periyodik olarak gerçek
+    // veri tekrar denenir; başarılı olduğu an grafik kullanıcı hiçbir şey
+    // yapmadan GERÇEK veriye kendiliğinden yükseltilir. WebSocket
+    // döngüsüyle aynı üstel geri çekilme deseni (15sn'den başlayıp 90sn'de
+    // tavan yapan), sonsuza kadar dener — backend/Yahoo ne zaman
+    // düzelirse düzelsin, sayfa açık kaldığı sürece kendiliğinden yakalar.
+    const REAL_DATA_RETRY_BASE_DELAY_MS = 15000;
+    const REAL_DATA_RETRY_MAX_DELAY_MS = 90000;
+    let realDataRetryTimer = null;
+
+    function cancelRealDataRetry() {
+        if (realDataRetryTimer) {
+            clearTimeout(realDataRetryTimer);
+            realDataRetryTimer = null;
+        }
+    }
+
+    function applyRealDataUpgrade(ticker, freshCandles) {
+        const seen = new Set();
+        const candles = freshCandles.filter(c => {
+            if (seen.has(c.date)) return false;
+            seen.add(c.date);
+            return true;
+        }).sort((a, b) => a.date - b.date);
+        if (!candles.length) return;
+
+        state.dailyCandles = candles;
+        state.dayOpenPrice = candles[candles.length - 1].open;
+        state.dailyDataIsSynthetic = false;
+        applyResolution();
+        scheduleIntradayUpgrade(ticker, state.resolution);
+
+        const last = candles[candles.length - 1];
+        const prev = candles.length > 1 ? candles[candles.length - 2] : last;
+        setSymbolHeader(ticker, last.close, prev.close);
+
+        console.info(`[TradingChart] ${ticker}: arka plan denemesi başarılı oldu, grafik sentetik veriden GERÇEK veriye otomatik yükseltildi.`);
+        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') {
+            window.TradingEngine.showToast(`${ticker} için gerçek veri bağlantısı kuruldu — grafik güncellendi.`);
+        }
+    }
+
+    function scheduleRealDataRetry(ticker, mySeq, attempt) {
+        cancelRealDataRetry();
+        const delay = Math.min(REAL_DATA_RETRY_BASE_DELAY_MS * Math.pow(1.6, attempt), REAL_DATA_RETRY_MAX_DELAY_MS);
+        realDataRetryTimer = setTimeout(async () => {
+            realDataRetryTimer = null;
+            // Kullanıcı bu arada başka bir sembole geçtiyse bu deneme artık
+            // anlamsız — sessizce bırak, yeni sembolün kendi loadSymbol()
+            // çağrısı zaten gerekirse kendi retry zincirini kurmuştur.
+            if (mySeq !== state.loadSeq || state.ticker !== ticker) return;
+            let fresh = null;
+            try {
+                fresh = await fetchOhlcvWithRetry(ticker);
+            } catch (e) {
+                // sessiz — bir sonraki turda tekrar denenecek
+            }
+            if (mySeq !== state.loadSeq || state.ticker !== ticker) return; // yarış durumu tekrar kontrolü
+            if (fresh && fresh.length >= 5) {
+                symbolHistoryCache.set(ticker, { candles: fresh, ts: Date.now() });
+                applyRealDataUpgrade(ticker, fresh);
+            } else {
+                scheduleRealDataRetry(ticker, mySeq, attempt + 1);
+            }
+        }, delay);
+    }
+
     /* ────────── Gerçek gün-içi (intraday) veri (27 Ağustos 2026) ──────────
      * "TradingView'daki mum bendekiyle aynı değil" geri bildirimi üzerine:
      * 15dk/1sa/4sa görünümleri ÖNCEDEN her zaman TAMAMEN sentetikti (bkz.
@@ -925,6 +1015,14 @@ const TradingChart = (() => {
             // DataController.generateOHLCV kendi güncel TRADING_DAYS (750,
             // ~3 yıllık simüle geçmiş) varsayılanını kullanıyor.
             candles = window.DataController.generateOHLCV(ticker);
+            state.dailyDataIsSynthetic = true;
+            // (2 Eylül 2026) Kalıcı olarak sentetikte takılı kalmamak için
+            // arka planda gerçek veriyi periyodik olarak tekrar dene — bkz.
+            // scheduleRealDataRetry() üzerindeki kök neden açıklaması.
+            scheduleRealDataRetry(ticker, mySeq, 0);
+        } else {
+            state.dailyDataIsSynthetic = false;
+            cancelRealDataRetry();
         }
 
         // Lightweight Charts requires strictly ascending unique time values
