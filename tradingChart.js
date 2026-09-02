@@ -905,7 +905,88 @@ const TradingChart = (() => {
         if (v === null || v === undefined || isNaN(v)) return '--';
         return '₺' + Number(v).toFixed(2);
     }
+    // (2 Eylül 2026 — "hisseye özel veriler hiç çalışmıyor" kök neden
+    // düzeltmesi) ÖNCEDEN bu tek bir 8sn'lik denemeydi — başarısız olursa
+    // (Yahoo geçici rate-limit, Render soğuk başlangıç) satırlar KALICI
+    // OLARAK "--" da kalıyordu, sembol tekrar seçilmeden bir daha asla
+    // denenmiyordu. Artık OHLCV/WebSocket tarafındakiyle AYNI ilke: arka
+    // planda, kullanıcıyı rahatsız etmeden, üstel geri çekilmeli sonsuz
+    // yeniden deneme — backend/Yahoo ne zaman düzelirse düzelsin bu satırlar
+    // kendiliğinden dolar.
+    const FUNDAMENTALS_RETRY_BASE_DELAY_MS = 15000;
+    const FUNDAMENTALS_RETRY_MAX_DELAY_MS = 90000;
+    let fundamentalsRetryTimer = null;
+
+    function cancelFundamentalsRetry() {
+        if (fundamentalsRetryTimer) {
+            clearTimeout(fundamentalsRetryTimer);
+            fundamentalsRetryTimer = null;
+        }
+    }
+
+    function applyFundamentalsData(data) {
+        const peEl = document.getElementById('tv-fund-pe');
+        const mcapEl = document.getElementById('tv-fund-mcap');
+        const divEl = document.getElementById('tv-fund-div');
+        const rangeEl = document.getElementById('tv-fund-range');
+        const avgVolEl = document.getElementById('tv-fund-avgvol');
+        const betaEl = document.getElementById('tv-fund-beta');
+        const epsEl = document.getElementById('tv-fund-eps');
+        if (!peEl || !mcapEl || !divEl) return;
+        peEl.textContent = 'F/K: ' + formatPE(data.trailingPE);
+        mcapEl.textContent = 'Piyasa Değeri: ₺' + formatMarketCap(data.marketCap);
+        divEl.textContent = 'Temettü Verimi: ' + formatDividendYield(data.dividendYield);
+        if (rangeEl) rangeEl.textContent = '52 Hafta: ' + formatRange(data.fiftyTwoWeekLow, data.fiftyTwoWeekHigh);
+        if (avgVolEl) avgVolEl.textContent = 'Ort. Hacim: ' + formatVolume(data.averageVolume);
+        if (betaEl) betaEl.textContent = 'Beta: ' + formatBeta(data.beta);
+        if (epsEl) epsEl.textContent = 'Hisse Başı Kazanç: ' + formatEps(data.trailingEps);
+    }
+
+    // `data` alanlarının HEPSİ null ise (HTTP 200 olsa bile) bu, backend'in
+    // Yahoo'dan hiçbir şey alamadığı (rate-limit/geçici erişim sorunu)
+    // anlamına gelir — "gerçek ama boş veri" değil, başarısız bir denemedir.
+    function fundamentalsAllEmpty(data) {
+        if (!data) return true;
+        return ['trailingPE', 'marketCap', 'dividendYield', 'fiftyTwoWeekLow', 'fiftyTwoWeekHigh', 'averageVolume', 'beta', 'trailingEps']
+            .every(k => data[k] === null || data[k] === undefined);
+    }
+
+    async function fetchFundamentalsOnce(ticker) {
+        const backendHttp = window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000';
+        const fetchOpts = window.optipulseFetchOpts
+            ? window.optipulseFetchOpts({ signal: AbortSignal.timeout(8000) })
+            : { signal: AbortSignal.timeout(8000) };
+        const res = await fetch(`${backendHttp}/api/v1/fundamentals/${ticker}`, fetchOpts);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (fundamentalsAllEmpty(data)) return null;
+        return data;
+    }
+
+    function scheduleFundamentalsRetry(ticker, attempt) {
+        cancelFundamentalsRetry();
+        const delay = Math.min(FUNDAMENTALS_RETRY_BASE_DELAY_MS * Math.pow(1.6, attempt), FUNDAMENTALS_RETRY_MAX_DELAY_MS);
+        fundamentalsRetryTimer = setTimeout(async () => {
+            fundamentalsRetryTimer = null;
+            if (state.ticker !== ticker) return; // kullanıcı başka bir sembole geçti — bu zincir artık anlamsız
+            let data = null;
+            try {
+                data = await fetchFundamentalsOnce(ticker);
+            } catch (e) {
+                // sessiz — bir sonraki turda tekrar denenecek
+            }
+            if (state.ticker !== ticker) return; // yarış durumu tekrar kontrolü
+            if (data) {
+                applyFundamentalsData(data);
+                console.info(`[TradingChart] ${ticker}: hisseye özel veriler (F/K, piyasa değeri vb.) arka plan denemesiyle başarıyla dolduruldu.`);
+            } else {
+                scheduleFundamentalsRetry(ticker, attempt + 1);
+            }
+        }, delay);
+    }
+
     async function fetchFundamentals(ticker) {
+        cancelFundamentalsRetry();
         const peEl = document.getElementById('tv-fund-pe');
         const mcapEl = document.getElementById('tv-fund-mcap');
         const divEl = document.getElementById('tv-fund-div');
@@ -923,25 +1004,18 @@ const TradingChart = (() => {
         if (avgVolEl) avgVolEl.textContent = 'Ort. Hacim: --';
         if (betaEl) betaEl.textContent = 'Beta: --';
         if (epsEl) epsEl.textContent = 'Hisse Başı Kazanç: --';
+        let data = null;
         try {
-            const backendHttp = window.OPTIPULSE_CONFIG ? window.OPTIPULSE_CONFIG.BACKEND_HTTP : 'http://127.0.0.1:8000';
-            const fetchOpts = window.optipulseFetchOpts
-                ? window.optipulseFetchOpts({ signal: AbortSignal.timeout(8000) })
-                : { signal: AbortSignal.timeout(8000) };
-            const res = await fetch(`${backendHttp}/api/v1/fundamentals/${ticker}`, fetchOpts);
-            if (!res.ok) return;
-            const data = await res.json();
-            if (state.ticker !== ticker) return; // kullanıcı bu sırada başka bir sembole geçtiyse eski veriyi yazma
-            peEl.textContent = 'F/K: ' + formatPE(data.trailingPE);
-            mcapEl.textContent = 'Piyasa Değeri: ₺' + formatMarketCap(data.marketCap);
-            divEl.textContent = 'Temettü Verimi: ' + formatDividendYield(data.dividendYield);
-            if (rangeEl) rangeEl.textContent = '52 Hafta: ' + formatRange(data.fiftyTwoWeekLow, data.fiftyTwoWeekHigh);
-            if (avgVolEl) avgVolEl.textContent = 'Ort. Hacim: ' + formatVolume(data.averageVolume);
-            if (betaEl) betaEl.textContent = 'Beta: ' + formatBeta(data.beta);
-            if (epsEl) epsEl.textContent = 'Hisse Başı Kazanç: ' + formatEps(data.trailingEps);
+            data = await fetchFundamentalsOnce(ticker);
         } catch (e) {
-            // Sessizce yoksay — backend kapalıysa/erişilemezse satır "--"
-            // göstermeye devam eder, bu bir hata değil beklenen bir durumdur.
+            // Sessizce yoksay — aşağıdaki arka plan yeniden deneme zinciri
+            // devreye girecek, kullanıcıya görünür bir hata gösterilmez.
+        }
+        if (state.ticker !== ticker) return; // kullanıcı bu sırada başka bir sembole geçtiyse eski veriyi yazma
+        if (data) {
+            applyFundamentalsData(data);
+        } else {
+            scheduleFundamentalsRetry(ticker, 0);
         }
     }
 

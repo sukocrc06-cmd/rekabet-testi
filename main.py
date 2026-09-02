@@ -480,7 +480,15 @@ def get_fundamentals(ticker: str):
             # Newer yfinance versions expose get_info(); older ones only have
             # the .info property. Try both so this keeps working regardless
             # of which yfinance version the user's environment has installed.
-            info = stock.get_info() if hasattr(stock, "get_info") else stock.info
+            # (2 Eylül 2026 — "hisseye özel veriler hiç çalışmıyor" kök neden
+            # düzeltmesi) Diğer yfinance çağrılarıyla (fast_info, history) aynı
+            # _yf_call_with_backoff() sarmalayıcısı buraya da eklendi — Yahoo
+            # geçici olarak rate-limit uyguladığında tek seferde pes etmek
+            # yerine bir kez daha (kısa bir bekleme sonrası) deniyor.
+            info = _yf_call_with_backoff(
+                lambda: (stock.get_info() if hasattr(stock, "get_info") else stock.info),
+                label=f"fundamentals({formatted})"
+            )
         except Exception:
             info = {}
 
@@ -506,7 +514,23 @@ def get_fundamentals(ticker: str):
             "beta": info.get("beta"),
             "trailingEps": info.get("trailingEps"),
         }
-        _fundamentals_cache[formatted] = (now, data)
+        # (2 Eylül 2026 — "hisseye özel veriler hiç çalışmıyor, güncel/gerçek
+        # bilgi neden yok" kök neden düzeltmesi) BURADAKİ ASIL HATA: Yahoo
+        # geçici olarak engelleyip/rate-limit uygulayıp `info` boş {} dönse
+        # bile, aşağıdaki satır bu TAMAMEN BOŞ sonucu (yani "F/K: --, Piyasa
+        # Değeri: --" vb.) _FUNDAMENTALS_CACHE_TTL_SEC (6 SAAT) boyunca
+        # önbelleğe KOŞULSUZ yazıyordu. Yani Yahoo saniyeler sonra tekrar
+        # sağlıklı hale gelse bile, bu sembol için bir sonraki 6 saat boyunca
+        # her istek doğrudan bu "boş" önbellek kaydından cevaplanıyor, gerçek
+        # veri BİR DAHA HİÇ denenmiyordu — kullanıcının "bilgiler neden hiç
+        # gelmiyor" şikayetinin gerçek kök nedeni buydu (WS/OHLCV tarafında
+        # aynı sınıftan bir sorun bugün ayrıca düzeltildi). Düzeltme: sadece
+        # GERÇEKTEN en az bir alanı dolu (yani Yahoo'dan gerçekten bir şey
+        # alınabilmiş) bir sonuç önbelleğe yazılır — tamamen boş/başarısız bir
+        # deneme önbelleğe hiç girmez, bir sonraki istek Yahoo'yu tekrar dener.
+        has_any_real_value = any(v is not None for v in data.values())
+        if has_any_real_value:
+            _fundamentals_cache[formatted] = (now, data)
         return {"ticker": ticker, **data, "cached": False}
     except Exception as e:
         return JSONResponse(
