@@ -327,6 +327,29 @@ _SELF_PING_INTERVAL_SEC = 300  # 10 dakikadan 5 dakikaya düşürüldü — Rend
 # 15 dakikalık boşta-kalma eşiğine göre daha geniş bir güvenlik payı bırakır
 # (tek bir pinglemenin gecikmesi/kaybolması artık eşiğe çok daha az yaklaşır).
 
+# (7 Eylül 2026 — İKİNCİ DÜZELTME, ÖNEMLİ MALİYET/KOTA DÜZELTMESİ) Render'ın
+# ücretsiz planında TÜM ücretsiz servisler PAYLAŞIMLI aylık 750 "instance
+# saati" hakkına sahip (Render'ın kendi dokümantasyonu: "750 Free instance
+# hours to each workspace per calendar month" — kota bitince O AY için
+# workspace'teki TÜM ücretsiz web servisleri durduruluyor). Bir servis SADECE
+# uyanıkken bu saatleri tüketiyor — uyuyan bir servis hiç saat harcamıyor.
+# Bu proje artık İKİ ayrı Render servisine sahip (canlı yarışma sitesi
+# rekabet-testi + bağımsız geliştirme kum havuzu oplab-backend). Bu self-ping
+# döngüsü İKİSİNDE de aynı anda çalışırsa, ikisi birlikte 7/24 uyanık kalmaya
+# çalışır — bu da ayda ~1488 saat gerektirir, 750'lik ortak kotayı ~15-16
+# günde tüketir ve Render o ay İKİ servisi de tamamen durdurur (yarışma
+# sırasında olursa felaket olur). rekabet-testi TEK BAŞINA daha önce zaten
+# aylarca ücretsiz ve kesintisiz çalışıyordu (750 saat ~31 günlük bir ay için
+# rahatça yetiyor) — bunu bozmuyoruz. Sadece İKİNCİ (geliştirme amaçlı)
+# servis için bu döngüyü isteğe bağlı olarak KAPATILABİLİR yapıyoruz: Render
+# Environment sekmesinden `SELF_PING_ENABLED=false` eklenen bir serviste bu
+# döngü hiç başlamaz, o servis normal şekilde 15 dakika boşta kalınca uyur
+# (kişisel test ortamı için tamamen kabul edilebilir — kod zaten soğuk
+# başlangıçtan kendi kendine gerçek veriye yükseliyor). Ortam değişkeni
+# ayarlanmazsa (rekabet-testi'nde olduğu gibi) varsayılan davranış AYNI
+# kalıyor — hiçbir mevcut servis bu değişiklikten etkilenmiyor.
+_SELF_PING_ENABLED = os.environ.get("SELF_PING_ENABLED", "true").strip().lower() != "false"
+
 
 async def _self_ping_loop():
     while True:
@@ -339,7 +362,7 @@ async def _self_ping_loop():
 
 @app.on_event("startup")
 async def _start_self_ping():
-    if os.environ.get("RENDER"):
+    if os.environ.get("RENDER") and _SELF_PING_ENABLED:
         asyncio.create_task(_self_ping_loop())
 
 
