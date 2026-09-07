@@ -300,10 +300,32 @@ async def health_check():
 # başarısız olması (geçici ağ hatası vb.) sessizce yutulur — bu döngü asla
 # ana uygulamayı çökertmemeli, sadece "varsa iyi, yoksa zararı yok" bir
 # ek önlem.
+#
+# (7 Eylül 2026 — KÖK NEDEN DÜZELTMESİ) Yukarıdaki adres önceden SABİT
+# olarak "rekabet-testi.onrender.com" yazılıydı. Bu main.py, bu projenin
+# ikinci (bağımsız "oplab" sandbox) Render servisine olduğu gibi
+# kopyalanınca, o servis kendini DEĞİL, hâlâ rekabet-testi'ni pingliyordu —
+# yani "oplab" servisi hiç uyanık tutulmuyordu (bu, kullanıcının yaşadığı
+# soğuk başlangıç gecikmesinin doğrudan kök nedeniydi). Kalıcı düzeltme:
+# Render HER servise otomatik olarak kendi genel adresini içeren
+# `RENDER_EXTERNAL_URL` ortam değişkenini atar (bkz. Render resmi
+# dokümantasyonu, "Default Environment Variables") — artık bu değişken
+# öncelikli olarak okunuyor, yani kod bu main.py'nin dağıtıldığı HANGİ
+# Render servisine olursa olsun otomatik olarak KENDİ adresini pingliyor,
+# elle bir SELF_PING_URL ayarlamaya bir daha asla gerek kalmıyor. Elle
+# ayarlanmış bir SELF_PING_URL varsa (özel bir durum için) o hâlâ her şeyin
+# önünde geçerli; ikisi de yoksa (yalnızca Render dışı, olağandışı bir
+# ortamda) eski sabit adrese düşülüyor — ama bu döngü zaten sadece
+# RENDER=true ortamında başladığı için pratikte bu son durum hiç yaşanmaz.
+_render_external_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 _SELF_PING_URL = os.environ.get(
-    "SELF_PING_URL", "https://rekabet-testi.onrender.com/api/v1/health"
+    "SELF_PING_URL",
+    f"{_render_external_url}/api/v1/health" if _render_external_url
+    else "https://rekabet-testi.onrender.com/api/v1/health"
 )
-_SELF_PING_INTERVAL_SEC = 600  # 10 dakika
+_SELF_PING_INTERVAL_SEC = 300  # 10 dakikadan 5 dakikaya düşürüldü — Render'ın
+# 15 dakikalık boşta-kalma eşiğine göre daha geniş bir güvenlik payı bırakır
+# (tek bir pinglemenin gecikmesi/kaybolması artık eşiğe çok daha az yaklaşır).
 
 
 async def _self_ping_loop():
