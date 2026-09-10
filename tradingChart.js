@@ -4602,23 +4602,228 @@ const TradingChart = (() => {
         return { x: to.x + dx * tMax, y: to.y + dy * tMax };
     }
 
-    function drawFibLevels(a, b, shape, levels) {
-        const xStart = Math.min(a.x, b.x);
-        const xEnd = Math.max(a.x, b.x);
-        const p1 = shape.p1.price, p2 = shape.p2.price;
-        levels.forEach(lvl => {
-            const price = p1 + (p2 - p1) * lvl;
-            const y = candleSeries.priceToCoordinate(price);
-            if (y === null) return;
-            drawCtx.strokeStyle = fibLineColor();
-            drawCtx.beginPath();
-            drawCtx.moveTo(xStart, y);
-            drawCtx.lineTo(xEnd, y);
-            drawCtx.stroke();
-            drawCtx.fillStyle = drawColor();
-            drawCtx.font = '9px "Fira Code", monospace';
-            drawCtx.fillText(`${(lvl * 100).toFixed(1)}%  ₺${fmtPrice(price)}`, xEnd + 4, y + 3);
+    /* ══════════════════════════════════════════════════════════════════
+       (10 Eylül 2026) ÇİZİM STİL SİSTEMİ — TradingView benzeri renk/ayar
+       altyapısı.
+
+       ÖNCESİ: Tüm Fibonacci seviyeleri TEK bir yarı saydam altın renkle
+       (fibLineColor()) çiziliyordu; seviye başına renk, seviyeler arası
+       dolgu, kalınlık/çizgi stili, seviye açma-kapama ve hiçbir ayar
+       arayüzü yoktu. Diğer çizim araçları da sabit renkteydi.
+
+       SONRASI: Her çizim nesnesi kendi `style` nesnesini taşıyor. Fibonacci
+       araçlarında her seviyenin kendi rengi/görünürlüğü var, aralar
+       renkli bantlarla doldurulabiliyor, etiketlerde hem oran hem ₺ fiyat
+       gösterilebiliyor. Diğer araçlarda renk/kalınlık/stil/dolgu ayarı var.
+       Ayarlar sağ tık → "Ayarlar…" ya da çizime ÇİFT TIKLA açılan panelden
+       değiştiriliyor, "Varsayılan yap" ile localStorage'a kaydedilip yeni
+       çizimlere otomatik uygulanıyor.
+
+       TASARIM NOTU (neden bu kadar az yere dokunuldu): drawShape() içinde
+       onlarca dal (trend, ray, rect, gann, pozisyon araçları…) renk için
+       zaten drawColor()/fibLineColor() çağırıyordu. Bu iki fonksiyon artık
+       "o an çizilen şeklin stilini" (activeShapeStyle) biliyor — yani tek
+       bir noktadan yapılan bu değişiklik, TÜM araçlara renk desteğini
+       otomatik kazandırdı; her dalı tek tek düzenlemeye gerek kalmadı.
+       ══════════════════════════════════════════════════════════════════ */
+
+    const DRAW_STYLE_KEY = 'optipulselab_draw_style_v1';
+
+    // Fibonacci araçlarının varsayılan oran setleri. fib_time'daki sayılar
+    // fiyat oranı değil, BAR sayısı çarpanıdır (Fibonacci dizisi).
+    const FIB_LEVEL_SETS = {
+        fib:      [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1],
+        fib_ext:  [0, 0.618, 1, 1.272, 1.618, 2, 2.618],
+        fib_fan:  [0.236, 0.382, 0.5, 0.618, 0.786, 1],
+        fib_time: [1, 2, 3, 5, 8, 13, 21]
+    };
+
+    // İki hazır palet + "özel". Kullanıcı ayar panelinden seçiyor; tek bir
+    // seviyenin rengini elle değiştirdiği anda palet otomatik "custom"a
+    // geçiyor (TradingView'in davranışının aynısı).
+    const FIB_PALETTES = {
+        tv: {
+            label: 'TradingView',
+            // Kullanıcının paylaştığı TradingView ekran görüntüsündeki renk
+            // düzeni: 0/1 gri, 0.236-0.382 kırmızı, 0.5-0.618 yeşil,
+            // 0.786 turuncu, 1.272-1.382 pembe, 1.618 mavi, 2 turkuaz.
+            colors: {
+                '0': '#787B86', '0.236': '#EF5350', '0.382': '#EF5350',
+                '0.5': '#4CAF50', '0.618': '#4CAF50', '0.786': '#FF9800',
+                '1': '#B2B5BE', '1.272': '#F06292', '1.382': '#F06292',
+                '1.618': '#2196F3', '2': '#00897B', '2.618': '#9C27B0'
+            },
+            cycle: ['#EF5350', '#FF9800', '#4CAF50', '#2196F3', '#F06292', '#00897B', '#9C27B0'],
+            fallback: '#B2B5BE'
+        },
+        gold: {
+            label: 'Altın Tema',
+            // Sitenin altın-siyah kimliğiyle uyumlu: kritik seviye (0.618)
+            // altın, 0.5 turkuaz, düzeltme seviyeleri kırmızı tonlarında.
+            colors: {
+                '0': '#8D8D8D', '0.236': '#EF5350', '0.382': '#E57373',
+                '0.5': '#26C6DA', '0.618': '#D4AF37', '0.786': '#FFA726',
+                '1': '#8D8D8D', '1.272': '#AB47BC', '1.382': '#AB47BC',
+                '1.618': '#42A5F5', '2': '#66BB6A', '2.618': '#7E57C2'
+            },
+            cycle: ['#D4AF37', '#FFA726', '#26C6DA', '#42A5F5', '#AB47BC', '#66BB6A', '#E57373'],
+            fallback: '#D4AF37'
+        }
+    };
+
+    const GENERIC_STYLE_DEFAULT = { color: '#D4AF37', width: 1.5, dash: 'solid', fillOpacity: 0.10 };
+    const FIB_STYLE_DEFAULT = {
+        palette: 'tv', width: 1, dash: 'solid', fill: true, fillOpacity: 0.07,
+        showPercent: true, showPrice: true, extendLeft: false, extendRight: false
+    };
+
+    const FIB_SHAPE_TYPES = ['fib', 'fib_ext', 'fib_fan', 'fib_time'];
+    function isFibShape(type) { return FIB_SHAPE_TYPES.indexOf(type) !== -1; }
+
+    let drawStyleDefaults = null;
+    function getDrawStyleDefaults() {
+        if (drawStyleDefaults) return drawStyleDefaults;
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(DRAW_STYLE_KEY) || 'null'); } catch (e) { /* private mode */ }
+        drawStyleDefaults = {
+            generic: Object.assign({}, GENERIC_STYLE_DEFAULT, (saved && saved.generic) || {}),
+            fib: Object.assign({}, FIB_STYLE_DEFAULT, (saved && saved.fib) || {})
+        };
+        return drawStyleDefaults;
+    }
+    function saveDrawStyleDefaults() {
+        try { localStorage.setItem(DRAW_STYLE_KEY, JSON.stringify(getDrawStyleDefaults())); } catch (e) { /* kota/private mode */ }
+    }
+
+    function fibColorForRatio(paletteId, ratio, index) {
+        const pal = FIB_PALETTES[paletteId] || FIB_PALETTES.tv;
+        const key = String(ratio);
+        if (pal.colors[key]) return pal.colors[key];
+        return pal.cycle[index % pal.cycle.length] || pal.fallback;
+    }
+
+    // Bir Fibonacci şekli için seviye listesi üretir. Mevcut listedeki
+    // açık/kapalı durumları korur (palet değişince sadece renkler yenilenir).
+    function buildFibLevels(type, paletteId, existing) {
+        const ratios = FIB_LEVEL_SETS[type] || FIB_LEVEL_SETS.fib;
+        return ratios.map((r, i) => {
+            const prev = existing && existing.find ? existing.find(l => l.r === r) : null;
+            return { r: r, on: prev ? prev.on !== false : true, color: fibColorForRatio(paletteId, r, i) };
         });
+    }
+
+    function getShapeStyle(shape) {
+        if (!shape) return getDrawStyleDefaults().generic;
+        if (!shape.style) {
+            const d = getDrawStyleDefaults();
+            if (isFibShape(shape.type)) {
+                shape.style = Object.assign({}, d.fib);
+                // colorsByRatio yalnızca VARSAYILANLARDA tutulan bir haritadır
+                // (kullanıcı "Varsayılan yap" dediğinde kaydedilir); şeklin
+                // kendi stiline kopyalanmaz, sadece seviye renklerine uygulanır.
+                delete shape.style.colorsByRatio;
+                shape.style.levels = buildFibLevels(shape.type, shape.style.palette, null);
+                if (d.fib.colorsByRatio) {
+                    shape.style.levels.forEach(l => {
+                        const c = d.fib.colorsByRatio[String(l.r)];
+                        if (c) l.color = c;
+                    });
+                }
+            } else {
+                shape.style = Object.assign({}, d.generic);
+            }
+        }
+        // Eski bir çizim (ör. kopyala-yapıştır ile gelen) seviye listesi
+        // taşımıyorsa burada tamamlanır.
+        if (isFibShape(shape.type) && !shape.style.levels) {
+            shape.style.levels = buildFibLevels(shape.type, shape.style.palette || 'tv', null);
+        }
+        return shape.style;
+    }
+
+    function dashArrayFor(style) {
+        if (!style) return [];
+        if (style.dash === 'dashed') return [6, 4];
+        if (style.dash === 'dotted') return [2, 3];
+        return [];
+    }
+
+    // '#RRGGBB' → 'rgba(r,g,b,alpha)'. Zaten rgba() olan değerler olduğu
+    // gibi döner (paletlerde yok ama özel renklerde olabilir).
+    function withAlpha(color, alpha) {
+        if (!color) return 'rgba(212,175,55,' + alpha + ')';
+        if (color.charAt(0) !== '#') return color;
+        const hex = color.length === 4
+            ? '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3]
+            : color;
+        const r = parseInt(hex.substr(1, 2), 16);
+        const g = parseInt(hex.substr(3, 2), 16);
+        const b = parseInt(hex.substr(5, 2), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    // drawShape() çalışırken o şeklin stilini tutar; drawColor() ve
+    // fibLineColor() buradan okuyor (bkz. yukarıdaki TASARIM NOTU).
+    let activeShapeStyle = null;
+
+    // Fibonacci geri çekilme / uzantı: seviye başına renk + dolgu bantları.
+    function drawFibLevels(a, b, shape) {
+        const st = getShapeStyle(shape);
+        const plot = getPlotRect();
+        let xStart = Math.min(a.x, b.x);
+        let xEnd = Math.max(a.x, b.x);
+        if (st.extendLeft) xStart = 0;
+        if (st.extendRight) xEnd = plot.width;
+
+        const p1 = shape.p1.price, p2 = shape.p2.price;
+        const rows = (st.levels || []).filter(l => l.on !== false).map(l => {
+            const price = p1 + (p2 - p1) * l.r;
+            const y = candleSeries.priceToCoordinate(price);
+            return (y === null) ? null : { r: l.r, color: l.color, price: price, y: y };
+        }).filter(Boolean);
+        if (!rows.length) return;
+        rows.sort((m, n) => m.y - n.y);
+
+        // Seviyeler arası dolgu bantları — TradingView'de olduğu gibi her
+        // bant, ALTINDAKİ seviyenin rengini düşük saydamlıkla alıyor.
+        if (st.fill && rows.length > 1) {
+            for (let i = 0; i < rows.length - 1; i++) {
+                drawCtx.fillStyle = withAlpha(rows[i + 1].color, st.fillOpacity);
+                drawCtx.fillRect(xStart, rows[i].y, xEnd - xStart, rows[i + 1].y - rows[i].y);
+            }
+        }
+
+        drawCtx.setLineDash(dashArrayFor(st));
+        drawCtx.lineWidth = st.width;
+        drawCtx.font = '9px "Fira Code", monospace';
+
+        // Etiketler önce hazırlanıp EN GENİŞİNE göre tek bir x konumu
+        // seçiliyor. (Önce her etiket kendi genişliğine göre ayrı ayrı
+        // hizalanıyordu; kısa etiketler çizginin sağına, uzunlar soluna
+        // düşünce seviyeler birbirinden kaymış görünüyordu.)
+        const labels = rows.map(row => {
+            const parts = [];
+            if (st.showPercent) parts.push(String(row.r));
+            if (st.showPrice) parts.push('₺' + fmtPrice(row.price));
+            return parts.join('  ');
+        });
+        const maxLabelW = labels.reduce((m, t) => Math.max(m, t ? drawCtx.measureText(t).width : 0), 0);
+        // Hepsi sağa sığmıyorsa hepsi birden çizginin içine (sola) alınır.
+        const labelX = (xEnd + 6 + maxLabelW > plot.width)
+            ? Math.max(2, xEnd - maxLabelW - 6)
+            : xEnd + 6;
+
+        rows.forEach((row, i) => {
+            drawCtx.strokeStyle = row.color;
+            drawCtx.beginPath();
+            drawCtx.moveTo(xStart, row.y);
+            drawCtx.lineTo(xEnd, row.y);
+            drawCtx.stroke();
+            if (!labels[i]) return;
+            drawCtx.fillStyle = row.color;
+            drawCtx.fillText(labels[i], labelX, row.y - 3);
+        });
+        drawCtx.setLineDash([]);
     }
 
     function redrawDrawings() {
@@ -4633,10 +4838,22 @@ const TradingChart = (() => {
         drawCtx.rect(0, 0, plot.width, plot.height);
         drawCtx.clip();
 
+        // (10 Eylül 2026) Her şeklin stili, o şekil çizilirken activeShapeStyle
+        // içine konuyor; drawColor()/fibLineColor() oradan okuyor. Çizim bitince
+        // null'a çekiliyor ki ölçüm aracı gibi stilsiz çizimler eski tema
+        // renklerine düşsün.
         if (!state.drawingsHidden) {
-            state.drawings.forEach((shape, i) => drawShape(shape, i === state.selectedDrawingIndex));
+            state.drawings.forEach((shape, i) => {
+                activeShapeStyle = getShapeStyle(shape);
+                drawShape(shape, i === state.selectedDrawingIndex);
+                activeShapeStyle = null;
+            });
         }
-        if (state.pendingShape) drawShape(state.pendingShape, false);
+        if (state.pendingShape) {
+            activeShapeStyle = getShapeStyle(state.pendingShape);
+            drawShape(state.pendingShape, false);
+            activeShapeStyle = null;
+        }
         if (state.measureShape) drawShape({ type: 'measure', p1: state.measureShape.p1, p2: state.measureShape.p2 }, false);
 
         renderSessionCloseMarker(plot);
@@ -4682,10 +4899,17 @@ const TradingChart = (() => {
     // GÖRE seçiliyor: açık temada koyu/siyaha yakın bir ton (kontrast için),
     // koyu temada mevcut altın rengi aynen korunuyor (orada zaten okunaklıydı,
     // kullanıcı sadece açık temadaki görünürlükten şikayet etti).
+    // (10 Eylül 2026) Bu iki fonksiyon artık "o an çizilen şeklin" kendi
+    // rengini biliyor — kullanıcı ayar panelinden bir çizimin rengini
+    // değiştirdiğinde, o rengi kullanan TÜM drawShape() dalları (trend,
+    // ray, dikdörtgen, kanal, pozisyon araçları…) otomatik olarak yeni
+    // rengi kullanıyor. Stil yoksa (ör. ölçüm aracı) eski tema davranışı.
     function drawColor() {
+        if (activeShapeStyle && activeShapeStyle.color) return activeShapeStyle.color;
         return currentTheme === 'light' ? '#14161A' : COLORS.draw;
     }
     function fibLineColor() {
+        if (activeShapeStyle && activeShapeStyle.color) return activeShapeStyle.color;
         return currentTheme === 'light' ? 'rgba(20,22,26,0.55)' : COLORS.fibLine;
     }
 
@@ -4735,10 +4959,17 @@ const TradingChart = (() => {
         const rect = getPlotRect();
 
         drawCtx.save();
+        // (10 Eylül 2026) Kalınlık, çizgi stili ve dolgu saydamlığı artık
+        // şeklin kendi ayarlarından geliyor (ayar paneli). Seçili şekilde
+        // eski davranış korunuyor: mavi vurgu + kesikli çerçeve.
+        const shapeStyle = getShapeStyle(shape);
         drawCtx.strokeStyle = isSelected ? '#4FC3F7' : drawColor();
-        drawCtx.fillStyle = isSelected ? 'rgba(79,195,247,0.12)' : 'rgba(212,175,55,0.10)';
-        drawCtx.lineWidth = isSelected ? 2.25 : 1.5;
+        drawCtx.fillStyle = isSelected
+            ? 'rgba(79,195,247,0.12)'
+            : withAlpha(shapeStyle.color || COLORS.draw, shapeStyle.fillOpacity != null ? shapeStyle.fillOpacity : 0.10);
+        drawCtx.lineWidth = isSelected ? (shapeStyle.width || 1.5) + 0.75 : (shapeStyle.width || 1.5);
         if (isSelected) drawCtx.setLineDash([5, 3]);
+        else drawCtx.setLineDash(dashArrayFor(shapeStyle));
 
         if (shape.type === 'trend') {
             // (23 Temmuz 2026, İKİNCİ düzeltme) Bir önceki turda buraya
@@ -4931,41 +5162,55 @@ const TradingChart = (() => {
             drawCtx.fillText('Giriş ₺' + fmtPrice(shape.p1.price), xStart + 4, entryY - 4);
             if (targetY !== null) drawCtx.fillText('Hedef ₺' + fmtPrice(shape.target), xStart + 4, targetY - 4);
             drawCtx.fillText('Stop ₺' + fmtPrice(shape.p2.price), xStart + 4, stopY + 12);
-        } else if (shape.type === 'fib') {
-            drawFibLevels(a, b, shape, [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
-        } else if (shape.type === 'fib_ext') {
-            drawFibLevels(a, b, shape, [0, 0.618, 1, 1.272, 1.618, 2, 2.618]);
+        } else if (shape.type === 'fib' || shape.type === 'fib_ext') {
+            // Seviye seti artık şeklin kendi stilinden (style.levels) geliyor —
+            // kullanıcı ayar panelinden seviye açıp kapatabildiği için burada
+            // sabit bir liste YOK.
+            drawFibLevels(a, b, shape);
         } else if (shape.type === 'fib_fan') {
-            const levels = [0.236, 0.382, 0.5, 0.618, 0.786, 1];
-            levels.forEach(lvl => {
-                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * lvl;
+            const fanStyle = getShapeStyle(shape);
+            drawCtx.setLineDash(dashArrayFor(fanStyle));
+            drawCtx.lineWidth = fanStyle.width;
+            drawCtx.font = '9px "Fira Code", monospace';
+            (fanStyle.levels || []).filter(l => l.on !== false).forEach(l => {
+                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * l.r;
                 const py = candleSeries.priceToCoordinate(price);
                 if (py === null) return;
                 const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
-                drawCtx.strokeStyle = fibLineColor();
+                drawCtx.strokeStyle = l.color;
                 drawCtx.beginPath();
                 drawCtx.moveTo(a.x, a.y);
                 drawCtx.lineTo(ext.x, ext.y);
                 drawCtx.stroke();
+                if (fanStyle.showPercent) {
+                    drawCtx.fillStyle = l.color;
+                    drawCtx.fillText(String(l.r), ext.x - 26, ext.y - 3);
+                }
             });
+            drawCtx.setLineDash([]);
         } else if (shape.type === 'fib_time') {
+            const timeStyle = getShapeStyle(shape);
             const idx1 = indexForTime(shape.p1.time), idx2 = indexForTime(shape.p2.time);
             const unit = Math.max(1, Math.abs(idx2 - idx1));
-            const fibNums = [1, 2, 3, 5, 8, 13, 21];
-            fibNums.forEach(n => {
-                const idx = idx1 + unit * n;
+            drawCtx.setLineDash(dashArrayFor(timeStyle));
+            drawCtx.lineWidth = timeStyle.width;
+            drawCtx.font = '9px "Fira Code", monospace';
+            (timeStyle.levels || []).filter(l => l.on !== false).forEach(l => {
+                const idx = idx1 + unit * l.r;
                 if (idx < 0 || idx >= state.candles.length) return;
                 const lx = chart.timeScale().logicalToCoordinate(idx);
                 if (lx === null) return;
-                drawCtx.strokeStyle = fibLineColor();
+                drawCtx.strokeStyle = l.color;
                 drawCtx.beginPath();
                 drawCtx.moveTo(lx, 0);
                 drawCtx.lineTo(lx, rect.height);
                 drawCtx.stroke();
-                drawCtx.fillStyle = drawColor();
-                drawCtx.font = '9px "Fira Code", monospace';
-                drawCtx.fillText(String(n), lx + 2, 12);
+                if (timeStyle.showPercent) {
+                    drawCtx.fillStyle = l.color;
+                    drawCtx.fillText(String(l.r), lx + 2, 12);
+                }
             });
+            drawCtx.setLineDash([]);
         } else if (shape.type === 'gann_fan') {
             // Klasik Gann açı seti: p1 = pivot, p2 = "1x1" (45°) açısını
             // tanımlayan referans nokta. Her oran, p1->p2 fiyat/bar eğiminin
@@ -5172,6 +5417,9 @@ const TradingChart = (() => {
         if (state.drawingsLocked) return false;
         state.drawings.splice(state.selectedDrawingIndex, 1);
         state.selectedDrawingIndex = -1;
+        // Silinen çizimin ayar paneli açık kalmamalı (aksi halde panel
+        // artık var olmayan bir index'i düzenlemeye çalışırdı).
+        if (typeof closeDrawSettings === 'function') closeDrawSettings();
         redrawDrawings();
         return true;
     }
@@ -5403,9 +5651,39 @@ const TradingChart = (() => {
             }
         });
 
+        // (10 Eylül 2026) Çizime ÇİFT TIKLAYINCA ayar paneli açılır —
+        // TradingView'deki davranışın aynısı. Sağ tık menüsündeki
+        // "Ayarlar…" ile aynı paneli açar.
+        chartContainer.addEventListener('dblclick', (e) => {
+            if (state.activeTool !== 'cursor') return;
+            const r = chartContainer.getBoundingClientRect();
+            const hitIndex = hitTestDrawings(e.clientX - r.left, e.clientY - r.top);
+            if (hitIndex >= 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                openDrawSettings(hitIndex, e.clientX, e.clientY);
+            }
+        });
+
         // Context menu actions
         const menu = byId('drawing-context-menu');
         if (menu) {
+            // "Ayarlar…" satırı index.html'de DEĞİL burada ekleniyor: aynı
+            // tradingChart.js iki ayrı sitede (farklı index.html'lerle)
+            // kullanıldığı için tek kaynaktan yönetmek daha güvenli.
+            if (!menu.querySelector('[data-action="settings"]')) {
+                const settingsBtn = document.createElement('button');
+                settingsBtn.type = 'button';
+                settingsBtn.className = 'drawing-context-item';
+                settingsBtn.dataset.action = 'settings';
+                settingsBtn.textContent = 'Ayarlar…';
+                menu.insertBefore(settingsBtn, menu.firstChild);
+                settingsBtn.addEventListener('click', () => {
+                    const r = menu.getBoundingClientRect();
+                    hideDrawingContextMenu();
+                    openDrawSettings(state.selectedDrawingIndex, r.left, r.top);
+                });
+            }
             menu.querySelector('[data-action="copy"]').addEventListener('click', () => {
                 copySelectedDrawing();
                 hideDrawingContextMenu();
@@ -5419,6 +5697,267 @@ const TradingChart = (() => {
                 hideDrawingContextMenu();
             });
         }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       (10 Eylül 2026) ÇİZİM AYAR PANELİ — TradingView'deki "Settings"
+       diyaloğunun karşılığı. Sağ tık → "Ayarlar…" ya da çizime ÇİFT TIKLA
+       açılır, başlığından tutup sürüklenebilir.
+
+       Panelin HTML'i ve CSS'i BİLEREK buradan (JS'ten) üretiliyor,
+       index.html/styles.css'e eklenmiyor: bu özellik iki ayrı sitede
+       (rekabet-testi + oplab) kullanılıyor ve o iki sitenin index.html /
+       styles.css dosyaları birbirinden FARKLI. Tek dosyada (tradingChart.js)
+       toplanınca her iki site de tek bir kaynaktan besleniyor, ileride
+       ikisinden birini güncellemeyi unutma riski ortadan kalkıyor.
+       ══════════════════════════════════════════════════════════════════ */
+
+    let drawSettingsIndex = -1;
+
+    function ensureDrawSettingsStyles() {
+        if (byId('tv-draw-settings-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'tv-draw-settings-styles';
+        style.textContent = [
+            '.tv-ds{position:fixed;z-index:9999;width:268px;max-height:76vh;overflow:auto;',
+            'background:var(--bg-panel,#12131A);border:1px solid var(--gold-border,rgba(212,175,55,0.28));',
+            'border-radius:var(--radius-md,10px);box-shadow:0 18px 44px rgba(0,0,0,0.55);',
+            'font-family:var(--font-sans,system-ui,sans-serif);color:var(--text-primary,#E8E8E8);display:none;}',
+            '.tv-ds.open{display:block;}',
+            '.tv-ds-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;',
+            'border-bottom:1px solid var(--gold-border,rgba(212,175,55,0.18));cursor:move;user-select:none;}',
+            '.tv-ds-title{font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--gold,#D4AF37);}',
+            '.tv-ds-x{background:none;border:none;color:var(--text-muted,#8A8A8A);font-size:17px;line-height:1;',
+            'cursor:pointer;padding:0 2px;}',
+            '.tv-ds-x:hover{color:var(--danger,#EF5350);}',
+            '.tv-ds-body{padding:10px 12px;}',
+            '.tv-ds-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;}',
+            '.tv-ds-row>span.tv-ds-lbl{font-size:11px;color:var(--text-secondary,#A8A8A8);white-space:nowrap;}',
+            '.tv-ds-ctl{display:flex;align-items:center;gap:8px;}',
+            '.tv-ds-sec{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted,#8A8A8A);',
+            'margin:12px 0 6px;}',
+            '.tv-ds-levels{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-bottom:4px;}',
+            '.tv-ds-level{display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;}',
+            '.tv-ds-level-r{flex:1;font-family:"Fira Code",monospace;font-size:10.5px;color:var(--text-secondary,#A8A8A8);}',
+            '.tv-ds input[type=color]{width:26px;height:20px;padding:0;border:1px solid var(--gold-border,rgba(212,175,55,0.3));',
+            'border-radius:4px;background:none;cursor:pointer;}',
+            '.tv-ds input[type=checkbox]{accent-color:var(--gold,#D4AF37);cursor:pointer;margin:0;}',
+            '.tv-ds input[type=range]{width:88px;accent-color:var(--gold,#D4AF37);cursor:pointer;}',
+            '.tv-ds select{background:var(--bg-main,#0B0C11);color:var(--text-primary,#E8E8E8);font-size:11px;',
+            'border:1px solid var(--gold-border,rgba(212,175,55,0.28));border-radius:5px;padding:3px 6px;cursor:pointer;}',
+            '.tv-ds-chk{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary,#A8A8A8);cursor:pointer;}',
+            '.tv-ds-foot{display:flex;gap:6px;padding:9px 12px;border-top:1px solid var(--gold-border,rgba(212,175,55,0.18));}',
+            '.tv-ds-foot button{flex:1;font-size:10.5px;padding:6px 4px;border-radius:6px;cursor:pointer;',
+            'border:1px solid var(--gold-border,rgba(212,175,55,0.3));background:transparent;color:var(--text-secondary,#A8A8A8);}',
+            '.tv-ds-foot button:hover{color:var(--gold,#D4AF37);border-color:var(--gold,#D4AF37);}',
+            '.tv-ds-foot button.primary{background:var(--gold,#D4AF37);color:var(--text-dark,#111);border-color:var(--gold,#D4AF37);font-weight:700;}'
+        ].join('');
+        document.head.appendChild(style);
+    }
+
+    function dsSelect(key, options, current) {
+        return '<select data-ds="' + key + '">' + options.map(o =>
+            '<option value="' + o[0] + '"' + (String(o[0]) === String(current) ? ' selected' : '') + '>' + o[1] + '</option>'
+        ).join('') + '</select>';
+    }
+    function dsCheck(key, checked, label) {
+        return '<label class="tv-ds-chk"><input type="checkbox" data-ds="' + key + '"' + (checked ? ' checked' : '') + '>' +
+            (label ? '<span>' + label + '</span>' : '') + '</label>';
+    }
+    function dsRow(label, ctl) {
+        return '<div class="tv-ds-row"><span class="tv-ds-lbl">' + label + '</span><span class="tv-ds-ctl">' + ctl + '</span></div>';
+    }
+
+    const DS_WIDTHS = [[1, 'İnce'], [1.5, 'Normal'], [2, 'Kalın'], [3, 'Çok kalın']];
+    const DS_DASHES = [['solid', 'Düz'], ['dashed', 'Kesikli'], ['dotted', 'Noktalı']];
+
+    function renderDrawSettingsBody(shape) {
+        const st = getShapeStyle(shape);
+        let h = '';
+        if (isFibShape(shape.type)) {
+            h += dsRow('Renk paleti', dsSelect('palette', [['tv', 'TradingView'], ['gold', 'Altın Tema'], ['custom', 'Özel']], st.palette));
+            h += '<div class="tv-ds-sec">Seviyeler</div><div class="tv-ds-levels">';
+            (st.levels || []).forEach((l, i) => {
+                h += '<label class="tv-ds-level">' +
+                    '<input type="checkbox" data-ds="level-on" data-i="' + i + '"' + (l.on !== false ? ' checked' : '') + '>' +
+                    '<span class="tv-ds-level-r">' + l.r + '</span>' +
+                    '<input type="color" data-ds="level-color" data-i="' + i + '" value="' + l.color + '">' +
+                    '</label>';
+            });
+            h += '</div>';
+            if (shape.type === 'fib' || shape.type === 'fib_ext') {
+                h += dsRow('Dolgu bantları', dsCheck('fill', st.fill) +
+                    '<input type="range" data-ds="fillOpacity" min="0" max="0.4" step="0.01" value="' + st.fillOpacity + '">');
+                h += dsRow('Uzat', dsCheck('extendLeft', st.extendLeft, 'Sola') + dsCheck('extendRight', st.extendRight, 'Sağa'));
+                h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Oran') + dsCheck('showPrice', st.showPrice, '₺'));
+            } else {
+                h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Göster'));
+            }
+        } else {
+            h += dsRow('Renk', '<input type="color" data-ds="color" value="' + (st.color || '#D4AF37') + '">');
+            h += dsRow('Dolgu saydamlığı',
+                '<input type="range" data-ds="fillOpacity" min="0" max="0.5" step="0.01" value="' +
+                (st.fillOpacity != null ? st.fillOpacity : 0.1) + '">');
+        }
+        h += dsRow('Kalınlık', dsSelect('width', DS_WIDTHS, st.width));
+        h += dsRow('Çizgi stili', dsSelect('dash', DS_DASHES, st.dash));
+        return h;
+    }
+
+    function ensureDrawSettingsPanel() {
+        ensureDrawSettingsStyles();
+        let panel = byId('tv-draw-settings');
+        if (panel) return panel;
+        panel = document.createElement('div');
+        panel.id = 'tv-draw-settings';
+        panel.className = 'tv-ds';
+        panel.innerHTML =
+            '<div class="tv-ds-head"><span class="tv-ds-title">Çizim Ayarları</span>' +
+            '<button type="button" class="tv-ds-x" data-ds-action="close" aria-label="Kapat">&times;</button></div>' +
+            '<div class="tv-ds-body"></div>' +
+            '<div class="tv-ds-foot">' +
+            '<button type="button" data-ds-action="reset">Sıfırla</button>' +
+            '<button type="button" data-ds-action="default">Varsayılan yap</button>' +
+            '<button type="button" class="primary" data-ds-action="close">Tamam</button>' +
+            '</div>';
+        document.body.appendChild(panel);
+        wireDrawSettingsPanel(panel);
+        return panel;
+    }
+
+    function currentSettingsShape() {
+        if (drawSettingsIndex < 0 || drawSettingsIndex >= state.drawings.length) return null;
+        return state.drawings[drawSettingsIndex];
+    }
+
+    function wireDrawSettingsPanel(panel) {
+        const body = panel.querySelector('.tv-ds-body');
+
+        function applyChange(target) {
+            const shape = currentSettingsShape();
+            if (!shape) return;
+            const st = getShapeStyle(shape);
+            const key = target.dataset.ds;
+            if (!key) return;
+
+            if (key === 'level-on') {
+                st.levels[+target.dataset.i].on = target.checked;
+            } else if (key === 'level-color') {
+                st.levels[+target.dataset.i].color = target.value;
+                // Tek bir seviyenin rengi elle değiştirilirse palet "Özel"e
+                // geçer (TradingView'in davranışı) — aksi halde palet
+                // yeniden uygulandığında kullanıcının rengi kaybolurdu.
+                st.palette = 'custom';
+                const sel = body.querySelector('select[data-ds="palette"]');
+                if (sel) sel.value = 'custom';
+            } else if (key === 'palette') {
+                st.palette = target.value;
+                if (target.value !== 'custom') {
+                    st.levels = buildFibLevels(shape.type, target.value, st.levels);
+                    body.innerHTML = renderDrawSettingsBody(shape);
+                }
+            } else if (key === 'width') {
+                st.width = parseFloat(target.value);
+            } else if (key === 'dash') {
+                st.dash = target.value;
+            } else if (key === 'color') {
+                st.color = target.value;
+            } else if (key === 'fillOpacity') {
+                st.fillOpacity = parseFloat(target.value);
+            } else if (target.type === 'checkbox') {
+                st[key] = target.checked;
+            }
+            redrawDrawings();
+        }
+
+        body.addEventListener('input', (e) => applyChange(e.target));
+        body.addEventListener('change', (e) => applyChange(e.target));
+
+        panel.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-ds-action]');
+            if (!btn) return;
+            const action = btn.dataset.dsAction;
+            const shape = currentSettingsShape();
+            if (action === 'close') {
+                closeDrawSettings();
+            } else if (action === 'default' && shape) {
+                const st = getShapeStyle(shape);
+                const d = getDrawStyleDefaults();
+                if (isFibShape(shape.type)) {
+                    d.fib = {
+                        palette: st.palette, width: st.width, dash: st.dash, fill: st.fill,
+                        fillOpacity: st.fillOpacity, showPercent: st.showPercent, showPrice: st.showPrice,
+                        extendLeft: st.extendLeft, extendRight: st.extendRight, colorsByRatio: {}
+                    };
+                    (st.levels || []).forEach(l => { d.fib.colorsByRatio[String(l.r)] = l.color; });
+                } else {
+                    d.generic = { color: st.color, width: st.width, dash: st.dash, fillOpacity: st.fillOpacity };
+                }
+                saveDrawStyleDefaults();
+                btn.textContent = 'Kaydedildi ✓';
+                setTimeout(() => { btn.textContent = 'Varsayılan yap'; }, 1400);
+            } else if (action === 'reset' && shape) {
+                if (isFibShape(shape.type)) {
+                    shape.style = Object.assign({}, FIB_STYLE_DEFAULT);
+                    shape.style.levels = buildFibLevels(shape.type, FIB_STYLE_DEFAULT.palette, null);
+                } else {
+                    shape.style = Object.assign({}, GENERIC_STYLE_DEFAULT);
+                }
+                body.innerHTML = renderDrawSettingsBody(shape);
+                redrawDrawings();
+            }
+        });
+
+        // Başlıktan tutup sürükleme
+        const head = panel.querySelector('.tv-ds-head');
+        let dragOffset = null;
+        head.addEventListener('mousedown', (e) => {
+            if (e.target.closest('[data-ds-action]')) return;
+            const r = panel.getBoundingClientRect();
+            dragOffset = { x: e.clientX - r.left, y: e.clientY - r.top };
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!dragOffset) return;
+            const maxX = window.innerWidth - panel.offsetWidth - 4;
+            const maxY = window.innerHeight - 40;
+            panel.style.left = Math.max(4, Math.min(maxX, e.clientX - dragOffset.x)) + 'px';
+            panel.style.top = Math.max(4, Math.min(maxY, e.clientY - dragOffset.y)) + 'px';
+        });
+        document.addEventListener('mouseup', () => { dragOffset = null; });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && panel.classList.contains('open')) closeDrawSettings();
+        });
+    }
+
+    function openDrawSettings(index, clientX, clientY) {
+        if (index < 0 || index >= state.drawings.length) return;
+        const shape = state.drawings[index];
+        const panel = ensureDrawSettingsPanel();
+        drawSettingsIndex = index;
+        selectDrawing(index);
+
+        const TITLES = {
+            fib: 'Fibonacci Geri Çekilme', fib_ext: 'Fibonacci Uzantı',
+            fib_fan: 'Fibonacci Yelpazesi', fib_time: 'Fibonacci Zaman Bölgesi'
+        };
+        panel.querySelector('.tv-ds-title').textContent = TITLES[shape.type] || 'Çizim Ayarları';
+        panel.querySelector('.tv-ds-body').innerHTML = renderDrawSettingsBody(shape);
+        panel.classList.add('open');
+
+        // Konum: tıklanan noktanın yanına, ekran dışına taşmayacak şekilde.
+        const w = panel.offsetWidth || 268, h = panel.offsetHeight || 320;
+        const x = (clientX != null ? clientX + 12 : window.innerWidth / 2 - w / 2);
+        const y = (clientY != null ? clientY : window.innerHeight / 2 - h / 2);
+        panel.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px';
+        panel.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y)) + 'px';
+    }
+
+    function closeDrawSettings() {
+        const panel = byId('tv-draw-settings');
+        if (panel) panel.classList.remove('open');
+        drawSettingsIndex = -1;
     }
 
     function showDrawingContextMenu(clientX, clientY) {
@@ -5592,7 +6131,21 @@ const TradingChart = (() => {
         debugGetMeasureShape: () => state.measureShape ? JSON.parse(JSON.stringify(state.measureShape)) : null,
         // (29 Temmuz 2026 — Madde 18 doğrulaması) Kullanıcının gerçek al-sat
         // işaretçilerinin hesaplanan halini (aktif sembol için) döndürür.
-        debugGetUserTradeMarkers: () => computeUserTradeMarkers()
+        debugGetUserTradeMarkers: () => computeUserTradeMarkers(),
+        // (10 Eylül 2026 — çizim stil sistemi doğrulaması) Ayar panelini ve
+        // renkli Fibonacci çizimini otomatik testten sürebilmek için.
+        // NOT: iç mum nesnelerinde zaman alanı `date` (grafik serisine
+        // `time: c.date` olarak veriliyor) — çizim noktaları da bu değeri
+        // `time` alanında tutuyor, bu yüzden burada `date` → `time` eşlemesi
+        // yapılıyor.
+        debugGetCandleSample: (i) => state.candles[i]
+            ? { time: state.candles[i].date, close: state.candles[i].close, high: state.candles[i].high, low: state.candles[i].low }
+            : null,
+        debugAddDrawing: (shape) => { state.drawings.push(shape); redrawDrawings(); return state.drawings.length - 1; },
+        debugOpenDrawSettings: (index, x, y) => openDrawSettings(index, x != null ? x : 240, y != null ? y : 120),
+        debugGetShapeStyle: (index) => state.drawings[index]
+            ? JSON.parse(JSON.stringify(getShapeStyle(state.drawings[index])))
+            : null
     });
 })();
 
