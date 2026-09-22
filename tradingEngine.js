@@ -5052,11 +5052,37 @@ const TradingEngine = (() => {
         return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     }
 
-    function exportTradeHistoryCSV() {
+    async function exportTradeHistoryCSV() {
         // (29 Temmuz 2026 — Madde 11) Artık Spot VE VİOP'un TÜM işlem
         // geçmişini birlikte, hangi piyasada gerçekleştiğini belirten ayrı
         // bir "Piyasa" sütunuyla dışa aktarıyor — böylece indirilen kayıt
         // gerçekten TAM (eksiksiz) bir işlem geçmişi oluyor.
+
+        // (22 Eylül 2026 — Madde 6 kök neden düzeltmesi) Dışa aktarmadan
+        // ÖNCE buluttaki portföy kaydı bu cihazdakinden daha yeni mi diye
+        // tek seferlik bir kontrol yapılıyor. Eğer öyleyse
+        // checkForNewerCloudRecordSync() zaten applyCloudPortfolioRecordIfNewer
+        // ile bu cihazı otomatik senkronize edip sayfayı yeniliyor — bu
+        // fonksiyon o durumda export'a devam ETMİYOR (yeniden yüklenen
+        // sayfadan tekrar denenebilir). Kontrol başarısız olursa (bağlantı
+        // sorunu vb.) veya FinteClubBridge hiç yüklenmediyse export normal
+        // şekilde, ELDEKİ yerel veriyle devam eder — SL/TP/Marj çağrısı gibi
+        // asla geciktirilmemesi gereken bir işlem olmadığından burada
+        // bekleme kısa tutuluyor ve asla kullanıcıyı kilitlemiyor.
+        if (window.FinteClubBridge && typeof window.FinteClubBridge.checkForNewerCloudRecordSync === 'function') {
+            try {
+                const freshness = await window.FinteClubBridge.checkForNewerCloudRecordSync();
+                // checkForNewerCloudRecordSync() bulutta daha yeni bir kayıt
+                // bulursa kendi içinde zaten bir toast gösterip 900ms sonra
+                // sayfayı yeniliyor (applyCloudPortfolioRecordIfNewer) — burada
+                // AYRICA bir toast göstermeye gerek yok, sadece export'u iptal
+                // edip yeniden yüklenecek sayfaya bırakıyoruz.
+                if (freshness && freshness.hasNewer) return;
+            } catch (e) {
+                console.warn('Dışa aktarma öncesi bulut tazelik kontrolü başarısız, yerel veriyle devam ediliyor.', e);
+            }
+        }
+
         const combined = portfolio.history.map(h => ({ ...h, market: 'NORMAL' }))
             .concat((portfolio.viopHistory || []).map(h => ({ ...h, market: 'VIOP' })));
         if (!combined.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }
@@ -5139,6 +5165,18 @@ const TradingEngine = (() => {
     }
 
     async function exportTradeHistoryXLSX() {
+        // (22 Eylül 2026 — Madde 6 kök neden düzeltmesi) CSV export'taki ile
+        // AYNI dışa-aktarma-öncesi bulut tazelik kontrolü — bkz. yukarıdaki
+        // exportTradeHistoryCSV() içindeki açıklama.
+        if (window.FinteClubBridge && typeof window.FinteClubBridge.checkForNewerCloudRecordSync === 'function') {
+            try {
+                const freshness = await window.FinteClubBridge.checkForNewerCloudRecordSync();
+                if (freshness && freshness.hasNewer) return;
+            } catch (e) {
+                console.warn('Dışa aktarma öncesi bulut tazelik kontrolü başarısız, yerel veriyle devam ediliyor.', e);
+            }
+        }
+
         const combined = portfolio.history.map(h => ({ ...h, market: 'NORMAL' }))
             .concat((portfolio.viopHistory || []).map(h => ({ ...h, market: 'VIOP' })));
         if (!combined.length) { showToast('Dışa aktarılacak işlem geçmişi yok.'); return; }

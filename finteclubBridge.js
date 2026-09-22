@@ -63,8 +63,33 @@
         appId: "1:267255127844:web:9d8a65057cc822375b9db1"
     };
 
+    // (22 Eylül 2026 — Madde 5/6 kök neden düzeltmesi: "cihazlar farklı
+    // bakiye gösteriyor") FIREBASE_ENABLED önceden SABİT ve sayfa açılır
+    // açılmaz TEK SEFERLİK, SESSİZCE hesaplanıyordu — tıpkı FinTeClub/ADMİN
+    // index.html'de daha önce bulunup düzeltilen (Madde 4) AYNI hata sınıfı.
+    // OPLab'ın kendi index.html'i Firebase script'lerini `defer` ile
+    // yüklüyor (bkz. o dosyanın <head>'i) — bu SIRALAMAYI garanti eder ama
+    // script'lerden biri ağ hatasıyla hiç YÜKLENEMEZSE (mobil veri/okul
+    // wifi titreşimi — kablolu lab bilgisayarlarında çok daha nadir) yine
+    // aynı sonuç: `typeof firebase` tanımsız kalır. Bu olduğunda, bu
+    // dosyanın kurduğu SOFİSTİKE çok-cihazlı senkronizasyon sisteminin
+    // (rev-korumalı transaction + gerçek zamanlı onSnapshot, bkz. aşağıdaki
+    // pushFullPortfolioToCloud/listenForPortfolioSync) TAMAMI o cihazda
+    // KALICI olarak devre dışı kalıyordu — cihaz kendi başına, izole
+    // çalışmaya devam ediyordu, hiçbir uyarı olmadan. Artık: (1) ilk deneme
+    // başarısız olursa startFtcBridgeRetryLoop() birkaç saniye arayla
+    // birkaç kez otomatik yeniden dener, sonra arka planda daha seyrek
+    // aralıklarla denemeye devam eder (bağlantı geç de olsa geri gelirse
+    // kendini iyileştirir); (2) ftcConnState 'failed' olduğu sürece ekranda
+    // kalıcı, göz ardı edilemez bir uyarı bandı gösterilir (bkz.
+    // showSyncWarningBanner) — işlem yapmayı ENGELLEMEZ (yarışma sırasında
+    // kilitlememek için, bkz. bu dosyanın "bir altyapı sorunu gerçek
+    // kullanıcıları asla yanlışlıkla kilitlememeli" ilkesi) ama artık
+    // sessiz de değil.
     var FIREBASE_ENABLED = typeof firebase !== 'undefined' &&
         FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+    // 'ok' | 'retrying' | 'failed'
+    var ftcConnState = FIREBASE_ENABLED ? 'ok' : 'retrying';
 
     var fsSharedDoc = null;
     var fsActivityDoc = null;
@@ -74,11 +99,16 @@
     var fsActionCommandsDoc = null;
     var ftcAuth = null;
 
-    if (FIREBASE_ENABLED) {
+    function tryInitFtcBridge() {
+        if (!FIREBASE_ENABLED) return false;
         try {
             // Ayrı isimli bir app instance kullanıyoruz ('ftcBridge') — ileride
             // OPLab kendi ana Firebase kurulumunu eklerse çakışma olmasın diye.
-            var ftcApp = firebase.initializeApp(FIREBASE_CONFIG, 'ftcBridge');
+            // (22 Eylül 2026) Bu fonksiyon bir yeniden deneme sonrası tekrar
+            // çağrılabildiğinden, aynı isimli app zaten varsa yeniden
+            // initializeApp() ÇAĞIRMIYORUZ — Firebase bunu hata sayar.
+            var existing = (firebase.apps || []).filter(function (a) { return a.name === 'ftcBridge'; })[0];
+            var ftcApp = existing || firebase.initializeApp(FIREBASE_CONFIG, 'ftcBridge');
             var fs = ftcApp.firestore();
             fsSharedDoc = fs.collection('finteclub').doc('shared_state');
             fsActivityDoc = fs.collection('finteclub').doc('oplab_activity');
@@ -121,10 +151,105 @@
             // üzerinden Authentication — FinTeClub'ın başvuru formunda oluşturulan
             // hesaplarla AYNI Firebase projesi/kullanıcı havuzuna bakıyor.
             ftcAuth = ftcApp.auth();
+            return true;
         } catch (e) {
             console.warn('FinTeClub bağlantısı kurulamadı, doğrulama devre dışı bırakıldı.', e);
             FIREBASE_ENABLED = false;
+            return false;
         }
+    }
+
+    // (22 Eylül 2026 — Madde 5/6) Firebase SDK script'lerini (OPLab'ın kendi
+    // index.html'inde <head>'e `defer` ile eklenenlerle AYNI 3 URL — bu
+    // dosya Storage kullanmıyor) dinamik olarak yeniden yükleyip birkaç kez
+    // dener. Sıralı yükleniyor — firestore/auth-compat script'leri 'firebase'
+    // global'ının app-compat tarafından önceden tanımlanmış olmasına bağımlı.
+    var FTC_FIREBASE_SDK_URLS = [
+        'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+        'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js',
+        'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js'
+    ];
+    function ftcLoadScriptOnce(url) {
+        return new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = url;
+            s.onload = function () { resolve(); };
+            s.onerror = function () { reject(new Error('yüklenemedi: ' + url)); };
+            document.head.appendChild(s);
+        });
+    }
+    function ftcReloadFirebaseSdkOnce() {
+        return FTC_FIREBASE_SDK_URLS.reduce(function (chain, url) {
+            return chain.then(function () { return ftcLoadScriptOnce(url); });
+        }, Promise.resolve());
+    }
+    // Bir yeniden bağlanma başarılı olduğunda, sadece Firestore/Auth
+    // referanslarını kurmak yetmez — init()'in normalde SADECE sayfa
+    // açılışında bir kez çalıştırdığı gerçek zamanlı dinleyicileri de
+    // (fsSharedDoc.onSnapshot, ftcAuth.onAuthStateChanged, periyodik
+    // portföy özeti) BAŞLATMAK gerekir — bkz. startRealtimeFeatures()
+    // ve onun çağrıldığı init()/retry başarı yolu.
+    function startFtcBridgeRetryLoop() {
+        var attempt = 0;
+        var FAST_ATTEMPTS = 5, FAST_DELAY_MS = 3000, SLOW_DELAY_MS = 20000;
+        function onRecovered() {
+            ftcConnState = 'ok';
+            console.log('[FinTeClub köprüsü] Yeniden bağlantı başarılı (deneme ' + attempt + ').');
+            hideSyncWarningBanner();
+            startRealtimeFeatures();
+        }
+        function scheduleNext() {
+            var delay = attempt < FAST_ATTEMPTS ? FAST_DELAY_MS : SLOW_DELAY_MS;
+            if (attempt === FAST_ATTEMPTS) {
+                ftcConnState = 'failed';
+                console.warn('[FinTeClub köprüsü] İlk ' + FAST_ATTEMPTS + ' deneme başarısız — arka planda daha seyrek denemeye devam ediliyor, bu cihaz senkronize olana kadar uyarı gösterilecek.');
+                showSyncWarningBanner();
+            }
+            setTimeout(attemptOnce, delay);
+        }
+        function attemptOnce() {
+            attempt++;
+            ftcReloadFirebaseSdkOnce().then(function () {
+                FIREBASE_ENABLED = typeof firebase !== 'undefined' && FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+                if (FIREBASE_ENABLED && tryInitFtcBridge()) { onRecovered(); return; }
+                scheduleNext();
+            }).catch(function (e) {
+                console.warn('[FinTeClub köprüsü] Yeniden yükleme denemesi ' + attempt + ' başarısız:', e.message);
+                scheduleNext();
+            });
+        }
+        attemptOnce();
+    }
+
+    // Ekranın en altında, kaybolmayan, göz ardı edilemez bir uyarı bandı —
+    // sadece ftcConnState 'failed' iken görünür. İşlem yapmayı ENGELLEMEZ
+    // (bkz. yukarıdaki "bir altyapı sorunu gerçek kullanıcıları asla
+    // yanlışlıkla kilitlememeli" ilkesi) — sadece kullanıcıya bu cihazın
+    // ŞU AN diğer cihazlarla senkronize olmadığını açıkça bildirir.
+    var SYNC_WARNING_BANNER_ID = 'ftcSyncWarningBanner';
+    function showSyncWarningBanner() {
+        if (byId(SYNC_WARNING_BANNER_ID)) return;
+        var bar = document.createElement('div');
+        bar.id = SYNC_WARNING_BANNER_ID;
+        bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999999;' +
+            'background:#7c2d12;color:#fed7aa;font:600 12.5px/1.5 system-ui,sans-serif;' +
+            'padding:10px 16px;text-align:center;box-shadow:0 -2px 10px rgba(0,0,0,0.35);';
+        bar.textContent = '⚠ Bu cihaz şu an diğer cihazlarınla senkronize DEĞİL (sunucuya bağlanılamıyor) — burada yaptığın işlemler diğer cihazlarına/admin paneline geç yansıyabilir. İnternetini kontrol edip sayfayı yenilemeyi dene.';
+        (document.body || document.documentElement).appendChild(bar);
+    }
+    function hideSyncWarningBanner() {
+        var el = byId(SYNC_WARNING_BANNER_ID);
+        if (el) el.remove();
+    }
+
+    // (22 Eylül 2026) İlk (senkron) deneme — script'ler başarıyla yüklendiyse
+    // (yaygın/beklenen durum) burada anında kurulur, hiçbir gecikme/uyarı
+    // olmaz. Başarısızsa arka planda otomatik yeniden bağlanma başlar.
+    if (FIREBASE_ENABLED && tryInitFtcBridge()) {
+        ftcConnState = 'ok';
+    } else {
+        ftcConnState = 'retrying';
+        startFtcBridgeRetryLoop();
     }
 
     /* (5 Ağustos 2026 — "giriş yapmadan önce bakiye hep 0 olsun, sadece
@@ -785,6 +910,42 @@
         });
     }
 
+    // (22 Eylül 2026 — Madde 6 kök neden düzeltmesi: "CSV'de hayalet otomatik
+    // satış") checkStopLossTakeProfit()/checkMarginCalls()/checkPendingOcoOrders()
+    // (tradingEngine.js) her 2 saniyede bir SADECE bu cihazın YEREL (belki
+    // bayat) pozisyon verisine bakıp otomatik kapatma yapabiliyor — başka bir
+    // cihazda az önce kapatılmış bir pozisyon, gerçek zamanlı senkron henüz
+    // yetişmeden bu cihazda "gerçekten" kapanıp portfolio.history'ye
+    // yazılabiliyor, ve dışa aktarma (CSV/XLSX) bu geçmişi DOĞRUDAN, hiç
+    // tazelik kontrolü yapmadan okuyor (bkz. tradingEngine.js
+    // exportTradeHistoryCSV/exportTradeHistoryXLSX). Kök çözüm dışa aktarma
+    // akışını tamamen değiştirmek yerine (SL/TP'nin ASLA geciktirilmemesi
+    // gerektiği ilkesine dokunmadan — bkz. closePosition() yorumu), dışa
+    // aktarmanın HEMEN ÖNCESİNDE tek seferlik, hızlı bir "acaba buluta göre
+    // bayat mıyım" kontrolü ekliyoruz. Bayatsa applyCloudPortfolioRecordIfNewer
+    // zaten KANITLANMIŞ mekanizmasını (yerel veriyi düzelt + sayfayı yenile)
+    // tetikleriz — dışa aktarma o düzeltmeden SONRAKİ bir denemede, artık
+    // hayalet içermeyen gerçek geçmişle yapılır. Bağlantı yoksa/kontrol
+    // başarısızsa (bu proje genelinde tutarlı ilke) engellemiyoruz — elimizdeki
+    // yerel veriyle dışa aktarmaya izin veriyoruz, hiçbir zaman kilitlemiyoruz.
+    function checkForNewerCloudRecordSync() {
+        if (!fsUserPortfoliosDoc || !verifiedApp) return Promise.resolve({ hasNewer: false });
+        return fsUserPortfoliosDoc.get().then(function (doc) {
+            if (!doc.exists) return { hasNewer: false };
+            var data = doc.data() || {};
+            var record = (data.users || {})[String(verifiedApp.id)];
+            if (!record) return { hasNewer: false };
+            var cloudRev = typeof record.rev === 'number' ? record.rev : 0;
+            var knownRev = getKnownCloudRev();
+            var isNewer = cloudRev > knownRev && record.deviceId !== getDeviceId();
+            if (isNewer) applyCloudPortfolioRecordIfNewer(record);
+            return { hasNewer: isNewer };
+        }).catch(function (e) {
+            console.warn('Dışa aktarma öncesi bulut tazelik kontrolü başarısız (bağlantı sorunu olabilir), yerel veriyle devam ediliyor.', e);
+            return { hasNewer: false };
+        });
+    }
+
     // (9 Ağustos 2026 — "kökten çöz") hydratePortfolioFromCloudIfNeeded()
     // sadece sayfa AÇILIRKEN bir kez bakıyordu. Bu, tabletini/PC'ni sabah
     // açıp sekmeyi kapatmadan bütün gün öylece bırakan, arada telefondan
@@ -1035,65 +1196,83 @@
         }
 
         if (FIREBASE_ENABLED && fsSharedDoc) {
-            fsSharedDoc.onSnapshot(function (doc) {
-                lastSharedData = doc.exists ? doc.data() : null;
-                updateAccessGate();
-                updateTradingHaltState();
-                updateForcedThemeState();
-                checkApplicationStatus();
-            }, function (err) {
-                console.warn('FinTeClub verisi dinlenemedi.', err);
-                updateAccessGate();
-                updateTradingHaltState();
-                updateForcedThemeState();
-            });
-            if (ftcAuth) {
-                ftcAuth.onAuthStateChanged(function (user) {
-                    currentAuthUser = user;
-                    // (bkz. yukarıdaki FTC_AUTH_STATE tanımı) tradingEngine.js'in
-                    // bakiye kapısını gerçek zamanlı güncellemesi için.
-                    window.FTC_AUTH_STATE.loggedIn = !!user;
-                    window.FTC_AUTH_STATE.email = user ? user.email : null;
-                    window.dispatchEvent(new CustomEvent('ftc-auth-changed', { detail: window.FTC_AUTH_STATE }));
-                    syncLoginUI();
-
-                    // (Modal her açılışta gösterilir) Bu karar, checkApplicationStatus()
-                    // ÇAĞRILMADAN ÖNCE verilir — zaten giriş yapmış bir yarışmacı için
-                    // showModalWelcomeAndClose() modalın AÇIK olmasını bekler; sıralama
-                    // ters olsaydı (önce checkApplicationStatus, sonra modal açılışı)
-                    // eşleşme bulunsa bile modal henüz kapalı olduğundan "Hoşgeldin"
-                    // mesajı hiç görünmezdi. modalDecisionMade sadece AYNI sayfa
-                    // yüklemesinde onAuthStateChanged birden fazla tetiklenirse modalın
-                    // tekrar tekrar açılmasını önler — sayfa yeniden yüklendiğinde
-                    // (F5 / siteyi kapat-aç) her zaman sıfırdan başlar.
-                    if (!modalDecisionMade) {
-                        modalDecisionMade = true;
-                        showLoginModal();
-                    }
-
-                    if (user) {
-                        checkApplicationStatus();
-                    } else {
-                        setBadgeVisible(false);
-                        setVerifyStatus('', null);
-                        verifiedApp = null;
-                    }
-                });
-            }
-            // Admin panelindeki Canlı İzleme / Kullanıcı Portföyleri sayfalarını
-            // beslemek için: sadece doğrulanmış bir yarışmacı varsa ve sekme
-            // görünürken periyodik olarak bakiye/özkaynak özetini gönder.
-            // İlk gönderim birkaç saniye gecikmeli — tradingEngine.js'in fiyat
-            // akışının (tickPrices) en az bir tur çalışmış olması için.
-            setTimeout(pushPortfolioSnapshot, 5000);
-            setInterval(pushPortfolioSnapshot, PORTFOLIO_PUSH_INTERVAL_MS);
+            startRealtimeFeatures();
         } else {
             // Firebase yok/engelli — kilit varsayılan AÇIK, giriş pasif.
+            // (22 Eylül 2026) startFtcBridgeRetryLoop() zaten başlatılmış
+            // durumda (bkz. dosyanın en üstü) — başarılı olursa
+            // startRealtimeFeatures() o zaman çağrılacak, aşağıdaki
+            // "pasif" durum sadece o ana kadar geçerli.
             updateAccessGate();
             updateTradingHaltState();
             updateForcedThemeState();
             syncLoginUI();
         }
+    }
+
+    // (22 Eylül 2026 — Madde 5/6) init()'teki gerçek zamanlı kurulum bloğu
+    // buraya taşındı ki hem normal (ilk denemede Firebase hazır) yoldan hem
+    // de geç bir otomatik yeniden bağlanma başarılı olduğunda ÇAĞRILABİLSİN.
+    // realtimeFeaturesStarted koruması, bir sayfa yüklemesinde bu kurulumun
+    // yanlışlıkla İKİ KEZ çalışıp dinleyicileri/periyodik push'u ikiye
+    // katlamasını önler.
+    var realtimeFeaturesStarted = false;
+    function startRealtimeFeatures() {
+        if (realtimeFeaturesStarted || !FIREBASE_ENABLED || !fsSharedDoc) return;
+        realtimeFeaturesStarted = true;
+        fsSharedDoc.onSnapshot(function (doc) {
+            lastSharedData = doc.exists ? doc.data() : null;
+            updateAccessGate();
+            updateTradingHaltState();
+            updateForcedThemeState();
+            checkApplicationStatus();
+        }, function (err) {
+            console.warn('FinTeClub verisi dinlenemedi.', err);
+            updateAccessGate();
+            updateTradingHaltState();
+            updateForcedThemeState();
+        });
+        if (ftcAuth) {
+            ftcAuth.onAuthStateChanged(function (user) {
+                currentAuthUser = user;
+                // (bkz. yukarıdaki FTC_AUTH_STATE tanımı) tradingEngine.js'in
+                // bakiye kapısını gerçek zamanlı güncellemesi için.
+                window.FTC_AUTH_STATE.available = true;
+                window.FTC_AUTH_STATE.loggedIn = !!user;
+                window.FTC_AUTH_STATE.email = user ? user.email : null;
+                window.dispatchEvent(new CustomEvent('ftc-auth-changed', { detail: window.FTC_AUTH_STATE }));
+                syncLoginUI();
+
+                // (Modal her açılışta gösterilir) Bu karar, checkApplicationStatus()
+                // ÇAĞRILMADAN ÖNCE verilir — zaten giriş yapmış bir yarışmacı için
+                // showModalWelcomeAndClose() modalın AÇIK olmasını bekler; sıralama
+                // ters olsaydı (önce checkApplicationStatus, sonra modal açılışı)
+                // eşleşme bulunsa bile modal henüz kapalı olduğundan "Hoşgeldin"
+                // mesajı hiç görünmezdi. modalDecisionMade sadece AYNI sayfa
+                // yüklemesinde onAuthStateChanged birden fazla tetiklenirse modalın
+                // tekrar tekrar açılmasını önler — sayfa yeniden yüklendiğinde
+                // (F5 / siteyi kapat-aç) her zaman sıfırdan başlar.
+                if (!modalDecisionMade) {
+                    modalDecisionMade = true;
+                    showLoginModal();
+                }
+
+                if (user) {
+                    checkApplicationStatus();
+                } else {
+                    setBadgeVisible(false);
+                    setVerifyStatus('', null);
+                    verifiedApp = null;
+                }
+            });
+        }
+        // Admin panelindeki Canlı İzleme / Kullanıcı Portföyleri sayfalarını
+        // beslemek için: sadece doğrulanmış bir yarışmacı varsa ve sekme
+        // görünürken periyodik olarak bakiye/özkaynak özetini gönder.
+        // İlk gönderim birkaç saniye gecikmeli — tradingEngine.js'in fiyat
+        // akışının (tickPrices) en az bir tur çalışmış olması için.
+        setTimeout(pushPortfolioSnapshot, 5000);
+        setInterval(pushPortfolioSnapshot, PORTFOLIO_PUSH_INTERVAL_MS);
     }
 
     if (document.readyState === 'loading') {
@@ -1145,6 +1324,10 @@
     // engelliyse) tradingEngine.js'teki çağrı güvenle no-op olur, hiçbir
     // üretim davranışı buna bağımlı değildir.
     window.FinteClubBridge = {
-        requestImmediateSync: function () { return requestImmediateSync(); }
+        requestImmediateSync: function () { return requestImmediateSync(); },
+        // (22 Eylül 2026 — Madde 6) tradingEngine.js'in dışa aktarma
+        // öncesinde çağırdığı tazelik kontrolü — bkz. checkForNewerCloudRecordSync
+        // yorumu. Her zaman bir Promise<{hasNewer:boolean}> döner, asla reddetmez.
+        checkForNewerCloudRecordSync: function () { return checkForNewerCloudRecordSync(); }
     };
 })();
