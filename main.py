@@ -892,6 +892,93 @@ _MAX_CONCURRENT_LIVE_CONNECTIONS = 300
 _active_live_connections = 0
 
 
+# (22 Eylül 2026 — KÖK NEDEN DÜZELTMESİ: "20 kişi bağlanınca motor duruyor")
+# Test günü 20 kişi aynı anda bağlanınca gerçek veri birkaç dakika sonra
+# simüleye döndü ve Render'dan "server failure / i/o timeout" maili geldi.
+# Kök neden: HER WebSocket bağlantısı kendi sembolü için BAĞIMSIZ olarak
+# LIVE_POLL_INTERVAL_SEC'te bir yfinance'e istek atıyordu — yani Yahoo'ya
+# giden istek hacmi bağlı kullanıcı sayısıyla DOĞRU ORANTILI büyüyordu
+# (20 farklı hisseye bakan 20 kullanıcı ≈ dakikada ~100 ayrı Yahoo isteği,
+# hepsi Render'ın PAYLAŞIMLI tek IP'sinden). Yahoo bunu yoğun/şüpheli trafik
+# sayıp o IP'yi geçici olarak rate-limit'liyor (bkz. yukarıdaki 27 Ağustos
+# notu, bu proje bunu daha önce de yaşamış) — gerçek fiyat gelmeyince
+# WebSocket kapanıyor, frontend'deki yeşil ışık sönüyor, herkes aynı anda
+# simüleye düşüyor. Aynı yoğunluk muhtemelen Render'ın ücretsiz tek işçili
+# sürecini de tıkayıp platformun kendi "i/o timeout" hatasına yol açtı.
+#
+# Çözüm: artık istek hacmi bağlı kullanıcı sayısından TAMAMEN bağımsız.
+# Tek bir arka plan döngüsü (_live_price_refresh_loop), o an en az bir
+# kullanıcı tarafından izlenen TÜM sembolleri _LIVE_REFRESH_INTERVAL_SEC'te
+# bir TEK bir toplu (batch) istekle çekip paylaşılan bir önbelleğe yazıyor
+# (tıpkı /api/v1/quotes'un zaten yaptığı gibi — aynı, kanıtlanmış toplu
+# indirme deseni). Her WebSocket bağlantısı bu önbellekten sadece OKUYOR,
+# kendi başına ağ isteği YAPMIYOR. Sonuç: 1 kullanıcı da bağlansa 200
+# kullanıcı da bağlansa (aynı sembollere bakıyorlarsa) Yahoo'ya giden istek
+# sayısı aynı kalır — sadece izlenen FARKLI sembol sayısına bağlı, bağlantı
+# sayısına değil.
+_LIVE_REFRESH_INTERVAL_SEC = 15
+_live_price_cache = {}   # orijinal ticker -> {"price": float, "ts": float}
+_live_watch_counts = {}  # orijinal ticker -> o an kaç aktif WebSocket bu sembolü izliyor
+_live_cache_lock = asyncio.Lock()
+
+
+async def _refresh_live_prices_once():
+    """İzlenen tüm sembolleri TEK bir toplu yfinance isteğiyle tazeler.
+    Bağlı kullanıcı/bağlantı sayısından bağımsız olarak her turda en fazla
+    BİR istek atılır (istek boyutu izlenen FARKLI sembol sayısına göre
+    değişir, ama bu da /api/v1/quotes'taki 150 sembollük üst sınırla aynı
+    mertebede — bir yarışmada gerçekçi sınırların çok üzerinde)."""
+    async with _live_cache_lock:
+        tickers = [t for t, c in _live_watch_counts.items() if c > 0]
+    if not tickers:
+        return
+
+    formatted_map = {format_ticker(t): t for t in tickers}
+    try:
+        raw = await asyncio.to_thread(
+            _yf_call_with_backoff,
+            lambda: yf.download(
+                tickers=list(formatted_map.keys()),
+                period="1d",
+                interval="1m",
+                group_by="ticker",
+                threads=True,
+                progress=False,
+                session=session,
+            ),
+            label="live toplu yenileme",
+        )
+        now = time.time()
+        # (bkz. /api/v1/quotes'taki 10 Ağustos notu) group_by="ticker"
+        # verildiğinde yfinance TEK sembol için bile her zaman MultiIndex
+        # sütun döndürür — sayıyı TAHMİN ETMEK yerine doğrudan
+        # raw.columns.nlevels'a bakılıyor.
+        for formatted, original in formatted_map.items():
+            try:
+                close_series = raw[formatted]["Close"] if raw.columns.nlevels > 1 else raw["Close"]
+                close_series = close_series.dropna()
+                if len(close_series) > 0:
+                    _live_price_cache[original] = {"price": round(float(close_series.iloc[-1]), 2), "ts": now}
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[live-refresh] Toplu güncelleme başarısız ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
+
+
+async def _live_price_refresh_loop():
+    while True:
+        await asyncio.sleep(_LIVE_REFRESH_INTERVAL_SEC)
+        try:
+            await _refresh_live_prices_once()
+        except Exception as e:
+            print(f"[live-refresh] loop error: {e}")
+
+
+@app.on_event("startup")
+async def _start_live_price_refresh():
+    asyncio.create_task(_live_price_refresh_loop())
+
+
 @app.websocket("/ws/live/{ticker}")
 async def websocket_endpoint(websocket: WebSocket, ticker: str):
     global _active_live_connections
@@ -912,79 +999,54 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
 
     await websocket.accept()
     _active_live_connections += 1
-    # (17-18 Temmuz 2026, sekizinci oturum — "motor" geliştirmesi) Bu uç
-    # önceden `random.uniform` ile TAMAMEN sahte/simüle tick üretiyordu ve
-    # frontend tarafından hiç kullanılmıyordu. Artık geçmiş mumlardan sonra,
-    # her LIVE_POLL_INTERVAL_SEC saniyede bir yfinance'ten GERÇEK güncel
-    # fiyatı çekip push ediyor. yfinance ücretsiz API'si saniyelik tick-by-
-    # tick veri sağlamıyor (sadece periyodik "son fiyat" anlık görüntüsü) —
-    # bu yüzden "canlı" burada "periyodik olarak tazelenen gerçek fiyat"
-    # anlamına geliyor. Frontend (tradingEngine.js → connectLiveFeed) bu
-    # gerçek fiyatı kendi 2 saniyelik mikro-simülasyonuna bir "çıpa" olarak
-    # besliyor — böylece hem akış görsel olarak akıcı kalıyor hem de
-    # periyodik olarak gerçeğe demirleniyor. Aralık kısa tutulmuyor (1sn
-    # değil, 12sn) çünkü amaç yfinance'i saniyede bir yormak değil, makul bir
-    # kaynakla gerçek veriye düzenli aralıklarla "check-in" yapmak.
-    LIVE_POLL_INTERVAL_SEC = 12
+    async with _live_cache_lock:
+        _live_watch_counts[ticker] = _live_watch_counts.get(ticker, 0) + 1
+
+    # (22 Eylül 2026) Bu artık ağ isteği aralığı DEĞİL — sadece paylaşılan
+    # önbellekten okuma aralığı (bellek içi, ağ maliyeti yok). Gerçek
+    # yfinance istekleri artık YALNIZCA yukarıdaki paylaşılan arka plan
+    # döngüsünde (_LIVE_REFRESH_INTERVAL_SEC'te bir) atılıyor.
+    LIVE_POLL_INTERVAL_SEC = 5
+    last_sent_ts = 0.0
     try:
         formatted = format_ticker(ticker)
         stock = yf.Ticker(formatted, session=session)
 
-        # (22 Temmuz 2026, on ikinci oturum, beşinci tur — "canlı veri
-        # noktası 20-30 saniye gri kalıyor" sorunu) Bu uç önceden burada
-        # KENDİ BAŞINA ayrı bir "3mo" geçmiş veri çekip bunu bir "history"
-        # mesajı olarak gönderiyordu. Ancak frontend (tradingEngine.js →
-        # openLiveSocket'in onmessage'ı) yalnızca "type":"tick" mesajlarını
-        # işliyor — "history" mesajını hiç okumuyor (grafik zaten ayrı bir
-        # REST isteğiyle, çok daha kapsamlı "period=max" veriyle çiziliyor).
-        # Yani bu ikinci geçmiş veri çekimi TAMAMEN boşa gidiyordu, ama ilk
-        # gerçek fiyat (tick) ancak bu bittikten sonra gönderilebiliyordu —
-        # her sembol geçişinde gereksiz bir tam yfinance isteği kadar (Render
-        # üzerinde birkaç saniye) fazladan gecikme ekliyordu. Kaldırıldı;
-        # artık bağlantı kurulur kurulmaz doğrudan gerçek fiyata geçiliyor.
-        async def fetch_and_send_tick() -> bool:
-            """Bir gerçek fiyat çekip varsa 'tick' olarak gönderir; başarılıysa
-            True döner (çağıran taraf bunu sadece loglama/tanı amaçlı kullanır,
-            akışı etkilemez).
-            (9 Ağustos 2026) Senkron/bloklayan kısım artık asyncio.to_thread()
-            ile ayrı bir thread'de çalışıyor — bkz. _fetch_real_price_sync()
-            üzerindeki kök neden açıklaması. Bu await, event loop'u
-            BLOKLAMAZ; thread çalışırken loop başka bağlantılara/isteklere
-            hizmet vermeye devam edebilir."""
+        # (22 Temmuz 2026, on ikinci oturum, dördüncü tur — "canlı veri
+        # göstergesi hemen yeşile dönmüyor" sorunu, hâlâ geçerli) Bu sembolü
+        # o an başka hiç kimse izlemiyorsa paylaşılan önbellekte veri
+        # olmayabilir (ya da çok bayat olabilir) — bu durumda SADECE bu
+        # sembol için tek seferlik bir "seed" isteği atıp önbelleği
+        # dolduruyoruz, böylece yeşil ışık ilk bağlananda da hemen yanar.
+        # Bu, kullanıcı sayısıyla ÇARPILMAZ — her FARKLI sembol için en
+        # fazla bir kez, ilk izleyici bağlandığında çalışır.
+        cached = _live_price_cache.get(ticker)
+        if not cached or (time.time() - cached["ts"]) > (_LIVE_REFRESH_INTERVAL_SEC * 2):
             real_price = await asyncio.to_thread(_fetch_real_price_sync, stock, ticker)
+            if real_price and real_price > 0:
+                _live_price_cache[ticker] = {"price": round(real_price, 2), "ts": time.time()}
 
-            if real_price is None or real_price <= 0:
-                # Gerçek fiyat bu turda alınamadı (ağ/yfinance geçici sorunu
-                # olabilir) — bağlantıyı koparmıyoruz, sadece bu turu
-                # sessizce atlayıp bir sonrakini deniyoruz. Frontend zaten
-                # kendi simülasyonuna kesintisiz devam ediyor (REST OHLCV
-                # fetch'teki yedek-yola-düşme mantığıyla aynı defense-in-
-                # depth prensibi).
-                return False
-
+        async def send_if_fresh() -> None:
+            """Önbellekte, en son gönderdiğimizden daha YENİ bir fiyat varsa
+            onu 'tick' olarak gönderir. Ağ isteği yapmaz — sadece bellekten
+            okur, bu yüzden bağlantı sayısı arttıkça maliyeti artmaz."""
+            nonlocal last_sent_ts
+            entry = _live_price_cache.get(ticker)
+            if not entry or entry["ts"] <= last_sent_ts:
+                return
+            last_sent_ts = entry["ts"]
             await websocket.send_json({
                 "type": "tick",
                 "ticker": ticker,
-                "price": round(real_price, 2),
+                "price": entry["price"],
                 "source": "live"
             })
-            return True
 
-        # (22 Temmuz 2026, on ikinci oturum, dördüncü tur — "canlı veri
-        # göstergesi hemen yeşile dönmüyor" sorunu) Önceden ilk gerçek 'tick'
-        # ancak LIVE_POLL_INTERVAL_SEC (12sn) sonra gönderiliyordu — bu yüzden
-        # sayfa yeni açıldığında/sembol değiştiğinde frontend'deki yeşil nokta
-        # 12 saniye boyunca gri kalıyor, biri tam o an bakarsa "canlı değil"
-        # sanısına kapılabiliyordu (hoca sunumu öncesi bu yanlış izlenimi hiç
-        # istemiyoruz). Artık geçmiş veriden hemen sonra bir "tick" daha
-        # deneniyor — bağlantı kurulduktan ~1 saniye içinde gerçek fiyat
-        # varsa nokta hemen yeşile dönüyor, yoksa döngü periyodik denemeye
-        # devam ediyor.
-        await fetch_and_send_tick()
+        await send_if_fresh()
 
         while True:
             await asyncio.sleep(LIVE_POLL_INTERVAL_SEC)
-            await fetch_and_send_tick()
+            await send_if_fresh()
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -995,6 +1057,14 @@ async def websocket_endpoint(websocket: WebSocket, ticker: str):
         # azaltılmalı, yoksa sayaç zamanla "sızar" ve gerçek kapasite
         # dolmadan yeni bağlantılar reddedilmeye başlar.
         _active_live_connections -= 1
+        # (22 Eylül 2026) İzleyici sayacı da aynı şekilde: bu sembolü izleyen
+        # son bağlantı da kapandıysa arka plan döngüsü artık bu sembol için
+        # boşuna istek atmasın diye sayaçtan tamamen siliniyor.
+        async with _live_cache_lock:
+            if ticker in _live_watch_counts:
+                _live_watch_counts[ticker] -= 1
+                if _live_watch_counts[ticker] <= 0:
+                    del _live_watch_counts[ticker]
 
 # (23 Temmuz 2026, on üçüncü oturum — "motoru güçlendirme" temizliği)
 # Burada önceden /api/v1/backtest/export uç noktası vardı — PDF raporu

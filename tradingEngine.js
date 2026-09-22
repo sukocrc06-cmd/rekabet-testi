@@ -869,12 +869,23 @@ const TradingEngine = (() => {
     // konsolu/ağı yormamak için. Bir tick başarıyla alınınca sayaç sıfırlanır.
     const RECONNECT_BASE_DELAY_MS = 3000;
     const RECONNECT_MAX_DELAY_MS = 30000;
+    // (22 Eylül 2026, Madde 1 "panik önleme" düzeltmesi) Kısa/geçici bağlantı
+    // kopmalarında (ör. Render'ın tek işçili süreci anlık olarak meşgulken,
+    // ya da ağda kısa bir titreşim olduğunda) yeşil ışık ANINDA sönüp
+    // herkesi simüle fiyata düşürmesin — bunun yerine LIVE_FEED_GRACE_MS
+    // kadar bekleniyor; bu süre içinde otomatik yeniden bağlanma başarılı
+    // olup yeni bir gerçek tick gelirse kullanıcı hiçbir şey fark etmez.
+    // Süre dolmadan gerçek bir tick gelmezse (gerçekten uzun süreli bir
+    // kopma varsa) ışık o zaman söner — böylece kullanıcı yanlış bilgiyle
+    // baş başa kalmaz, sadece anlık titreşimlerde panik olmaz.
+    const LIVE_FEED_GRACE_MS = 25000;
     let liveSocket = null;
     let liveFeedSymbol = null;
     let liveFeedActive = false;   // en az bir gerçek 'tick' mesajı alındı mı
     let liveFeedLastTickAt = null;
     let liveReconnectTimer = null;
     let liveReconnectAttempt = 0;
+    let liveFeedGraceTimer = null;
 
     function updateEngineFeedStatus() {
         if (typeof window.__optipulseSetLiveFeedStatus === 'function') {
@@ -894,8 +905,19 @@ const TradingEngine = (() => {
         liveReconnectAttempt = 0;
     }
 
+    function cancelLiveFeedGraceTimer() {
+        if (liveFeedGraceTimer) {
+            clearTimeout(liveFeedGraceTimer);
+            liveFeedGraceTimer = null;
+        }
+    }
+
     function disconnectLiveFeed() {
+        // Bilerek/anında yapılan bir kopuş (ör. kullanıcı başka bir sembole
+        // geçti) — burada bekleme süresi (grace) uygulanmaz, bekleyen bir
+        // grace zamanlayıcısı varsa da iptal edilir (artık geçersiz).
         cancelLiveReconnect();
+        cancelLiveFeedGraceTimer();
         if (liveSocket) {
             try { liveSocket.onclose = null; liveSocket.onmessage = null; liveSocket.onerror = null; liveSocket.close(); } catch (e) { /* ignore */ }
             liveSocket = null;
@@ -956,6 +978,10 @@ const TradingEngine = (() => {
                     renderAccountSummary();
                 }
             }
+            // Gerçek bir tick geldi — bekleyen bir "panik önleme" zamanlayıcısı
+            // varsa (yani yakın zamanda kısa bir kopma yaşandıysa) iptal
+            // ediliyor; akış zaten gerçekten iyileşti, ışığı söndürmeye gerek yok.
+            cancelLiveFeedGraceTimer();
             liveFeedActive = true;
             liveFeedLastTickAt = Date.now();
             liveReconnectAttempt = 0; // gerçek veri akıyor, geri çekilme sayacı sıfırlanır
@@ -965,8 +991,31 @@ const TradingEngine = (() => {
         socket.onclose = () => {
             if (liveSocket !== socket) return; // zaten değiştirilmiş/kapatılmış eski bir soket
             liveSocket = null;
-            liveFeedActive = false;
-            updateEngineFeedStatus();
+            // (22 Eylül 2026, Madde 1 "panik önleme") Bağlantı koptu diye
+            // ışığı ANINDA söndürmüyoruz — kısa/geçici kopmalarda otomatik
+            // yeniden bağlanma genelde saniyeler içinde toparlanıyor. Bunun
+            // yerine LIVE_FEED_GRACE_MS kadar bekleyen tek seferlik bir
+            // zamanlayıcı kuruyoruz; bu süre içinde (bu fonksiyonun üstünde,
+            // onmessage'da) yeni bir gerçek tick gelirse zamanlayıcı iptal
+            // edilir ve kullanıcı hiçbir şey fark etmez. Art arda birden
+            // fazla kopma/yeniden-deneme turu olursa (ör. reconnect denemesi
+            // de anında başarısız olursa) zaten bekleyen bir zamanlayıcı
+            // varsa YENİSİ kurulmaz — böylece "süre hep uzuyor da uzuyor"
+            // ve ışık hiç sönmüyor durumu oluşmaz; ilk kopmadan
+            // LIVE_FEED_GRACE_MS sonra, akış hâlâ toparlanmadıysa ışık gerçekten söner.
+            if (liveFeedSymbol === symbol && !liveFeedGraceTimer) {
+                liveFeedGraceTimer = setTimeout(() => {
+                    liveFeedGraceTimer = null;
+                    // Zamanlayıcı dolduğunda hâlâ aynı sembolü izliyorsak ve
+                    // arada gerçek bir tick gelmediyse (onmessage bu
+                    // zamanlayıcıyı iptal etmediyse), akış gerçekten uzun
+                    // süredir kopuk demektir — ışığı şimdi söndür.
+                    if (liveFeedSymbol === symbol) {
+                        liveFeedActive = false;
+                        updateEngineFeedStatus();
+                    }
+                }, LIVE_FEED_GRACE_MS);
+            }
             // Sembol hâlâ aktifse (kullanıcı bilerek disconnectLiveFeed()
             // çağırmadıysa, ör. başka bir sembole geçmediyse) bağlantı
             // beklenmedik şekilde koptu demektir — otomatik tekrar dene.
