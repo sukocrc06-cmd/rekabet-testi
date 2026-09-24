@@ -616,16 +616,72 @@ const TradingChart = (() => {
     const SYMBOL_HISTORY_CACHE_TTL_MS = 3 * 60 * 1000;
     const symbolHistoryCache = new Map(); // ticker -> { candles, ts }
 
-    async function fetchOhlcvCached(ticker) {
+    // (24 Eylül 2026 — Word listesi Madde 8) Aynı sembol için aynı anda
+    // gelen istekler (ön-ısıtma + tıklama) TEK ağ isteğini paylaşır.
+    const SYMBOL_HISTORY_STALE_MAX_MS = 60 * 60 * 1000;
+    const ohlcvInflight = new Map();
+    function fetchOhlcvFresh(ticker) {
+        if (ohlcvInflight.has(ticker)) return ohlcvInflight.get(ticker);
+        const p = fetchOhlcvWithRetry(ticker).then(fresh => {
+            if (fresh && fresh.length >= 5) symbolHistoryCache.set(ticker, { candles: fresh, ts: Date.now() });
+            return fresh;
+        }).finally(() => { ohlcvInflight.delete(ticker); });
+        ohlcvInflight.set(ticker, p);
+        return p;
+    }
+    function hasUsableHistoryCache(ticker) {
+        const c = symbolHistoryCache.get(ticker);
+        return !!(c && (Date.now() - c.ts) < SYMBOL_HISTORY_STALE_MAX_MS);
+    }
+    // opts.onRefresh verilirse: önbellek 3 dk'dan eski ama 1 saatten yeni ise
+    // grafik BEKLETİLMEDEN önbellekten hemen çizilir, arka planda taze veri
+    // çekilip gelince grafik güncellenir (sembole geri dönünce saniyelerce
+    // eski hissenin grafiği görünmesin diye).
+    async function fetchOhlcvCached(ticker, opts) {
         const cached = symbolHistoryCache.get(ticker);
-        if (cached && (Date.now() - cached.ts) < SYMBOL_HISTORY_CACHE_TTL_MS) {
+        const age = cached ? Date.now() - cached.ts : Infinity;
+        if (cached && age < SYMBOL_HISTORY_CACHE_TTL_MS) {
             return cached.candles;
         }
-        const fresh = await fetchOhlcvWithRetry(ticker);
-        if (fresh && fresh.length >= 5) {
-            symbolHistoryCache.set(ticker, { candles: fresh, ts: Date.now() });
+        if (cached && age < SYMBOL_HISTORY_STALE_MAX_MS && opts && typeof opts.onRefresh === 'function') {
+            fetchOhlcvFresh(ticker).then(fresh => {
+                if (fresh && fresh.length >= 5) opts.onRefresh(fresh);
+            }).catch(() => { /* sessiz — eski veri gösterilmeye devam eder */ });
+            return cached.candles;
         }
-        return fresh;
+        return fetchOhlcvFresh(ticker);
+    }
+
+    // Yeni sembolün verisi beklenirken ESKİ hissenin mumları ekranda
+    // kalmasın: grafiğin üstüne "yükleniyor" katmanı.
+    function showChartLoading(ticker) {
+        const pane = chartContainer && chartContainer.parentElement;
+        if (!pane) return;
+        let el = byId('tv-chart-loading');
+        if (!el) {
+            if (!byId('tv-chart-loading-styles')) {
+                const st = document.createElement('style');
+                st.id = 'tv-chart-loading-styles';
+                st.textContent = '.tv-chart-loading{position:absolute;inset:0;z-index:26;display:none;align-items:center;justify-content:center;' +
+                    'flex-direction:column;gap:10px;background:var(--bg-main,#0B0C11);color:var(--text-secondary,#A8A8A8);font-size:12.5px;}' +
+                    '.tv-chart-loading.open{display:flex;}' +
+                    '.tv-chart-loading .sp{width:26px;height:26px;border-radius:50%;border:3px solid rgba(212,175,55,0.25);' +
+                    'border-top-color:var(--gold,#D4AF37);animation:tvspin .8s linear infinite;}' +
+                    '@keyframes tvspin{to{transform:rotate(360deg)}}';
+                document.head.appendChild(st);
+            }
+            el = document.createElement('div');
+            el.id = 'tv-chart-loading';
+            el.className = 'tv-chart-loading';
+            el.innerHTML = '<div class="sp"></div><div class="tx"></div>';
+            pane.appendChild(el);
+        }
+        el.querySelector('.tx').textContent = ticker + ' grafiği yükleniyor…';
+        el.classList.add('open');
+    }
+    function hideChartLoading() {
+        const el = byId('tv-chart-loading');
+        if (el) el.classList.remove('open');
     }
 
     // (2 Eylül 2026 — "motor sürekli çalışmıyor, kökten çöz" kök neden
@@ -1078,12 +1134,20 @@ const TradingChart = (() => {
         }
         fetchFundamentals(ticker); // fire-and-forget, chart yüklemesini beklemez
 
-        let candles = await fetchOhlcvCached(ticker);
+        // (24 Eylül 2026 — Madde 8) Veri önbellekte yoksa, beklerken eski
+        // hissenin grafiği görünmesin diye "yükleniyor" katmanı açılıyor.
+        if (!hasUsableHistoryCache(ticker)) showChartLoading(ticker);
+        let candles = await fetchOhlcvCached(ticker, {
+            onRefresh: (fresh) => {
+                if (mySeq === state.loadSeq && state.ticker === ticker && state.dataReady) applyRealDataUpgrade(ticker, fresh);
+            }
+        });
 
         // Bu arada daha yeni bir sembol seçimi başladıysa (kullanıcı hızlıca
         // başka bir sembole tıkladı), bu eski yüklemeyi burada sessizce iptal
         // et — state'e hiçbir şey yazma, en yeni yüklemenin işini bozma.
         if (mySeq !== state.loadSeq) return null;
+        hideChartLoading();
 
         if (!candles || candles.length < 5) {
             // (19 Temmuz 2026, on ikinci oturum) Önceden burada sabit "90"
@@ -1094,6 +1158,19 @@ const TradingChart = (() => {
             // DataController.generateOHLCV kendi güncel TRADING_DAYS (750,
             // ~3 yıllık simüle geçmiş) varsayılanını kullanıyor.
             candles = window.DataController.generateOHLCV(ticker);
+            // (24 Eylül 2026 — Madde 8) Sentetik yedek grafiğin son fiyatı
+            // bilinen gerçek fiyattan çok farklı olunca grafik önce alakasız
+            // bir seviyede görünüp sonra canlı fiyata "zıplıyordu". Gerçek
+            // fiyat biliniyorsa sentetik seri ona ölçekleniyor.
+            const anchorPrice = cachedHint && typeof cachedHint.price === 'number' && cachedHint.price > 0 ? cachedHint.price : null;
+            const lastSynth = candles.length ? candles[candles.length - 1].close : null;
+            if (anchorPrice && lastSynth > 0) {
+                const k = anchorPrice / lastSynth;
+                candles = candles.map(c => Object.assign({}, c, {
+                    open: +(c.open * k).toFixed(2), high: +(c.high * k).toFixed(2),
+                    low: +(c.low * k).toFixed(2), close: +(c.close * k).toFixed(2)
+                }));
+            }
             state.dailyDataIsSynthetic = true;
             // (2 Eylül 2026) Kalıcı olarak sentetikte takılı kalmamak için
             // arka planda gerçek veriyi periyodik olarak tekrar dene — bkz.

@@ -504,7 +504,25 @@ def get_data(ticker: str, interval: str = "1d"):
         # normalize ediyoruz.
         if "Datetime" in hist.columns and "Date" not in hist.columns:
             hist = hist.rename(columns={"Datetime": "Date"})
+        # (24 Eylül 2026 — Word listesi Madde 8 KÖK NEDENİ) Yahoo artık bazı
+        # günlerde (ör. seans içindeki bugünün satırı, temettü/bölünme
+        # satırları) fiyat sütunları BOŞ (NaN) bir satır döndürüyor. NaN
+        # JSON'a çevrilemediği için bu uç nokta HER sembolde 500 veriyordu
+        # ("Out of range float values are not JSON compliant: nan") — site de
+        # gerçek geçmiş yerine SENTETİK (uydurma) grafik gösteriyordu: hisse
+        # değiştirince grafik geç geliyor, önce alakasız bir fiyat görünüp
+        # sonra canlı fiyata zıplıyordu. Fiyatı eksik satırlar atılıyor,
+        # kalan eksik değerler (ör. hacim) null olarak yazılıyor.
+        price_cols = [c for c in ("Open", "High", "Low", "Close") if c in hist.columns]
+        if price_cols:
+            hist = hist.dropna(subset=price_cols)
+        if hist.empty:
+            raise ValueError("No historical data found for this ticker")
         data = hist.to_dict(orient="records")
+        for record in data:
+            for k, v in list(record.items()):
+                if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))):
+                    record[k] = None
 
         # Convert Timestamp values to string for serialization. Gün-içi
         # barlar tz-aware (borsa saat dilimine, Europe/Istanbul'a
