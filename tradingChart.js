@@ -458,6 +458,7 @@ const TradingChart = (() => {
         chart.subscribeClick(handleChartSignalClick);
 
         setupDrawCanvas();
+        startDrawingViewportWatcher();
         setupToolbar();
         setupChartTypeMenu();
         setupHeaderMenu();
@@ -3601,6 +3602,157 @@ const TradingChart = (() => {
        DRAWING TOOLS (custom canvas overlay)
        ════════════════════════════════════════════════ */
 
+    /* ── (24 Eylül 2026 — Word listesi Madde 7) "Grafik oynarken Fibonacci
+       sabit kalıyor" KÖK NEDEN DÜZELTMESİ ─────────────────────────────────
+       Çizim katmanı (Fibonacci, trend çizgisi vb.) önceden SADECE zaman
+       ekseni kaydırıldığında/yakınlaştırıldığında, pencere boyutu
+       değiştiğinde ve sembol değiştiğinde yeniden çiziliyordu. Ama fiyat
+       (dikey) ekseni başka yollarla da değişiyor ve Lightweight Charts
+       bunlar için HİÇBİR olay yayınlamıyor:
+         - canlı fiyat tikiyle yeni bir tepe/dip oluşunca otomatik ölçek
+           (autoScale) fiyat eksenini genişletiyor,
+         - kullanıcı sağdaki fiyat eksenini fareyle sürükleyip dikey
+           ölçeği değiştiriyor, ya da grafiği yukarı-aşağı kaydırıyor,
+         - log/yüzde ölçeğe geçiş, gösterge eklenip çıkarılması vb.
+       Bu durumlarda mumlar yeni yerine giderken Fibonacci ESKİ piksel
+       konumunda "donuk" kalıyordu (kullanıcının fotoğrafındaki durum).
+       Çözüm: her animasyon karesinde, fiyat/zaman ekseninin piksel
+       eşlemesinin küçük bir "imzası" (iki referans fiyatın y'si + görünür
+       aralık + tuval boyutu) karşılaştırılıyor; değiştiyse çizimler
+       yeniden çiziliyor. Ekranda çizim yoksa hiçbir şey yapmıyor; imza
+       hesabı 3-4 hafif çağrı olduğundan performansa etkisi yok, sekme
+       arka plandayken tarayıcı zaten animasyon karelerini durduruyor. */
+    let lastViewportSig = '';
+    function drawingViewportSignature() {
+        if (!chart || !candleSeries || !drawCanvas) return '';
+        let ref = 1;
+        if (state.candles.length) ref = state.candles[state.candles.length - 1].close || 1;
+        const y1 = candleSeries.priceToCoordinate(ref);
+        const y2 = candleSeries.priceToCoordinate(ref * 0.9);
+        const range = chart.timeScale().getVisibleLogicalRange();
+        const x0 = chart.timeScale().logicalToCoordinate(0);
+        const f = (v) => (v === null || v === undefined || isNaN(v)) ? 'n' : Math.round(v * 10);
+        return [f(y1), f(y2), range ? f(range.from) : 'n', range ? f(range.to) : 'n', f(x0),
+            drawCanvas.width, drawCanvas.height].join('|');
+    }
+    function hasSomethingToDraw() {
+        return (!state.drawingsHidden && state.drawings.length > 0) || !!state.pendingShape || !!state.measureShape;
+    }
+    function startDrawingViewportWatcher() {
+        const tick = () => {
+            requestAnimationFrame(tick);
+            if (!drawCtx || !hasSomethingToDraw()) return;
+            let sig = '';
+            try { sig = drawingViewportSignature(); } catch (e) { return; }
+            if (sig !== lastViewportSig) redrawDrawings();
+        };
+        requestAnimationFrame(tick);
+    }
+
+    /* ── (24 Eylül 2026) SEÇİLİ ÇİZİM ARAÇ ÇUBUĞU — TradingView'deki gibi ──
+       Fibonacci/çizim AYARLARI önceden sadece çizime ÇİFT TIKLAYINCA ya da
+       SAĞ TIK → "Ayarlar…" ile açılıyordu — kullanıcılar bu paneli hiç
+       bulamıyordu (telefonda/tablette çift tık ve sağ tık zaten yok). Artık
+       bir çizim seçilince (yeni çizilen çizim de otomatik seçiliyor) grafiğin
+       üst ortasında görünür bir araç çubuğu çıkıyor: çizimin adı, hızlı renk,
+       ⚙ Ayarlar, Çoğalt, Sil. HTML/CSS ayar paneliyle aynı gerekçeyle JS'ten
+       üretiliyor (bu dosya iki ayrı sitede kullanılıyor). */
+    let drawBarShownFor = null;
+    function toolLabelFor(type) {
+        for (const g of TOOL_GROUPS) {
+            const t = (g.tools || []).find(tt => tt.id === type);
+            if (t) return t.label;
+        }
+        return 'Çizim';
+    }
+    function ensureDrawSelectionBar() {
+        let bar = byId('tv-draw-selbar');
+        if (bar) return bar;
+        const pane = chartContainer && chartContainer.parentElement;
+        if (!pane) return null;
+        if (!byId('tv-draw-selbar-styles')) {
+            const st = document.createElement('style');
+            st.id = 'tv-draw-selbar-styles';
+            st.textContent = [
+                '.tv-selbar{position:absolute;top:38px;left:50%;transform:translateX(-50%);z-index:30;display:none;',
+                'align-items:center;gap:4px;padding:4px 6px;background:var(--bg-panel,#12131A);',
+                'border:1px solid var(--gold-border,rgba(212,175,55,0.35));border-radius:8px;',
+                'box-shadow:0 8px 22px rgba(0,0,0,0.45);font-family:var(--font-sans,system-ui,sans-serif);white-space:nowrap;}',
+                '.tv-selbar.open{display:flex;}',
+                '.tv-selbar-name{font-size:11px;font-weight:700;color:var(--gold,#D4AF37);padding:0 6px 0 2px;',
+                'border-right:1px solid var(--gold-border,rgba(212,175,55,0.25));margin-right:2px;}',
+                '.tv-selbar button{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;line-height:1;padding:6px 8px;',
+                'border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text-primary,#E8E8E8);cursor:pointer;}',
+                '.tv-selbar button:hover{border-color:var(--gold-border,rgba(212,175,55,0.4));color:var(--gold,#D4AF37);}',
+                '.tv-selbar button.tv-selbar-settings{background:var(--gold,#D4AF37);color:var(--text-dark,#111);font-weight:700;}',
+                '.tv-selbar button.tv-selbar-settings:hover{filter:brightness(1.08);color:var(--text-dark,#111);}',
+                '.tv-selbar button.tv-selbar-del:hover{color:var(--danger,#EF5350);border-color:var(--danger,#EF5350);}',
+                '.tv-selbar input[type=color]{width:24px;height:22px;padding:0;border:1px solid var(--gold-border,rgba(212,175,55,0.35));',
+                'border-radius:5px;background:none;cursor:pointer;}',
+                '@media (max-width:640px){.tv-selbar-name{display:none;}.tv-selbar button{padding:8px 9px;}}'
+            ].join('');
+            document.head.appendChild(st);
+        }
+        bar = document.createElement('div');
+        bar.id = 'tv-draw-selbar';
+        bar.className = 'tv-selbar';
+        bar.innerHTML =
+            '<span class="tv-selbar-name"></span>' +
+            '<input type="color" class="tv-selbar-color" title="Renk">' +
+            '<button type="button" class="tv-selbar-settings" data-sb="settings" title="Ayarlar (çizime çift tıklayarak da açılır)">⚙ Ayarlar</button>' +
+            '<button type="button" data-sb="dup" title="Çizimi çoğalt">⧉ Çoğalt</button>' +
+            '<button type="button" class="tv-selbar-del" data-sb="del" title="Çizimi sil (Delete tuşu)">🗑 Sil</button>';
+        // Grafiğe tıklama/sürükleme olarak algılanmasın
+        ['mousedown', 'touchstart', 'pointerdown', 'dblclick', 'contextmenu'].forEach(ev =>
+            bar.addEventListener(ev, (e) => e.stopPropagation()));
+        bar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const btn = e.target.closest('[data-sb]');
+            if (!btn) return;
+            const idx = state.selectedDrawingIndex;
+            if (btn.dataset.sb === 'settings') {
+                const r = bar.getBoundingClientRect();
+                openDrawSettings(idx, r.left, r.bottom + 6);
+            } else if (btn.dataset.sb === 'dup') {
+                if (copySelectedDrawing()) pasteDrawing();
+            } else if (btn.dataset.sb === 'del') {
+                deleteSelectedDrawing();
+            }
+        });
+        const colorInput = bar.querySelector('.tv-selbar-color');
+        colorInput.addEventListener('input', () => {
+            const shape = state.drawings[state.selectedDrawingIndex];
+            if (!shape || isFibShape(shape.type)) return;
+            getShapeStyle(shape).color = colorInput.value;
+            redrawDrawings();
+        });
+        pane.appendChild(bar);
+        return bar;
+    }
+    function updateDrawSelectionBar() {
+        const idx = state.selectedDrawingIndex;
+        const shape = (idx >= 0 && !state.drawingsHidden) ? state.drawings[idx] : null;
+        let bar = byId('tv-draw-selbar');
+        if (!shape) {
+            if (bar && drawBarShownFor !== null) { bar.classList.remove('open'); drawBarShownFor = null; }
+            return;
+        }
+        if (drawBarShownFor === shape) return;
+        bar = bar || ensureDrawSelectionBar();
+        if (!bar) return;
+        drawBarShownFor = shape;
+        bar.querySelector('.tv-selbar-name').textContent = toolLabelFor(shape.type);
+        const colorInput = bar.querySelector('.tv-selbar-color');
+        const isFib = isFibShape(shape.type);
+        colorInput.style.display = isFib ? 'none' : '';
+        if (!isFib) {
+            const c = getShapeStyle(shape).color;
+            colorInput.value = (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) ? c : '#D4AF37';
+        }
+        bar.querySelector('[data-sb="del"]').style.display = state.drawingsLocked ? 'none' : '';
+        bar.classList.add('open');
+    }
+
     function setupDrawCanvas() {
         drawCanvas = byId('tv-draw-overlay');
         if (!drawCanvas) return;
@@ -4389,8 +4541,16 @@ const TradingChart = (() => {
         return virtualTimeToIndex(time);
     }
 
+    let lastAutoSelectedShape = null;
     function finishDrawing() {
         selectTool('cursor');
+        // (24 Eylül 2026) TradingView'deki gibi: yeni çizilen çizim seçili
+        // gelir, üstteki araç çubuğu (⚙ Ayarlar vb.) hemen görünür.
+        const last = state.drawings[state.drawings.length - 1];
+        if (last && last !== lastAutoSelectedShape && !state.drawingsLocked) {
+            state.selectedDrawingIndex = state.drawings.length - 1;
+        }
+        lastAutoSelectedShape = last || null;
         redrawDrawings();
     }
 
@@ -4858,6 +5018,8 @@ const TradingChart = (() => {
 
         renderSessionCloseMarker(plot);
         drawCtx.restore();
+        try { lastViewportSig = drawingViewportSignature(); } catch (e) { lastViewportSig = ''; }
+        updateDrawSelectionBar();
     }
 
     // Thin dashed vertical marker + label at the most recent bar, shown only
@@ -6142,6 +6304,8 @@ const TradingChart = (() => {
             ? { time: state.candles[i].date, close: state.candles[i].close, high: state.candles[i].high, low: state.candles[i].low }
             : null,
         debugAddDrawing: (shape) => { state.drawings.push(shape); redrawDrawings(); return state.drawings.length - 1; },
+        // (24 Eylül 2026 — Madde 7 doğrulaması) Bir fiyatın o anki piksel y'si.
+        debugPriceToY: (price) => (candleSeries ? candleSeries.priceToCoordinate(price) : null),
         debugOpenDrawSettings: (index, x, y) => openDrawSettings(index, x != null ? x : 240, y != null ? y : 120),
         debugGetShapeStyle: (index) => state.drawings[index]
             ? JSON.parse(JSON.stringify(getShapeStyle(state.drawings[index])))
