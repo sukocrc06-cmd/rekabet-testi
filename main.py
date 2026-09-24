@@ -33,6 +33,7 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 # dosyasındaki StrategyEngine sınıfı da aynı sebeple tamamen kaldırıldı.
 import asyncio
 import random
+import threading
 
 # (28 Ağustos 2026 — Yahoo Finance engellemesi KÖK NEDEN düzeltmesi, dördüncü
 # hız turu devamı; AYNI GÜN 8. tur sonunda GERİ ALINDI, bkz. not aşağıda)
@@ -234,19 +235,62 @@ def _friendly_fetch_error(exc: Exception) -> str:
     return f"Data fetch timed out or failed: {str(exc)}"
 
 
+# (24 Eylül 2026 — "20 kişi aynı anda" yük düzeltmesi: SINGLE-FLIGHT)
+# Önbellek süresi dolduğu anda (ya da yarışma başında herkes siteyi aynı anda
+# açtığında) AYNI veri için gelen eşzamanlı isteklerin HEPSİ önbellekte veri
+# bulamayıp Yahoo'ya AYRI AYRI gidiyordu. Test: 20 eşzamanlı istek → Yahoo'ya
+# 20 istek (her biri ayrı). Bu tam olarak Render'ın paylaşımlı IP'sinin
+# Yahoo'dan geçici engel (rate-limit) yemesine yol açan desen. Artık her
+# anahtar için bir kilit var: ilk istek veriyi çeker, aynı anda gelen diğerleri
+# onu bekleyip önbellekten okur → 20 istek = Yahoo'ya 1 istek. Çekme başarısız
+# olursa bekleyenler aynı başarısız isteği sırayla tekrar tekrar (her biri 15
+# sn'ye kadar) denemesin diye hata kısa süreliğine hatırlanır.
+_SINGLE_FLIGHT_FAIL_TTL_SEC = 15
+_single_flight_locks = {}
+_single_flight_guard = threading.Lock()
+_single_flight_failures = {}  # key -> (timestamp, exception)
+
+
+def _single_flight_lock(key):
+    with _single_flight_guard:
+        lk = _single_flight_locks.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _single_flight_locks[key] = lk
+        return lk
+
+
+def _recent_failure(key):
+    failed = _single_flight_failures.get(key)
+    if failed and (time.time() - failed[0]) < _SINGLE_FLIGHT_FAIL_TTL_SEC:
+        return failed[1]
+    return None
+
+
 def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: str, timeout: int = 10):
     key = (formatted, period, interval)
-    now = time.time()
     cached = _history_cache.get(key)
-    if cached and (now - cached[0]) < _HISTORY_CACHE_TTL_SEC:
+    if cached and (time.time() - cached[0]) < _HISTORY_CACHE_TTL_SEC:
         return cached[1]
-    df = _yf_call_with_backoff(
-        lambda: stock.history(period=period, interval=interval, timeout=timeout),
-        label=f"history({formatted})"
-    )
-    if df is not None and not df.empty:
-        _history_cache[key] = (now, df)
-    return df
+    with _single_flight_lock(("history",) + key):
+        # Kilidi beklerken başka bir istek veriyi çekmiş olabilir.
+        cached = _history_cache.get(key)
+        if cached and (time.time() - cached[0]) < _HISTORY_CACHE_TTL_SEC:
+            return cached[1]
+        recent = _recent_failure(("history",) + key)
+        if recent is not None:
+            raise recent
+        try:
+            df = _yf_call_with_backoff(
+                lambda: stock.history(period=period, interval=interval, timeout=timeout),
+                label=f"history({formatted})"
+            )
+        except Exception as e:
+            _single_flight_failures[("history",) + key] = (time.time(), e)
+            raise
+        if df is not None and not df.empty:
+            _history_cache[key] = (time.time(), df)
+        return df
 
 
 class QuotesRequest(BaseModel):
@@ -518,7 +562,24 @@ def get_fundamentals(ticker: str):
         cached = _fundamentals_cache.get(formatted)
         if cached and (now - cached[0]) < _FUNDAMENTALS_CACHE_TTL_SEC:
             return {"ticker": ticker, **cached[1], "cached": True}
+        # (24 Eylül 2026) single-flight — bkz. _cached_history üzerindeki not.
+        return _fetch_fundamentals_single_flight(ticker, formatted)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": _friendly_fetch_error(e)}
+        )
 
+
+def _fetch_fundamentals_single_flight(ticker: str, formatted: str):
+    with _single_flight_lock(("fundamentals", formatted)):
+        now = time.time()
+        cached = _fundamentals_cache.get(formatted)
+        if cached and (now - cached[0]) < _FUNDAMENTALS_CACHE_TTL_SEC:
+            return {"ticker": ticker, **cached[1], "cached": True}
+        recent_empty = _single_flight_failures.get(("fundamentals", formatted))
+        if recent_empty and (now - recent_empty[0]) < _SINGLE_FLIGHT_FAIL_TTL_SEC:
+            return {"ticker": ticker, **recent_empty[1], "cached": True}
         stock = yf.Ticker(formatted, session=session)
         info = {}
         try:
@@ -576,12 +637,9 @@ def get_fundamentals(ticker: str):
         has_any_real_value = any(v is not None for v in data.values())
         if has_any_real_value:
             _fundamentals_cache[formatted] = (now, data)
+        else:
+            _single_flight_failures[("fundamentals", formatted)] = (now, data)
         return {"ticker": ticker, **data, "cached": False}
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": _friendly_fetch_error(e)}
-        )
 
 def format_ticker(ticker: str) -> str:
     ticker = ticker.upper()
@@ -668,6 +726,15 @@ def get_quotes(request: QuotesRequest):
     now = time.time()
     if _quote_cache["tickers_key"] == cache_key and (now - _quote_cache["ts"]) < _QUOTE_CACHE_TTL_SEC:
         return {"quotes": _quote_cache["data"], "prevClose": _quote_cache.get("prevClose", {}), "asOf": _quote_cache["ts"], "cached": True}
+    # (24 Eylül 2026) single-flight — bkz. _cached_history üzerindeki not.
+    with _single_flight_lock(("quotes",)):
+        now = time.time()
+        if _quote_cache["tickers_key"] == cache_key and (now - _quote_cache["ts"]) < _QUOTE_CACHE_TTL_SEC:
+            return {"quotes": _quote_cache["data"], "prevClose": _quote_cache.get("prevClose", {}), "asOf": _quote_cache["ts"], "cached": True}
+        return _fetch_quotes_locked(tickers, cache_key, now)
+
+
+def _fetch_quotes_locked(tickers, cache_key, now):
 
     formatted_map = {}
     for t in tickers:
@@ -763,6 +830,15 @@ def get_market_ticker():
     now = time.time()
     if _market_ticker_cache["data"] and (now - _market_ticker_cache["ts"]) < _MARKET_TICKER_CACHE_TTL_SEC:
         return {"items": _market_ticker_cache["data"], "asOf": _market_ticker_cache["ts"], "cached": True}
+    # (24 Eylül 2026) single-flight — bkz. _cached_history üzerindeki not.
+    with _single_flight_lock(("market-ticker",)):
+        now = time.time()
+        if _market_ticker_cache["data"] and (now - _market_ticker_cache["ts"]) < _MARKET_TICKER_CACHE_TTL_SEC:
+            return {"items": _market_ticker_cache["data"], "asOf": _market_ticker_cache["ts"], "cached": True}
+        return _fetch_market_ticker_locked(now)
+
+
+def _fetch_market_ticker_locked(now):
 
     symbols = [it["symbol"] for it in _MARKET_TICKER_ITEMS]
     items_out = []

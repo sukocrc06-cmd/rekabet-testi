@@ -1712,7 +1712,11 @@
          çağırıyor — yani bu deferred scriptlerin hepsi çalışmayı bitirmeden
          o kod hiç tetiklenmiyor, aralarındaki bağımlılık sırası bozulmuyor. -->
     <!-- TradingView Lightweight Charts (used by the main trading chart) -->
-    <script defer src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- (24 Eylül 2026) unpkg.com yerine cdn.jsdelivr.net: aynı npm paketi ve
+         sürümü (4.1.3), birebir aynı dosya — jsDelivr çoklu CDN altyapısıyla
+         daha hızlı ve daha az kesinti yaşıyor. Grafik kütüphanesi yüklenemezse
+         hiçbir grafik çizilemediği için tek kritik dış bağımlılık bu. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
          getirildi) 17 Ağustos'ta "bağımsız kopya" kararıyla kaldırılmış
          olan Firebase SDK script'leri (finteclubBridge.js'in FinTeClub ile
