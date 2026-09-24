@@ -400,25 +400,64 @@ const TradingEngine = (() => {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) {
-                const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed.balance === 'number') {
-                    // Eski (17 Temmuz 2026 yedinci oturumdan önce) kaydedilmiş
-                    // portföylerde pendingOrders alanı yok — geriye dönük
-                    // uyumluluk için varsayılan boş dizi ile tamamla.
-                    if (!Array.isArray(parsed.pendingOrders)) parsed.pendingOrders = [];
-                    // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Daha eski
-                    // kaydedilmiş portföylerde VİOP'a ait ayrı defter alanları
-                    // hiç yok — geriye dönük uyumluluk için boş varsayılanlarla
-                    // tamamlanıyor. Böylece önceki oturumlardan gelen bir
-                    // portföy (yalnızca spot pozisyonlar içeren) hatasız yüklenir.
-                    if (!parsed.viopPositions || typeof parsed.viopPositions !== 'object' || Array.isArray(parsed.viopPositions)) parsed.viopPositions = {};
-                    if (!Array.isArray(parsed.viopHistory)) parsed.viopHistory = [];
-                    if (!Array.isArray(parsed.viopPendingOrders)) parsed.viopPendingOrders = [];
-                    return parsed;
-                }
+                const parsed = normalizePortfolioShape(JSON.parse(raw));
+                if (parsed) return parsed;
             }
         } catch (e) { /* ignore corrupt storage */ }
         return { balance: DEFAULT_BALANCE, positions: {}, history: [], pendingOrders: [], viopPositions: {}, viopHistory: [], viopPendingOrders: [] };
+    }
+
+    // (24 Eylül 2026 — çok cihazlı senkron yeniden yapılanması) loadPortfolio()'nun
+    // eskiden kendi içinde yaptığı geriye dönük uyumluluk tamamlaması ayrı bir
+    // fonksiyona alındı ki başka bir cihazdan gelen portföy de (bkz.
+    // applySyncedPortfolio) AYNI şekilde tamamlanabilsin. Geçersizse null döner.
+    function normalizePortfolioShape(parsed) {
+        if (!parsed || typeof parsed !== 'object' || typeof parsed.balance !== 'number') return null;
+        // Eski (17 Temmuz 2026 yedinci oturumdan önce) kaydedilmiş
+        // portföylerde pendingOrders alanı yok — geriye dönük
+        // uyumluluk için varsayılan boş dizi ile tamamla.
+        if (!parsed.positions || typeof parsed.positions !== 'object' || Array.isArray(parsed.positions)) parsed.positions = {};
+        if (!Array.isArray(parsed.history)) parsed.history = [];
+        if (!Array.isArray(parsed.pendingOrders)) parsed.pendingOrders = [];
+        // (29 Temmuz 2026 — Madde 11 "VİOP ayrı panel") Daha eski
+        // kaydedilmiş portföylerde VİOP'a ait ayrı defter alanları
+        // hiç yok — geriye dönük uyumluluk için boş varsayılanlarla
+        // tamamlanıyor. Böylece önceki oturumlardan gelen bir
+        // portföy (yalnızca spot pozisyonlar içeren) hatasız yüklenir.
+        if (!parsed.viopPositions || typeof parsed.viopPositions !== 'object' || Array.isArray(parsed.viopPositions)) parsed.viopPositions = {};
+        if (!Array.isArray(parsed.viopHistory)) parsed.viopHistory = [];
+        if (!Array.isArray(parsed.viopPendingOrders)) parsed.viopPendingOrders = [];
+        return parsed;
+    }
+
+    // (24 Eylül 2026 — çok cihazlı senkron yeniden yapılanması) finteclubBridge.js,
+    // başka bir cihazda (ör. telefonda) yapılan bir işlem bulut üzerinden bu
+    // cihaza ulaştığında bunu çağırır. ÖNCEDEN köprü localStorage'ı değiştirip
+    // SAYFAYI YENİLİYORDU (location.reload) — iki cihaz aynı anda açıkken bu,
+    // her senkronda ekranın baştan yüklenmesine ve açık formların/grafik
+    // ayarlarının kaybolmasına yol açıyordu. Artık portföy yerinde değiştirilip
+    // sadece ilgili paneller yeniden çiziliyor (resetPortfolio() ile AYNI
+    // desen). BİLEREK savePortfolio() ÇAĞRILMIYOR: o, köprüye "bu cihazda
+    // değişiklik var, buluta yaz" sinyali gönderir — buluttan gelen veriyi
+    // geri buluta yazıp gereksiz bir yazma/yankı döngüsü başlatırdı.
+    function applySyncedPortfolio(incoming) {
+        let next;
+        try { next = normalizePortfolioShape(JSON.parse(JSON.stringify(incoming))); } catch (e) { next = null; }
+        if (!next) return false;
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (e) { /* quota / private mode */ }
+        // init() henüz çalışmadıysa (portfolio null) sadece depoya yazmak
+        // yeterli — init() birazdan loadPortfolio() ile bunu okuyacak.
+        if (portfolio === null) return true;
+        portfolio = next;
+        try {
+            renderPositions();
+            renderOrders();
+            renderAccountSummary();
+            renderPendingOcoOrders();
+            renderPerformanceTab();
+            sampleEquity();
+        } catch (e) { console.warn('Senkronize portföy çizilirken hata:', e); }
+        return true;
     }
 
     function savePortfolio() {
@@ -5072,12 +5111,12 @@ const TradingEngine = (() => {
         if (window.FinteClubBridge && typeof window.FinteClubBridge.checkForNewerCloudRecordSync === 'function') {
             try {
                 const freshness = await window.FinteClubBridge.checkForNewerCloudRecordSync();
-                // checkForNewerCloudRecordSync() bulutta daha yeni bir kayıt
-                // bulursa kendi içinde zaten bir toast gösterip 900ms sonra
-                // sayfayı yeniliyor (applyCloudPortfolioRecordIfNewer) — burada
-                // AYRICA bir toast göstermeye gerek yok, sadece export'u iptal
-                // edip yeniden yüklenecek sayfaya bırakıyoruz.
-                if (freshness && freshness.hasNewer) return;
+                // (24 Eylül 2026) Bulutta daha yeni bir kayıt varsa köprü onu
+                // artık SAYFA YENİLEMEDEN, anında bu cihazın portföyüne
+                // uyguluyor (applySyncedPortfolio) — yani export aşağıda
+                // zaten TAZE veriyle devam edebilir. Sadece eski yedek yol
+                // (sayfa yenileme) devreye girdiyse export'u bırakıyoruz.
+                if (freshness && freshness.reloading) return;
             } catch (e) {
                 console.warn('Dışa aktarma öncesi bulut tazelik kontrolü başarısız, yerel veriyle devam ediliyor.', e);
             }
@@ -5171,7 +5210,7 @@ const TradingEngine = (() => {
         if (window.FinteClubBridge && typeof window.FinteClubBridge.checkForNewerCloudRecordSync === 'function') {
             try {
                 const freshness = await window.FinteClubBridge.checkForNewerCloudRecordSync();
-                if (freshness && freshness.hasNewer) return;
+                if (freshness && freshness.reloading) return;
             } catch (e) {
                 console.warn('Dışa aktarma öncesi bulut tazelik kontrolü başarısız, yerel veriyle devam ediliyor.', e);
             }
@@ -5894,6 +5933,16 @@ const TradingEngine = (() => {
         }
         priceProfiles = buildPriceProfiles();
         portfolio = loadPortfolio();
+        // (24 Eylül 2026) Aynı tarayıcıda siteyi İKİ SEKMEDE açan biri için:
+        // bir sekmede yapılan işlem localStorage'a yazılınca diğer sekme de
+        // bellekteki portföyünü hemen günceller. Önceden ikinci sekme eski
+        // bellek kopyasıyla işlem yapıp birinci sekmenin işlemini sessizce
+        // eziyordu. ('storage' olayı sadece DİĞER sekmelerde tetiklenir ve
+        // aynı değer tekrar yazılınca tetiklenmez — döngü oluşmaz.)
+        window.addEventListener('storage', (e) => {
+            if (e.key !== STORAGE_KEY || !e.newValue) return;
+            try { applySyncedPortfolio(JSON.parse(e.newValue)); } catch (err) { /* bozuk veri — yok say */ }
+        });
         priceAlerts = loadAlerts();
         indicatorAlerts = loadIndicatorAlerts();
         watchlistSymbols = loadWatchlistSymbols();
@@ -6003,6 +6052,9 @@ const TradingEngine = (() => {
         closePosition,
         resetPortfolio,
         setBalance,
+        // (24 Eylül 2026) finteclubBridge.js başka bir cihazdan gelen portföyü
+        // sayfa yenilemeden uygulasın diye — bkz. applySyncedPortfolio().
+        applySyncedPortfolio,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
         // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
         // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki

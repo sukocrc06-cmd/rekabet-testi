@@ -137,6 +137,28 @@ service cloud.firestore {
       allow delete: if isFinteClubAdmin();
     }
 
+    // (24 Eylül 2026 — çok cihazlı senkron yeniden yapılanması) Her yarışmacının
+    // KENDİ portföy belgesi: oplab_portfolios/{e-posta}. Yukarıdaki
+    // oplab_user_portfolios notunda "tam çözüm" olarak tarif edilen yapı bu:
+    // belge kimliği Firebase Authentication e-postası olduğundan, bir
+    // yarışmacı SADECE kendi belgesini oluşturup güncelleyebiliyor —
+    // başkasının portföyüne yazamaz. Tek bir belgeyi okumak herkese açık
+    // (tek belge okuma — get); ama koleksiyonu LİSTELEMEK (herkesin e-posta
+    // ve portföyünü toplu çekmek) sadece admin girişine açık. Boyut ve alan
+    // sayısı makul sınırlarla tutuluyor. Silme yalnızca admin'e (ve Admin SDK
+    // kullanan api/delete-user.js'e — kuralları zaten atlar) ait.
+    match /oplab_portfolios/{emailId} {
+      allow get: if true;
+      allow list: if isFinteClubAdmin();
+      allow create, update: if request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == emailId
+        && request.resource.data.email == emailId
+        && request.resource.data.keys().size() < 20
+        && request.resource.data.portfolio is map;
+      allow delete: if isFinteClubAdmin();
+    }
+
     // ── finteclub/ altında tanımlı olmayan her şey ──────────────────────
     // (Örn. biri konsoldan yeni, rastgele bir belge oluşturmaya çalışırsa.)
     // Varsayılan olarak KAPALI — sadece admin girişi yapmış biri yazabilir.
