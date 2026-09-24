@@ -318,7 +318,7 @@ const TradingChart = (() => {
         chartType: 'candles',
         showVolume: false,
         activeTool: 'cursor',
-        magnetMode: false,
+        magnetMode: loadMagnetMode(), // 'off' | 'weak' | 'strong' (24 Eylül 2026)
         drawingsLocked: false,
         drawingsHidden: false,
         drawings: [],          // committed shapes
@@ -1035,6 +1035,10 @@ const TradingChart = (() => {
         // doesn't wipe a user's trend lines / fib levels on that symbol.
         if (state.ticker && state.ticker !== ticker) {
             drawingsBySymbol[state.ticker] = state.drawings;
+            // (24 Eylül 2026) Giden sembolün kaydedilmemiş son değişikliği
+            // kalıcı depoya yazılır; yarım kalan sürükleme iptal edilir
+            // (aksi halde sürükleme yeni sembolün dizisine yazardı).
+            commitAndCancelDrawingInteractions();
         }
 
         state.ticker = ticker;
@@ -1159,8 +1163,16 @@ const TradingChart = (() => {
         const prev = candles.length > 1 ? candles[candles.length - 2] : last;
         setSymbolHeader(ticker, last ? last.close : null, prev ? prev.close : null);
 
-        state.drawings = drawingsBySymbol[ticker] ? drawingsBySymbol[ticker].slice() : [];
-        state.selectedDrawingIndex = -1;
+        // (24 Eylül 2026) Çizimler artık kalıcı depodan (sayfa yenilense /
+        // başka cihazdan girilse de) yükleniyor — bkz. loadDrawingsForSymbol.
+        // Yükleme sürerken eski grafikte yapılan düzenleme de kaydedilsin.
+        commitAndCancelDrawingInteractions();
+        if (historyTicker !== ticker) {
+            state.drawings = loadDrawingsForSymbol(ticker);
+            state.selectedDrawingIndex = -1;
+            closeDrawSettings();
+            resetDrawingHistory(ticker);
+        }
         // Bir önceki sembolün mum indekslerine göre hesaplanmış geçici ölçüm
         // yeni sembolde anlamsız kalır — sembol değişince temizleniyor.
         state.measureShape = null;
@@ -3041,6 +3053,8 @@ const TradingChart = (() => {
         last.close = price;
         if (price > last.high) last.high = price;
         if (price < last.low) last.low = price;
+        // (24 Eylül 2026) Trend/ışın çizgisi alarmları — bkz. evaluateDrawingAlerts.
+        try { evaluateDrawingAlerts(price); } catch (e) { console.warn('[Çizim alarmı] değerlendirilemedi', e); }
 
         if (state.chartType === 'heikin_ashi') {
             // Heikin Ashi bars are derived from the whole series (each bar
@@ -3096,6 +3110,10 @@ const TradingChart = (() => {
         const dates = state.candles.map(c => c.date);
         const ind = state.indicators;
 
+        // (24 Eylül 2026) Gösterge etiketinden "Gizle" denen göstergeler
+        // etikette kalır ama grafiğe çizilmez (TradingView davranışı).
+        const onChart = (key) => !isOverlayHidden(key);
+        const defOf = (key) => LEGEND_CHIP_DEFS.find(d => d.key === key);
         const vis = {
             sma20: checked('chk-sma20'),
             sma50: checked('chk-sma50'),
@@ -3122,23 +3140,32 @@ const TradingChart = (() => {
             overlaySeries[key] = series;
         };
 
-        if (vis.sma20)  addLine('sma20', ind.sma20, COLORS.sma20);
-        if (vis.sma50)  addLine('sma50', ind.sma50, COLORS.sma50);
-        if (vis.sma200) addLine('sma200', ind.sma200, COLORS.sma200);
-        if (vis.ema9)   addLine('ema9', ind.ema9, COLORS.ema9, { lineStyle: LightweightCharts.LineStyle.Dashed });
-        if (vis.ema21)  addLine('ema21', ind.ema21, COLORS.ema21, { lineStyle: LightweightCharts.LineStyle.Dashed });
-        if (vis.wma20)  addLine('wma20', ind.wma20, COLORS.wma20);
-        if (vis.vwap)   addLine('vwap', ind.vwap, COLORS.vwap, { lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 2 });
+        // (24 Eylül 2026) Periyot/renk artık gösterge etiketinden ayarlanabiliyor.
+        const ma = (key, fallback) => overlayMaValues(defOf(key), fallback);
+        if (vis.sma20 && onChart('sma20'))   addLine('sma20', ma('sma20', ind.sma20), overlayColor('sma20', COLORS.sma20));
+        if (vis.sma50 && onChart('sma50'))   addLine('sma50', ma('sma50', ind.sma50), overlayColor('sma50', COLORS.sma50));
+        if (vis.sma200 && onChart('sma200')) addLine('sma200', ma('sma200', ind.sma200), overlayColor('sma200', COLORS.sma200));
+        if (vis.ema9 && onChart('ema9'))     addLine('ema9', ma('ema9', ind.ema9), overlayColor('ema9', COLORS.ema9), { lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (vis.ema21 && onChart('ema21'))   addLine('ema21', ma('ema21', ind.ema21), overlayColor('ema21', COLORS.ema21), { lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (vis.wma20 && onChart('wma20'))   addLine('wma20', ma('wma20', ind.wma20), overlayColor('wma20', COLORS.wma20));
+        if (vis.vwap && onChart('vwap'))     addLine('vwap', ind.vwap, overlayColor('vwap', COLORS.vwap), { lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 2 });
 
-        if (vis.bollinger) {
-            addLine('bbUpper', ind.bollingerUpper, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
-            addLine('bbLower', ind.bollingerLower, COLORS.bbLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+        if (vis.bollinger && onChart('bollinger')) {
+            const bs = overlaySetting('bollinger');
+            let up = ind.bollingerUpper, lo = ind.bollingerLower;
+            if ((bs.period && bs.period !== 20) || (bs.mult && bs.mult !== 2)) {
+                const bb = window.DataController.computeBollingerBands(state.candles.map(c => c.close), bs.period || 20, bs.mult || 2);
+                up = bb.upper; lo = bb.lower;
+            }
+            const bc = overlayColor('bollinger', COLORS.bbLine);
+            addLine('bbUpper', up, bc, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addLine('bbLower', lo, bc, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
         }
 
         // Ichimoku Cloud: 5 çizgi (Senkou A/B, gerçek verilerden hesaplanan
         // ama sahte gelecek bar EKLENMEDEN çizilen bulut dahil — bkz.
         // dataController.js computeIchimoku() yorum bloğu).
-        if (vis.ichimoku && ind.ichimoku) {
+        if (vis.ichimoku && ind.ichimoku && onChart('ichimoku')) {
             addLine('ichiTenkan', ind.ichimoku.tenkan, COLORS.ichimokuTenkan, { lineWidth: 1 });
             addLine('ichiKijun', ind.ichimoku.kijun, COLORS.ichimokuKijun, { lineWidth: 1 });
             addLine('ichiSenkouA', ind.ichimoku.senkouA, COLORS.ichimokuSenkouA, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
@@ -3148,14 +3175,14 @@ const TradingChart = (() => {
 
         // Parabolic SAR: klasik izole-nokta gösterimi yerine ince noktalı
         // çizgi olarak çiziliyor (dürüst basitleştirme — bkz. dataController.js).
-        if (vis.psar && ind.psar) {
-            addLine('psar', ind.psar, COLORS.psar, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, crosshairMarkerVisible: false });
+        if (vis.psar && ind.psar && onChart('psar')) {
+            addLine('psar', ind.psar, overlayColor('psar', COLORS.psar), { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, crosshairMarkerVisible: false });
         }
 
         // Pivot Points: zaman serisi değil, son tamamlanmış bardan hesaplanan
         // yatay destek/direnç seviyeleri — RSI'nin 70/30 çizgileriyle aynı
         // createPriceLine() deseni.
-        if (vis.pivot && ind.pivotPoints && candleSeries) {
+        if (vis.pivot && ind.pivotPoints && candleSeries && onChart('pivot')) {
             const pp = ind.pivotPoints;
             const addPivotLine = (price, title, color) => {
                 if (price === null || price === undefined) return;
@@ -3178,20 +3205,22 @@ const TradingChart = (() => {
         // dataController.js computeSuperTrend() yorum bloğu (dürüst
         // basitleştirme: nokta-bazlı renk API'si yerine null-boşluklu
         // iki çizgi kullanılıyor).
-        if (vis.supertrend && ind.supertrend) {
+        if (vis.supertrend && ind.supertrend && onChart('supertrend')) {
             addLine('supertrendUp', ind.supertrend.up, COLORS.supertrendUp, { lineWidth: 2 });
             addLine('supertrendDown', ind.supertrend.down, COLORS.supertrendDown, { lineWidth: 2 });
         }
 
-        if (vis.keltner && ind.keltner) {
-            addLine('keltnerUpper', ind.keltner.upper, COLORS.keltnerLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
-            addLine('keltnerMiddle', ind.keltner.middle, COLORS.keltnerLine, { lineWidth: 1 });
-            addLine('keltnerLower', ind.keltner.lower, COLORS.keltnerLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+        if (vis.keltner && ind.keltner && onChart('keltner')) {
+            const kc = overlayColor('keltner', COLORS.keltnerLine);
+            addLine('keltnerUpper', ind.keltner.upper, kc, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            addLine('keltnerMiddle', ind.keltner.middle, kc, { lineWidth: 1 });
+            addLine('keltnerLower', ind.keltner.lower, kc, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
         }
 
-        if (vis.donchian && ind.donchian) {
-            addLine('donchianUpper', ind.donchian.upper, COLORS.donchianLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
-            addLine('donchianLower', ind.donchian.lower, COLORS.donchianLine, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+        if (vis.donchian && ind.donchian && onChart('donchian')) {
+            const dcol = overlayColor('donchian', COLORS.donchianLine);
+            addLine('donchianUpper', ind.donchian.upper, dcol, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+            addLine('donchianLower', ind.donchian.lower, dcol, { lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
         }
 
         updateLegend(vis);
@@ -3213,18 +3242,18 @@ const TradingChart = (() => {
 
     // TradingView-style removable chips: label -> {color, checkboxId}
     const LEGEND_CHIP_DEFS = [
-        { key: 'sma20',     label: 'SMA20',      colorKey: 'sma20',  chk: 'chk-sma20' },
-        { key: 'sma50',     label: 'SMA50',      colorKey: 'sma50',  chk: 'chk-sma50' },
-        { key: 'sma200',    label: 'SMA200',     colorKey: 'sma200', chk: 'chk-sma200' },
-        { key: 'ema9',      label: 'EMA9',       colorKey: 'ema9',   chk: 'chk-ema9' },
-        { key: 'ema21',     label: 'EMA21',      colorKey: 'ema21',  chk: 'chk-ema21' },
-        { key: 'wma20',     label: 'WMA20',      colorKey: 'wma20',  chk: 'chk-wma20' },
-        { key: 'bollinger', label: 'BB(20,2)',   colorKey: 'bbLine', chk: 'chk-bollinger' },
+        { key: 'sma20',     label: 'SMA20',      colorKey: 'sma20',  chk: 'chk-sma20', kind: 'sma', period: 20 },
+        { key: 'sma50',     label: 'SMA50',      colorKey: 'sma50',  chk: 'chk-sma50', kind: 'sma', period: 50 },
+        { key: 'sma200',    label: 'SMA200',     colorKey: 'sma200', chk: 'chk-sma200', kind: 'sma', period: 200 },
+        { key: 'ema9',      label: 'EMA9',       colorKey: 'ema9',   chk: 'chk-ema9', kind: 'ema', period: 9 },
+        { key: 'ema21',     label: 'EMA21',      colorKey: 'ema21',  chk: 'chk-ema21', kind: 'ema', period: 21 },
+        { key: 'wma20',     label: 'WMA20',      colorKey: 'wma20',  chk: 'chk-wma20', kind: 'wma', period: 20 },
+        { key: 'bollinger', label: 'BB(20,2)',   colorKey: 'bbLine', chk: 'chk-bollinger', kind: 'bb', period: 20 },
         { key: 'vwap',      label: 'VWAP',       colorKey: 'vwap',   chk: 'chk-vwap' },
-        { key: 'ichimoku',  label: 'Ichimoku',   colorKey: 'ichimokuKijun', chk: 'chk-ichimoku' },
+        { key: 'ichimoku',  label: 'Ichimoku',   colorKey: 'ichimokuKijun', chk: 'chk-ichimoku', colorEditable: false },
         { key: 'psar',      label: 'Parabolic SAR', colorKey: 'psar', chk: 'chk-psar' },
-        { key: 'pivot',     label: 'Pivot Points', colorKey: 'pivot', chk: 'chk-pivot' },
-        { key: 'supertrend', label: 'SuperTrend', colorKey: 'supertrendUp', chk: 'chk-supertrend' },
+        { key: 'pivot',     label: 'Pivot Points', colorKey: 'pivot', chk: 'chk-pivot', colorEditable: false },
+        { key: 'supertrend', label: 'SuperTrend', colorKey: 'supertrendUp', chk: 'chk-supertrend', colorEditable: false },
         { key: 'keltner',   label: 'Keltner',     colorKey: 'keltnerLine', chk: 'chk-keltner' },
         { key: 'donchian',  label: 'Donchian',    colorKey: 'donchianLine', chk: 'chk-donchian' }
     ];
@@ -3233,19 +3262,39 @@ const TradingChart = (() => {
         const legend = byId('tv-overlay-legend');
         if (!legend) return;
         legend.innerHTML = '';
+        ensureDrawExtraStyles();
+        // (24 Eylül 2026) TradingView gibi: etikete tıkla → ayarlar (periyot,
+        // renk), 👁 → grafikte gizle/göster, × → kaldır.
         LEGEND_CHIP_DEFS.forEach(def => {
             if (!vis[def.key]) return;
+            const hidden = isOverlayHidden(def.key);
             const chip = document.createElement('button');
             chip.type = 'button';
-            chip.className = 'tv-indicator-chip';
+            chip.className = 'tv-indicator-chip' + (hidden ? ' tv-chip-hidden' : '');
             chip.dataset.chk = def.chk;
-            chip.title = 'Kaldırmak için tıkla';
-            chip.innerHTML = '<span class="tv-chip-dot" style="background:' + COLORS[def.colorKey] + '"></span>' +
-                '<span>' + def.label + '</span>' +
-                '<span class="tv-chip-remove">×</span>';
-            chip.addEventListener('click', () => {
-                const el = byId(def.chk);
-                if (el) { el.checked = false; el.dispatchEvent(new Event('change')); }
+            chip.dataset.key = def.key;
+            chip.title = 'Ayarlar için tıkla';
+            chip.innerHTML = '<span class="tv-chip-dot" style="background:' + overlayColor(def.key, COLORS[def.colorKey]) + '"></span>' +
+                '<span class="tv-chip-lbl">' + overlayLabel(def) + '</span>' +
+                '<span class="tv-chip-act" data-chip="eye" title="' + (hidden ? 'Göster' : 'Gizle') + '">' + (hidden ? '🚫' : '👁') + '</span>' +
+                '<span class="tv-chip-act" data-chip="gear" title="Ayarlar">⚙</span>' +
+                '<span class="tv-chip-remove" data-chip="remove" title="Kaldır">×</span>';
+            chip.addEventListener('click', (e) => {
+                const act = e.target.closest('[data-chip]') ? e.target.closest('[data-chip]').dataset.chip : 'gear';
+                if (act === 'remove') {
+                    const el = byId(def.chk);
+                    if (el) { el.checked = false; el.dispatchEvent(new Event('change')); }
+                    const pop = byId('tv-ind-pop');
+                    if (pop) pop.classList.remove('open');
+                } else if (act === 'eye') {
+                    const all = getOverlaySettings();
+                    all[def.key] = all[def.key] || {};
+                    all[def.key].hidden = !all[def.key].hidden;
+                    saveOverlaySettings();
+                    renderOverlays();
+                } else {
+                    openIndicatorPopover(def, chip);
+                }
             });
             legend.appendChild(chip);
         });
@@ -3602,6 +3651,804 @@ const TradingChart = (() => {
        DRAWING TOOLS (custom canvas overlay)
        ════════════════════════════════════════════════ */
 
+    /* ══════════════════════════════════════════════════════════════════
+       (24 Eylül 2026) TRADINGVIEW TARZI ÇİZİM GELİŞTİRMELERİ
+       ──────────────────────────────────────────────────────────────────
+       Bu bölüm şunları ekliyor (her birinin ayrıntısı kendi başlığında):
+         A) Çizimler KALICI: sembol başına tarayıcı deposuna yazılıyor
+            (giriş yapan kullanıcıya özel anahtarla) ve finteclubBridge.js
+            üzerinden aynı hesabın diğer cihazlarına senkronlanıyor.
+         B) Gerçek GERİ AL / YİNELE (Ctrl+Z / Ctrl+Y) — her çizim
+            değişikliği (çizme, taşıma, uç sürükleme, stil, silme, temizleme)
+            geri alınabilir bir adım.
+         C) MIKNATIS modu: Kapalı / Zayıf / Güçlü, grafikte görünür bir
+            düğmeyle; çizerken Ctrl basılı tutmak geçici olarak açar.
+         D) Çizim başına GİZLE / KİLİTLE + ÇİZİM LİSTESİ paneli.
+         E) Çizimden FİYAT ALARMI (yatay çizgi → Alarmlar paneline gerçek
+            fiyat alarmı; trend/ışın/genişletilmiş çizgi → fiyat çizgiyi
+            kestiğinde uyarı).
+       Dokunmatik destek setupDrawCanvas()/setupDrawingSelection() içinde,
+       gösterge ayarları renderOverlays()/updateLegend() yanında.
+       ══════════════════════════════════════════════════════════════════ */
+
+    function chartToast(msg) {
+        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') window.TradingEngine.showToast(msg);
+    }
+
+    /* ── A) Kalıcı çizim deposu ──────────────────────────────────────── */
+    const DRAWINGS_STORE_PREFIX = 'optipulselab_drawings_v1::';
+    let drawStoreOwner = null;   // 'guest' ya da küçük harfli e-posta
+    let drawStore = null;        // { SEMBOL: { t: zaman(ms), d: [şekiller] } }
+    let historyTicker = null;    // state.drawings'in AİT OLDUĞU sembol
+
+    function currentDrawingsOwner() {
+        const a = window.FTC_AUTH_STATE;
+        return (a && a.loggedIn && a.email) ? String(a.email).trim().toLowerCase() : 'guest';
+    }
+    function readDrawStore(owner) {
+        try {
+            const raw = localStorage.getItem(DRAWINGS_STORE_PREFIX + owner);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.symbols && typeof parsed.symbols === 'object') {
+                Object.keys(parsed.symbols).forEach(k => {
+                    const ent = parsed.symbols[k];
+                    if (!ent || typeof ent !== 'object') { delete parsed.symbols[k]; return; }
+                    ent.d = sanitizeShapes(ent.d);
+                });
+                return parsed.symbols;
+            }
+        } catch (e) { /* bozuk kayıt — boş başla */ }
+        return {};
+    }
+    function getDrawStore() {
+        if (!drawStore) {
+            drawStoreOwner = currentDrawingsOwner();
+            drawStore = readDrawStore(drawStoreOwner);
+        }
+        return drawStore;
+    }
+    function writeDrawStore() {
+        if (!drawStore) return;
+        try {
+            localStorage.setItem(DRAWINGS_STORE_PREFIX + drawStoreOwner, JSON.stringify({ v: 1, symbols: drawStore }));
+        } catch (e) { console.warn('[Çizimler] Tarayıcı deposuna yazılamadı (kota dolu olabilir).', e); }
+    }
+    function cloneShapes(v) {
+        try { return JSON.parse(JSON.stringify(v || [])); } catch (e) { return []; }
+    }
+    // Bozuk/eksik kayıtlar (null, türü olmayan nesne) çizim katmanını
+    // kırmasın diye depodan/buluttan gelen her dizi süzülüyor.
+    function sanitizeShapes(arr) {
+        return Array.isArray(arr) ? arr.filter(sh => sh && typeof sh === 'object' && typeof sh.type === 'string') : [];
+    }
+    function newShapeId() {
+        return 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    }
+    // Çizim dizisi DEĞİŞTİRİLMEDEN önce: yarım kalan sürükleme/çizim iptal
+    // edilir ve mevcut hâl koşulsuz kaydedilir.
+    function commitAndCancelDrawingInteractions() {
+        moveDrag = null;
+        endpointDrag = null;
+        if (state.pendingShape && state.pendingShape.dragging) state.pendingShape = null;
+        if (drawHistory.timer) { clearTimeout(drawHistory.timer); drawHistory.timer = null; }
+        markDrawingsChanged();
+    }
+    function loadDrawingsForSymbol(ticker) {
+        const st = getDrawStore();
+        const entry = ticker ? st[ticker] : null;
+        return (entry && Array.isArray(entry.d)) ? sanitizeShapes(cloneShapes(entry.d)) : [];
+    }
+    function persistDrawingsForSymbol(ticker, shapes) {
+        if (!ticker) return;
+        const st = getDrawStore();
+        const t = Math.max(Date.now(), ((st[ticker] && Number(st[ticker].t)) || 0) + 1);
+        st[ticker] = { t: t, d: cloneShapes(shapes) };
+        writeDrawStore();
+        try {
+            window.dispatchEvent(new CustomEvent('optipulse-drawings-changed', {
+                detail: { owner: drawStoreOwner, ticker: ticker, t: t, shapes: st[ticker].d }
+            }));
+        } catch (e) { /* eski tarayıcı */ }
+    }
+    // Giriş/çıkış olunca (paylaşılan bilgisayarda başka biri girince dahil)
+    // o kişinin kendi çizim deposuna geçilir — bir kullanıcının çizimleri
+    // diğerine görünmez.
+    function handleDrawingsOwnerChange() {
+        const owner = currentDrawingsOwner();
+        if (drawStore && owner === drawStoreOwner) return;
+        if (drawStore) commitAndCancelDrawingInteractions();
+        drawStoreOwner = owner;
+        drawStore = readDrawStore(owner);
+        if (historyTicker) {
+            state.drawings = loadDrawingsForSymbol(historyTicker);
+            state.selectedDrawingIndex = -1;
+            closeDrawSettings();
+            resetDrawingHistory(historyTicker);
+            redrawDrawings();
+        }
+    }
+    window.addEventListener('ftc-auth-changed', handleDrawingsOwnerChange);
+
+    // finteclubBridge.js için: bu cihazdaki depo (ilk bağlantıda buluta
+    // eksik/eski olanları yüklemek için) ve buluttan gelen güncellemeler.
+    function exportDrawingsStore(owner) {
+        getDrawStore();
+        if (owner && owner !== drawStoreOwner) return {};
+        flushDrawingHistoryCheck();
+        return cloneShapes(drawStore);
+    }
+    function applyRemoteDrawings(map, owner) {
+        getDrawStore();
+        if (!map || (owner && owner !== drawStoreOwner)) return [];
+        // Bu cihazda henüz kaydedilmemiş bir değişiklik varsa ÖNCE onu kaydet
+        // (daha yeni zaman damgası alır, buluttakinin üstüne yazılmaz).
+        flushDrawingHistoryCheck();
+        const changed = [];
+        Object.keys(map).forEach(ticker => {
+            const r = map[ticker];
+            if (!r || !Array.isArray(r.d)) return;
+            const local = drawStore[ticker];
+            if (local && (Number(local.t) || 0) >= (Number(r.t) || 0)) return;
+            drawStore[ticker] = { t: Number(r.t) || Date.now(), d: sanitizeShapes(cloneShapes(r.d)) };
+            changed.push(ticker);
+        });
+        if (!changed.length) return changed;
+        writeDrawStore();
+        if (historyTicker && changed.indexOf(historyTicker) !== -1) applyCurrentSymbolFromStore();
+        return changed;
+    }
+    function applyCurrentSymbolFromStore() {
+        if (isDrawingInteractionActive()) { setTimeout(applyCurrentSymbolFromStore, 800); return; }
+        const next = loadDrawingsForSymbol(historyTicker);
+        const before = drawHistory.committed;
+        state.drawings = next;
+        const nextJson = drawingsJSON(false);
+        lastPersistedFull = drawingsJSON(true);
+        if (nextJson === before) { redrawDrawings(); return; }
+        drawHistory.undo.push(before);
+        if (drawHistory.undo.length > HISTORY_LIMIT) drawHistory.undo.shift();
+        drawHistory.redo = [];
+        drawHistory.committed = nextJson;
+        state.selectedDrawingIndex = -1;
+        closeDrawSettings();
+        updateUndoRedoButtons();
+        redrawDrawings();
+    }
+
+    /* ── B) Geri al / yinele ──────────────────────────────────────────
+       Her değişiklik noktasına ayrı ayrı kod eklemek yerine (unutulan bir
+       nokta = geri alınamayan bir işlem), çizimlerin JSON hâli "son
+       kaydedilen" hâlle karşılaştırılıyor: yeniden çizimden kısa süre sonra
+       (sürükleme bitmişse) fark varsa bu bir geri alma adımı olur ve depoya
+       yazılır. Kaydırıcı gibi sürekli değişiklikler tek adımda birleşir. */
+    const HISTORY_LIMIT = 100;
+    const drawHistory = { undo: [], redo: [], committed: '[]', timer: null, timerSince: 0 };
+    let lastPersistedFull = '';
+
+    // Geri al karşılaştırması ALARM durumu HARİÇ yapılır: bir alarmın
+    // tetiklenmesi ya da kurulması bir "çizim adımı" değildir; Ctrl+Z bir
+    // alarmı sessizce yeniden kurmamalı / motorda asılı alarm bırakmamalı.
+    function drawingsJSON(includeAlerts) {
+        state.drawings.forEach(s => {
+            try { getShapeStyle(s); } catch (e) { /* yok say */ }
+            if (s && !s.id) s.id = newShapeId();
+        });
+        return includeAlerts
+            ? JSON.stringify(state.drawings)
+            : JSON.stringify(state.drawings, (k, v) => (k === 'alert' ? undefined : v));
+    }
+    function isDrawingInteractionActive() {
+        return !!(moveDrag || endpointDrag || (state.pendingShape && state.pendingShape.dragging));
+    }
+    function resetDrawingHistory(ticker) {
+        historyTicker = ticker;
+        drawHistory.undo = [];
+        drawHistory.redo = [];
+        if (drawHistory.timer) { clearTimeout(drawHistory.timer); drawHistory.timer = null; }
+        drawHistory.committed = drawingsJSON(false);
+        lastPersistedFull = drawingsJSON(true);
+        updateUndoRedoButtons();
+    }
+    // soft=true: yeniden çizimlerden gelir — ertelenir (kaydırıcı sürüklemesi
+    // tek adım olsun) ama en fazla 2 sn; sürekli çizimde kayıt hiç gecikmesin.
+    function scheduleHistoryCheck(delay, soft) {
+        const now = Date.now();
+        if (drawHistory.timer) {
+            if (soft && now - drawHistory.timerSince > 2000) return;
+            clearTimeout(drawHistory.timer);
+        } else {
+            drawHistory.timerSince = now;
+        }
+        drawHistory.timer = setTimeout(() => {
+            drawHistory.timer = null;
+            if (isDrawingInteractionActive()) { scheduleHistoryCheck(300); return; }
+            markDrawingsChanged();
+        }, delay == null ? 400 : delay);
+    }
+    function flushDrawingHistoryCheck() {
+        if (drawHistory.timer) { clearTimeout(drawHistory.timer); drawHistory.timer = null; }
+        if (!isDrawingInteractionActive()) markDrawingsChanged();
+    }
+    function markDrawingsChanged() {
+        if (!historyTicker) return false;
+        const hist = drawingsJSON(false);
+        const full = drawingsJSON(true);
+        if (hist !== drawHistory.committed) {
+            drawHistory.undo.push(drawHistory.committed);
+            if (drawHistory.undo.length > HISTORY_LIMIT) drawHistory.undo.shift();
+            drawHistory.redo = [];
+            drawHistory.committed = hist;
+        } else if (full === lastPersistedFull) {
+            return false;
+        }
+        lastPersistedFull = full;
+        persistDrawingsForSymbol(historyTicker, state.drawings);
+        updateUndoRedoButtons();
+        return true;
+    }
+    function restoreDrawingsFrom(json) {
+        let restored;
+        try { restored = sanitizeShapes(JSON.parse(json)); } catch (e) { restored = []; }
+        // Alarmlar geri al/yinele ile değişmez: hâlâ var olan çizim mevcut
+        // alarmını korur; geri alma ile ORTADAN KALKAN çizimin motordaki
+        // fiyat alarmı da silinir (sahipsiz alarm kalmasın).
+        const alertById = {};
+        state.drawings.forEach(sh => { if (sh && sh.id && sh.alert) alertById[sh.id] = sh.alert; });
+        const keepIds = {};
+        restored.forEach(sh => { if (sh.id) keepIds[sh.id] = true; if (sh.id && alertById[sh.id]) sh.alert = alertById[sh.id]; });
+        state.drawings.forEach(sh => {
+            if (sh && sh.alert && sh.alert.kind === 'price' && sh.alert.alertId && !(sh.id && keepIds[sh.id]) &&
+                window.TradingEngine && typeof window.TradingEngine.deletePriceAlert === 'function') {
+                window.TradingEngine.deletePriceAlert(sh.alert.alertId);
+            }
+        });
+        state.drawings = restored;
+        state.selectedDrawingIndex = -1;
+        state.pendingShape = null;
+        state.pendingPoints = null;
+        closeDrawSettings();
+        drawHistory.committed = drawingsJSON(false);
+        lastPersistedFull = drawingsJSON(true);
+        persistDrawingsForSymbol(historyTicker, state.drawings);
+        updateUndoRedoButtons();
+        redrawDrawings();
+    }
+    function undoDrawings() {
+        commitAndCancelDrawingInteractions();
+        if (!drawHistory.undo.length) { chartToast('Geri alınacak çizim işlemi yok.'); return false; }
+        drawHistory.redo.push(drawHistory.committed);
+        restoreDrawingsFrom(drawHistory.undo.pop());
+        return true;
+    }
+    function redoDrawings() {
+        commitAndCancelDrawingInteractions();
+        if (!drawHistory.redo.length) { chartToast('Yinelenecek çizim işlemi yok.'); return false; }
+        drawHistory.undo.push(drawHistory.committed);
+        restoreDrawingsFrom(drawHistory.redo.pop());
+        return true;
+    }
+    function updateUndoRedoButtons() {
+        const toolbar = byId('chart-toolbar');
+        if (!toolbar) return;
+        const u = toolbar.querySelector('[data-action="undo"]');
+        const r = toolbar.querySelector('[data-action="redo"]');
+        if (u) u.classList.toggle('tv-tool-disabled', !drawHistory.undo.length);
+        if (r) r.classList.toggle('tv-tool-disabled', !drawHistory.redo.length);
+    }
+
+    /* ── C) Mıknatıs modu ─────────────────────────────────────────────── */
+    const MAGNET_KEY = 'optipulselab_magnet_mode_v1';
+    const MAGNET_LABELS = { off: 'Kapalı', weak: 'Zayıf', strong: 'Güçlü' };
+    const MAGNET_WEAK_PX = 14;
+    let tempMagnet = false; // çizerken Ctrl basılıyken geçici "Güçlü"
+    function loadMagnetMode() {
+        try {
+            const v = localStorage.getItem('optipulselab_magnet_mode_v1');
+            if (v === 'weak' || v === 'strong') return v;
+        } catch (e) { /* private mode */ }
+        return 'off';
+    }
+    function magnetModeValue() {
+        if (state.magnetMode === true) return 'strong';
+        return (state.magnetMode === 'weak' || state.magnetMode === 'strong') ? state.magnetMode : 'off';
+    }
+    function effectiveMagnetMode() {
+        const m = magnetModeValue();
+        return (tempMagnet && m === 'off') ? 'strong' : m;
+    }
+    function setMagnetMode(mode, announce) {
+        state.magnetMode = mode;
+        try { localStorage.setItem(MAGNET_KEY, mode); } catch (e) { /* private mode */ }
+        updateToggleButtonState('magnet', mode !== 'off');
+        const btn = byId('chart-toolbar') && byId('chart-toolbar').querySelector('[data-action="magnet"]');
+        if (btn) btn.title = 'Mıknatıs: ' + MAGNET_LABELS[mode] + ' (tıkla: değiştir)';
+        updateMagnetChip(true);
+        if (announce) {
+            chartToast('🧲 Mıknatıs: ' + MAGNET_LABELS[mode] + (mode === 'weak'
+                ? ' — çizim ucu yakındaki mumun açılış/kapanış/tepe/dip fiyatına yapışır.'
+                : mode === 'strong'
+                    ? ' — çizim ucu her zaman en yakın açılış/kapanış/tepe/dip fiyatına yapışır.'
+                    : ' — çizim ucu serbest. (Çizerken Ctrl basılı tutarak geçici açabilirsin.)'));
+        }
+    }
+    function cycleMagnetMode() {
+        const order = ['off', 'weak', 'strong'];
+        setMagnetMode(order[(order.indexOf(magnetModeValue()) + 1) % order.length], true);
+    }
+    let magnetChipSig = '';
+    function updateMagnetChip(force) {
+        const pane = chartContainer && chartContainer.parentElement;
+        if (!pane) return;
+        let chip = byId('tv-magnet-chip');
+        const show = state.activeTool !== 'cursor' || state.selectedDrawingIndex >= 0;
+        const mode = effectiveMagnetMode();
+        const sig = (show ? 1 : 0) + mode;
+        if (!force && sig === magnetChipSig) return;
+        magnetChipSig = sig;
+        if (!chip) {
+            if (!show) return;
+            chip = document.createElement('button');
+            chip.type = 'button';
+            chip.id = 'tv-magnet-chip';
+            chip.className = 'tv-magnet-chip';
+            ['mousedown', 'touchstart', 'pointerdown'].forEach(ev => chip.addEventListener(ev, (e) => e.stopPropagation()));
+            chip.addEventListener('click', (e) => { e.stopPropagation(); cycleMagnetMode(); });
+            pane.appendChild(chip);
+        }
+        chip.style.display = show ? '' : 'none';
+        chip.classList.toggle('on', mode !== 'off');
+        chip.textContent = '🧲 Mıknatıs: ' + MAGNET_LABELS[mode];
+        chip.title = 'Çizim uçlarının mum fiyatlarına yapışması. Tıkla: Kapalı → Zayıf → Güçlü';
+    }
+
+    /* ── D) Çizim listesi paneli ─────────────────────────────────────── */
+    function ensureDrawExtraStyles() {
+        if (byId('tv-draw-extra-styles')) return;
+        const st = document.createElement('style');
+        st.id = 'tv-draw-extra-styles';
+        st.textContent = [
+            '.tv-magnet-chip{position:absolute;left:8px;bottom:36px;z-index:28;font-size:11px;font-weight:600;padding:5px 9px;',
+            'border-radius:14px;cursor:pointer;background:var(--bg-panel,#12131A);color:var(--text-secondary,#A8A8A8);',
+            'border:1px solid var(--gold-border,rgba(212,175,55,0.3));box-shadow:0 4px 12px rgba(0,0,0,0.35);}',
+            '.tv-magnet-chip.on{color:var(--gold,#D4AF37);border-color:var(--gold,#D4AF37);}',
+            '.tv-dl{width:300px;}',
+            '.tv-dl-empty{font-size:11.5px;color:var(--text-muted,#8A8A8A);line-height:1.5;padding:4px 2px;}',
+            '.tv-dl-row{display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:6px;margin-bottom:3px;',
+            'border:1px solid transparent;}',
+            '.tv-dl-row:hover{background:rgba(255,255,255,0.04);}',
+            '.tv-dl-row.sel{border-color:var(--gold,#D4AF37);background:rgba(212,175,55,0.08);}',
+            '.tv-dl-row.hid .tv-dl-name{opacity:.45;text-decoration:line-through;}',
+            '.tv-dl-name{flex:1;font-size:11.5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+            '.tv-dl-row button{background:none;border:1px solid transparent;border-radius:5px;cursor:pointer;font-size:12px;',
+            'padding:3px 5px;color:var(--text-secondary,#A8A8A8);line-height:1;}',
+            '.tv-dl-row button:hover{border-color:var(--gold-border,rgba(212,175,55,0.4));}',
+            '.tv-dl-row button.act{color:var(--gold,#D4AF37);}',
+            '.tv-ds-lvl-del{background:none;border:none;color:var(--text-muted,#8A8A8A);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}',
+            '.tv-ds-lvl-del:hover{color:var(--danger,#EF5350);}',
+            '.tv-ds input[type=number]{width:70px;background:var(--bg-main,#0B0C11);color:var(--text-primary,#E8E8E8);font-size:11px;',
+            'border:1px solid var(--gold-border,rgba(212,175,55,0.28));border-radius:5px;padding:3px 6px;}',
+            '.tv-ds-mini{font-size:10.5px;padding:4px 8px;border-radius:5px;cursor:pointer;background:transparent;',
+            'border:1px solid var(--gold-border,rgba(212,175,55,0.3));color:var(--text-secondary,#A8A8A8);}',
+            '.tv-ds-mini:hover{color:var(--gold,#D4AF37);border-color:var(--gold,#D4AF37);}',
+            '.tv-indicator-chip .tv-chip-act{margin-left:5px;opacity:.65;font-size:11px;}',
+            '.tv-indicator-chip .tv-chip-act:hover{opacity:1;}',
+            '.tv-indicator-chip.tv-chip-hidden{opacity:.55;}',
+            '.tv-indicator-chip.tv-chip-hidden .tv-chip-lbl{text-decoration:line-through;}',
+            '.tv-tool-btn.tv-tool-disabled{opacity:.35;}',
+            '@media (max-width:640px){.tv-dl{width:calc(100vw - 16px);}}'
+        ].join('');
+        document.head.appendChild(st);
+    }
+    function ensureDrawListPanel() {
+        ensureDrawSettingsStyles();
+        ensureDrawExtraStyles();
+        let panel = byId('tv-draw-list');
+        if (panel) return panel;
+        panel = document.createElement('div');
+        panel.id = 'tv-draw-list';
+        panel.className = 'tv-ds tv-dl';
+        panel.innerHTML =
+            '<div class="tv-ds-head"><span class="tv-ds-title">Çizimler</span>' +
+            '<button type="button" class="tv-ds-x" data-dl="close" aria-label="Kapat">&times;</button></div>' +
+            '<div class="tv-ds-body"></div>' +
+            '<div class="tv-ds-foot">' +
+            '<button type="button" data-dl="showall">Tümünü göster</button>' +
+            '<button type="button" data-dl="clearall">Tümünü sil</button>' +
+            '</div>';
+        ['mousedown', 'touchstart', 'pointerdown'].forEach(ev => panel.addEventListener(ev, (e) => e.stopPropagation()));
+        panel.addEventListener('click', (e) => {
+            const el = e.target.closest('[data-dl]');
+            if (!el) return;
+            const act = el.dataset.dl;
+            const row = el.closest('.tv-dl-row');
+            const i = row ? +row.dataset.i : -1;
+            const shape = i >= 0 ? state.drawings[i] : null;
+            if (act === 'close') { closeDrawList(); return; }
+            if (act === 'select' && shape) {
+                if (shape.hidden) shape.hidden = false;
+                selectDrawing(i);
+            } else if (act === 'hide' && shape) {
+                shape.hidden = !shape.hidden;
+                if (shape.hidden && state.selectedDrawingIndex === i) state.selectedDrawingIndex = -1;
+                redrawDrawings();
+            } else if (act === 'lock' && shape) {
+                shape.locked = !shape.locked;
+                redrawDrawings();
+            } else if (act === 'alert' && shape) {
+                toggleDrawingAlert(i);
+            } else if (act === 'del' && shape) {
+                if (shape.locked) { chartToast('Bu çizim kilitli — silmek için önce kilidini aç.'); return; }
+                removeDrawingAt(i);
+            } else if (act === 'showall') {
+                state.drawings.forEach(s => { s.hidden = false; });
+                if (state.drawingsHidden) { state.drawingsHidden = false; updateToggleButtonState('hide', false); }
+                redrawDrawings();
+            } else if (act === 'clearall') {
+                if (!state.drawings.length) return;
+                if (el.dataset.confirm !== '1') {
+                    el.dataset.confirm = '1';
+                    el.textContent = 'Emin misin? Tekrar bas';
+                    setTimeout(() => { el.dataset.confirm = ''; el.textContent = 'Tümünü sil'; }, 2500);
+                    return;
+                }
+                el.dataset.confirm = '';
+                el.textContent = 'Tümünü sil';
+                handleToolbarAction('clear');
+            }
+            scheduleHistoryCheck(0);
+            updateDrawListPanel(true);
+        });
+        document.body.appendChild(panel);
+        makePanelDraggable(panel);
+        return panel;
+    }
+    function makePanelDraggable(panel) {
+        const head = panel.querySelector('.tv-ds-head');
+        let off = null;
+        head.addEventListener('mousedown', (e) => {
+            if (e.target.closest('button')) return;
+            const r = panel.getBoundingClientRect();
+            off = { x: e.clientX - r.left, y: e.clientY - r.top };
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!off) return;
+            panel.style.left = Math.max(4, Math.min(window.innerWidth - panel.offsetWidth - 4, e.clientX - off.x)) + 'px';
+            panel.style.top = Math.max(4, Math.min(window.innerHeight - 40, e.clientY - off.y)) + 'px';
+        });
+        document.addEventListener('mouseup', () => { off = null; });
+    }
+    function openDrawList() {
+        const panel = ensureDrawListPanel();
+        panel.classList.add('open');
+        const pane = chartContainer ? chartContainer.getBoundingClientRect() : { left: 60, top: 120 };
+        const w = panel.offsetWidth || 300;
+        panel.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, pane.left + 8)) + 'px';
+        panel.style.top = Math.max(4, pane.top + 8) + 'px';
+        updateToggleButtonState('list', true);
+        updateDrawListPanel(true);
+    }
+    function closeDrawList() {
+        const panel = byId('tv-draw-list');
+        if (panel) panel.classList.remove('open');
+        updateToggleButtonState('list', false);
+    }
+    function toggleDrawList() {
+        const panel = byId('tv-draw-list');
+        if (panel && panel.classList.contains('open')) closeDrawList(); else openDrawList();
+    }
+    let drawListSig = '';
+    function updateDrawListPanel(force) {
+        const panel = byId('tv-draw-list');
+        if (!panel || !panel.classList.contains('open')) return;
+        const sig = [historyTicker, state.selectedDrawingIndex, state.drawings.map(s =>
+            s.type + (s.hidden ? 'h' : '') + (s.locked ? 'l' : '') + (hasActiveDrawingAlert(s) ? 'a' : '')).join(',')].join('|');
+        if (!force && sig === drawListSig) return;
+        drawListSig = sig;
+        panel.querySelector('.tv-ds-title').textContent = 'Çizimler' + (historyTicker ? ' — ' + historyTicker : '');
+        const body = panel.querySelector('.tv-ds-body');
+        if (!state.drawings.length) {
+            body.innerHTML = '<div class="tv-dl-empty">Bu sembolde henüz çizim yok. Soldaki araçlardan birini (ör. Fibonacci, Trend Çizgisi) seçip grafiğe çiz.</div>';
+            return;
+        }
+        body.innerHTML = state.drawings.map((s, i) => {
+            const alertBtn = drawingSupportsAlert(s)
+                ? '<button type="button" data-dl="alert" class="' + (hasActiveDrawingAlert(s) ? 'act' : '') + '" title="' + (hasActiveDrawingAlert(s) ? 'Alarmı kaldır' : 'Alarm kur') + '">🔔</button>'
+                : '';
+            return '<div class="tv-dl-row' + (i === state.selectedDrawingIndex ? ' sel' : '') + (s.hidden ? ' hid' : '') + '" data-i="' + i + '">' +
+                '<span class="tv-dl-name" data-dl="select" title="Seç">' + (i + 1) + '. ' + toolLabelFor(s.type) + '</span>' +
+                alertBtn +
+                '<button type="button" data-dl="hide" title="' + (s.hidden ? 'Göster' : 'Gizle') + '">' + (s.hidden ? '🚫' : '👁') + '</button>' +
+                '<button type="button" data-dl="lock" class="' + (s.locked ? 'act' : '') + '" title="' + (s.locked ? 'Kilidi aç' : 'Kilitle') + '">' + (s.locked ? '🔒' : '🔓') + '</button>' +
+                '<button type="button" data-dl="del" title="Sil">🗑</button>' +
+                '</div>';
+        }).join('');
+    }
+    function removeDrawingAt(i) {
+        if (i < 0 || i >= state.drawings.length) return false;
+        const shape = state.drawings[i];
+        if (shape && shape.alert && shape.alert.kind === 'price' && shape.alert.alertId &&
+            window.TradingEngine && typeof window.TradingEngine.deletePriceAlert === 'function') {
+            window.TradingEngine.deletePriceAlert(shape.alert.alertId);
+        }
+        state.drawings.splice(i, 1);
+        if (state.selectedDrawingIndex === i) state.selectedDrawingIndex = -1;
+        else if (state.selectedDrawingIndex > i) state.selectedDrawingIndex--;
+        closeDrawSettings();
+        redrawDrawings();
+        scheduleHistoryCheck(0);
+        return true;
+    }
+
+    /* ── E) Çizimden fiyat alarmı ─────────────────────────────────────── */
+    const ALERT_PRICE_TYPES = ['horizontal', 'hray'];
+    const ALERT_LINE_TYPES = ['trend', 'ray', 'extended'];
+    function drawingSupportsAlert(shape) {
+        return !!shape && (ALERT_PRICE_TYPES.indexOf(shape.type) !== -1 || ALERT_LINE_TYPES.indexOf(shape.type) !== -1);
+    }
+    function hasActiveDrawingAlert(shape) {
+        const al = shape && shape.alert;
+        if (!al || !al.on) return false;
+        if (al.kind === 'price' && al.alertId && window.TradingEngine &&
+            typeof window.TradingEngine.isPriceAlertActive === 'function') {
+            return window.TradingEngine.isPriceAlertActive(al.alertId);
+        }
+        return true;
+    }
+    // Trend/ışın/genişletilmiş çizginin verilen mum sırasındaki fiyatı.
+    function linePriceAtIndex(shape, idx) {
+        if (!shape || !shape.p1 || !shape.p2) return null;
+        const i1 = virtualTimeToIndex(shape.p1.time), i2 = virtualTimeToIndex(shape.p2.time);
+        if (i1 < 0 || i2 < 0 || i1 === i2) return null;
+        if (shape.type === 'trend' && (idx < Math.min(i1, i2) || idx > Math.max(i1, i2))) return null;
+        if (shape.type === 'ray' && (idx - i1) * Math.sign(i2 - i1) < 0) return null;
+        return shape.p1.price + (shape.p2.price - shape.p1.price) * (idx - i1) / (i2 - i1);
+    }
+    function lastPriceForAlerts() {
+        const last = state.candles[state.candles.length - 1];
+        return last ? last.close : null;
+    }
+    function toggleDrawingAlert(index) {
+        const shape = state.drawings[index];
+        if (!drawingSupportsAlert(shape)) {
+            chartToast('Alarm şu çizimlerde kurulabilir: Yatay Çizgi, Yatay Işın, Trend Çizgisi, Işın, Genişletilmiş Çizgi.');
+            return false;
+        }
+        const TE = window.TradingEngine;
+        if (hasActiveDrawingAlert(shape)) {
+            if (shape.alert.kind === 'price' && shape.alert.alertId && TE && typeof TE.deletePriceAlert === 'function') {
+                TE.deletePriceAlert(shape.alert.alertId);
+            }
+            shape.alert = null;
+            chartToast('🔕 Çizim alarmı kaldırıldı.');
+            redrawDrawings();
+            scheduleHistoryCheck(0);
+            return true;
+        }
+        const price = lastPriceForAlerts();
+        if (price === null || !state.ticker) { chartToast('Fiyat henüz yüklenmedi, birazdan tekrar dene.'); return false; }
+        if (ALERT_PRICE_TYPES.indexOf(shape.type) !== -1) {
+            const level = shape.p1.price;
+            const cond = price < level ? 'above' : 'below';
+            const created = (TE && typeof TE.addPriceAlert === 'function') ? TE.addPriceAlert(state.ticker, cond, level) : null;
+            if (!created || !created.id) { chartToast('Alarm kurulamadı.'); return false; }
+            shape.alert = { on: true, kind: 'price', alertId: created.id, level: level, cond: cond, createdAt: Date.now() };
+            chartToast('🔔 Alarm kuruldu: ' + state.ticker + ' ' + (cond === 'above' ? '≥' : '≤') + ' ₺' + fmtPrice(level) +
+                ' — Alarmlar panelinde de görünür.');
+        } else {
+            const lp = linePriceAtIndex(shape, state.candles.length - 1);
+            if (lp === null) {
+                chartToast('Bu çizgi son mumun hizasına ulaşmıyor. Alarm için çizgiyi bugüne kadar uzat ya da Işın/Genişletilmiş Çizgi kullan.');
+                return false;
+            }
+            shape.alert = { on: true, kind: 'cross', lastSide: price >= lp ? 'above' : 'below', createdAt: Date.now() };
+            chartToast('🔔 Alarm kuruldu: fiyat bu çizgiyi kestiğinde uyarılacaksın (çizgi şu an ₺' + fmtPrice(lp) + '). Grafikte ' + state.ticker + ' açıkken kontrol edilir.');
+        }
+        redrawDrawings();
+        scheduleHistoryCheck(0);
+        return true;
+    }
+    function evaluateDrawingAlerts(price) {
+        if (!state.drawings.length || price === null || price === undefined) return;
+        const idx = state.candles.length - 1;
+        let fired = false;
+        state.drawings.forEach(shape => {
+            const al = shape.alert;
+            if (!al || !al.on || al.kind !== 'cross') return;
+            const lp = linePriceAtIndex(shape, idx);
+            if (lp === null) return;
+            const side = price >= lp ? 'above' : 'below';
+            if (!al.lastSide) { al.lastSide = side; return; }
+            if (al.lastSide === side) return;
+            al.on = false;
+            al.triggeredAt = Date.now();
+            al.triggeredPrice = price;
+            fired = true;
+            const dir = side === 'above' ? 'yukarı kesti' : 'aşağı kesti';
+            const msg = state.ticker + ': fiyat (₺' + fmtPrice(price) + ') alarm kurduğun çizgiyi ' + dir + ' — ' + toolLabelFor(shape.type) + ', çizgi seviyesi ₺' + fmtPrice(lp) + '.';
+            const TE = window.TradingEngine;
+            if (TE && typeof TE.notifyAlert === 'function') TE.notifyAlert('OptiPulseLab — Çizgi Alarmı', '🔔 ' + msg);
+            else chartToast('🔔 ' + msg);
+        });
+        if (fired) { redrawDrawings(); scheduleHistoryCheck(0); }
+    }
+    function drawAlertBadge(shape) {
+        if (!hasActiveDrawingAlert(shape)) return;
+        let x, y;
+        const plot = getPlotRect();
+        if (ALERT_PRICE_TYPES.indexOf(shape.type) !== -1) {
+            y = candleSeries.priceToCoordinate(shape.p1.price);
+            x = plot.width - 16;
+        } else {
+            const b = dataPointToPixel(shape.p2);
+            x = b.x; y = b.y;
+        }
+        if (x === null || y === null || x === undefined || y === undefined || isNaN(x) || isNaN(y)) return;
+        x = Math.max(10, Math.min(plot.width - 10, x));
+        drawCtx.save();
+        drawCtx.fillStyle = 'rgba(18,19,26,0.85)';
+        drawCtx.strokeStyle = COLORS.draw || '#D4AF37';
+        drawCtx.lineWidth = 1;
+        drawCtx.beginPath();
+        drawCtx.arc(x, y - 12, 8, 0, Math.PI * 2);
+        drawCtx.fill();
+        drawCtx.stroke();
+        drawCtx.font = '10px sans-serif';
+        drawCtx.textAlign = 'center';
+        drawCtx.textBaseline = 'middle';
+        drawCtx.fillText('🔔', x, y - 11);
+        drawCtx.restore();
+    }
+
+    /* ── Gösterge (SMA/EMA/BB...) ayarları ───────────────────────────── */
+    const OVERLAY_SETTINGS_KEY = 'optipulselab_overlay_settings_v1';
+    let overlaySettingsCache = null;
+    function getOverlaySettings() {
+        if (overlaySettingsCache) return overlaySettingsCache;
+        try { overlaySettingsCache = JSON.parse(localStorage.getItem(OVERLAY_SETTINGS_KEY) || '{}') || {}; }
+        catch (e) { overlaySettingsCache = {}; }
+        return overlaySettingsCache;
+    }
+    function saveOverlaySettings() {
+        try { localStorage.setItem(OVERLAY_SETTINGS_KEY, JSON.stringify(getOverlaySettings())); } catch (e) { /* kota */ }
+    }
+    function overlaySetting(key) { return getOverlaySettings()[key] || {}; }
+    function isOverlayHidden(key) { return !!overlaySetting(key).hidden; }
+    function overlayColor(key, def) {
+        const c = overlaySetting(key).color;
+        return (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) ? c : def;
+    }
+    function toHexColor(c) {
+        if (typeof c !== 'string') return '#D4AF37';
+        if (/^#[0-9a-f]{6}$/i.test(c)) return c;
+        if (/^#[0-9a-f]{3}$/i.test(c)) return '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+        const m = c.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+        if (!m) return '#D4AF37';
+        return '#' + [m[1], m[2], m[3]].map(v => ('0' + Math.max(0, Math.min(255, +v)).toString(16)).slice(-2)).join('');
+    }
+    // Varsayılan periyottan farklı seçildiyse değerler burada hesaplanıyor.
+    function overlayMaValues(def, fallback) {
+        const p = overlaySetting(def.key).period;
+        const DC = window.DataController;
+        if (!def.kind || !p || p === def.period || !DC || !state.candles.length) return fallback;
+        const closes = state.candles.map(c => c.close);
+        if (def.kind === 'sma') return DC.computeSMA(closes, p);
+        if (def.kind === 'ema') return DC.computeEMA(closes, p);
+        if (def.kind === 'wma') return DC.computeWMA(closes, p);
+        return fallback;
+    }
+    function overlayLabel(def) {
+        const s = overlaySetting(def.key);
+        if (def.kind === 'bb') return 'BB(' + (s.period || 20) + ',' + (s.mult || 2) + ')';
+        if (def.kind) return def.kind.toUpperCase() + (s.period || def.period);
+        return def.label;
+    }
+    function ensureIndicatorPopover() {
+        ensureDrawSettingsStyles();
+        ensureDrawExtraStyles();
+        let pop = byId('tv-ind-pop');
+        if (pop) return pop;
+        pop = document.createElement('div');
+        pop.id = 'tv-ind-pop';
+        pop.className = 'tv-ds';
+        pop.innerHTML = '<div class="tv-ds-head"><span class="tv-ds-title">Gösterge</span>' +
+            '<button type="button" class="tv-ds-x" data-ip="close" aria-label="Kapat">&times;</button></div>' +
+            '<div class="tv-ds-body"></div>' +
+            '<div class="tv-ds-foot"><button type="button" data-ip="hide">Gizle</button>' +
+            '<button type="button" data-ip="reset">Varsayılan</button>' +
+            '<button type="button" data-ip="remove">Kaldır</button></div>';
+        ['mousedown', 'touchstart', 'pointerdown'].forEach(ev => pop.addEventListener(ev, (e) => e.stopPropagation()));
+        const onField = (e) => {
+            const key = pop.dataset.key;
+            const def = LEGEND_CHIP_DEFS.find(d => d.key === key);
+            const f = e.target.dataset.ipf;
+            if (!def || !f) return;
+            const all = getOverlaySettings();
+            const s = all[key] = all[key] || {};
+            if (f === 'period') {
+                const v = parseInt(e.target.value, 10);
+                if (!Number.isFinite(v) || v < 1 || v > 500) return;
+                s.period = v;
+            } else if (f === 'mult') {
+                const v = parseFloat(e.target.value);
+                if (!Number.isFinite(v) || v <= 0 || v > 10) return;
+                s.mult = v;
+            } else if (f === 'color') {
+                s.color = e.target.value;
+            }
+            saveOverlaySettings();
+            renderOverlays();
+        };
+        pop.addEventListener('input', onField);
+        pop.addEventListener('change', onField);
+        pop.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-ip]');
+            if (!b) return;
+            const key = pop.dataset.key;
+            const def = LEGEND_CHIP_DEFS.find(d => d.key === key);
+            const all = getOverlaySettings();
+            if (b.dataset.ip === 'close') { pop.classList.remove('open'); return; }
+            if (!def) return;
+            if (b.dataset.ip === 'hide') {
+                all[key] = all[key] || {};
+                all[key].hidden = !all[key].hidden;
+            } else if (b.dataset.ip === 'reset') {
+                delete all[key];
+            } else if (b.dataset.ip === 'remove') {
+                pop.classList.remove('open');
+                const el = byId(def.chk);
+                if (el) { el.checked = false; el.dispatchEvent(new Event('change')); }
+                return;
+            }
+            saveOverlaySettings();
+            renderOverlays();
+            renderIndicatorPopover(def);
+        });
+        document.addEventListener('mousedown', (e) => {
+            if (pop.classList.contains('open') && !pop.contains(e.target) && !e.target.closest('.tv-indicator-chip')) pop.classList.remove('open');
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') pop.classList.remove('open'); });
+        document.body.appendChild(pop);
+        return pop;
+    }
+    function renderIndicatorPopover(def) {
+        const pop = ensureIndicatorPopover();
+        const s = overlaySetting(def.key);
+        pop.dataset.key = def.key;
+        pop.querySelector('.tv-ds-title').textContent = overlayLabel(def) + ' — Ayarlar';
+        let h = '';
+        if (def.kind === 'bb') {
+            h += dsRow('Periyot', '<input type="number" min="2" max="500" step="1" data-ipf="period" value="' + (s.period || 20) + '">');
+            h += dsRow('Standart sapma', '<input type="number" min="0.5" max="5" step="0.1" data-ipf="mult" value="' + (s.mult || 2) + '">');
+        } else if (def.kind) {
+            h += dsRow('Periyot', '<input type="number" min="1" max="500" step="1" data-ipf="period" value="' + (s.period || def.period) + '">');
+        }
+        if (def.colorEditable !== false) {
+            h += dsRow('Renk', '<input type="color" data-ipf="color" value="' + toHexColor(overlayColor(def.key, COLORS[def.colorKey])) + '">');
+        }
+        if (!h) h = '<div class="tv-dl-empty">Bu göstergenin ayarlanabilir bir değeri yok; gizleyebilir ya da kaldırabilirsin.</div>';
+        pop.querySelector('.tv-ds-body').innerHTML = h;
+        pop.querySelector('[data-ip="hide"]').textContent = s.hidden ? 'Göster' : 'Gizle';
+    }
+    function openIndicatorPopover(def, anchorEl) {
+        const pop = ensureIndicatorPopover();
+        renderIndicatorPopover(def);
+        pop.classList.add('open');
+        const r = anchorEl ? anchorEl.getBoundingClientRect() : { left: 200, bottom: 160 };
+        const w = pop.offsetWidth || 268;
+        pop.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left)) + 'px';
+        pop.style.top = Math.max(4, Math.min(window.innerHeight - (pop.offsetHeight || 200) - 4, r.bottom + 6)) + 'px';
+    }
+
+    /* ── Dokunmatik yardımcıları ─────────────────────────────────────── */
+    let touchHitScale = 1; // dokunmada isabet toleransı büyütülür (parmak ≠ fare)
+    function touchToMouseLike(t) {
+        const ev = { clientX: t.clientX, clientY: t.clientY, _pd: false, _sp: false };
+        ev.preventDefault = function () { this._pd = true; };
+        ev.stopPropagation = function () { this._sp = true; };
+        return ev;
+    }
+
     /* ── (24 Eylül 2026 — Word listesi Madde 7) "Grafik oynarken Fibonacci
        sabit kalıyor" KÖK NEDEN DÜZELTMESİ ─────────────────────────────────
        Çizim katmanı (Fibonacci, trend çizgisi vb.) önceden SADECE zaman
@@ -3700,6 +4547,8 @@ const TradingChart = (() => {
             '<span class="tv-selbar-name"></span>' +
             '<input type="color" class="tv-selbar-color" title="Renk">' +
             '<button type="button" class="tv-selbar-settings" data-sb="settings" title="Ayarlar (çizime çift tıklayarak da açılır)">⚙ Ayarlar</button>' +
+            '<button type="button" data-sb="alert" title="Bu çizgiden fiyat alarmı kur">🔔 Alarm</button>' +
+            '<button type="button" data-sb="lock" title="Kilitle / kilidi aç">🔓</button>' +
             '<button type="button" data-sb="dup" title="Çizimi çoğalt">⧉ Çoğalt</button>' +
             '<button type="button" class="tv-selbar-del" data-sb="del" title="Çizimi sil (Delete tuşu)">🗑 Sil</button>';
         // Grafiğe tıklama/sürükleme olarak algılanmasın
@@ -3717,6 +4566,16 @@ const TradingChart = (() => {
                 if (copySelectedDrawing()) pasteDrawing();
             } else if (btn.dataset.sb === 'del') {
                 deleteSelectedDrawing();
+            } else if (btn.dataset.sb === 'alert') {
+                toggleDrawingAlert(idx);
+            } else if (btn.dataset.sb === 'lock') {
+                const sh = state.drawings[idx];
+                if (sh) {
+                    sh.locked = !sh.locked;
+                    chartToast(sh.locked ? '🔒 Çizim kilitlendi — taşınamaz ve silinemez.' : '🔓 Çizimin kilidi açıldı.');
+                    redrawDrawings();
+                    scheduleHistoryCheck(0);
+                }
             }
         });
         const colorInput = bar.querySelector('.tv-selbar-color');
@@ -3737,10 +4596,18 @@ const TradingChart = (() => {
             if (bar && drawBarShownFor !== null) { bar.classList.remove('open'); drawBarShownFor = null; }
             return;
         }
-        if (drawBarShownFor === shape) return;
+        const barSig = (shape.locked ? 'L' : '') + (hasActiveDrawingAlert(shape) ? 'A' : '') + (state.drawingsLocked ? 'G' : '');
+        if (drawBarShownFor === shape && bar && bar.dataset.sig === barSig) return;
         bar = bar || ensureDrawSelectionBar();
         if (!bar) return;
         drawBarShownFor = shape;
+        bar.dataset.sig = barSig;
+        const alertBtn = bar.querySelector('[data-sb="alert"]');
+        alertBtn.style.display = drawingSupportsAlert(shape) ? '' : 'none';
+        alertBtn.textContent = hasActiveDrawingAlert(shape) ? '🔕 Alarmı kaldır' : '🔔 Alarm';
+        const lockBtn = bar.querySelector('[data-sb="lock"]');
+        lockBtn.textContent = shape.locked ? '🔒' : '🔓';
+        lockBtn.title = shape.locked ? 'Kilidi aç' : 'Kilitle (taşınamaz/silinemez)';
         bar.querySelector('.tv-selbar-name').textContent = toolLabelFor(shape.type);
         const colorInput = bar.querySelector('.tv-selbar-color');
         const isFib = isFibShape(shape.type);
@@ -3749,7 +4616,7 @@ const TradingChart = (() => {
             const c = getShapeStyle(shape).color;
             colorInput.value = (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) ? c : '#D4AF37';
         }
-        bar.querySelector('[data-sb="del"]').style.display = state.drawingsLocked ? 'none' : '';
+        bar.querySelector('[data-sb="del"]').style.display = (state.drawingsLocked || shape.locked) ? 'none' : '';
         bar.classList.add('open');
     }
 
@@ -3762,6 +4629,35 @@ const TradingChart = (() => {
         drawCanvas.addEventListener('mousedown', onDrawStart);
         window.addEventListener('mousemove', onDrawMove);
         window.addEventListener('mouseup', onDrawEnd);
+
+        // (24 Eylül 2026) DOKUNMATİK çizim: bir araç seçiliyken parmakla
+        // sürükleyerek çizilir (iki noktalı araçlar), çok noktalı araçlarda
+        // (Elliott/ABCD) her dokunuş bir nokta ekler.
+        drawCanvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1 || state.activeTool === 'cursor') return;
+            e.preventDefault();
+            touchHitScale = 2.4;
+            try { onDrawStart(touchToMouseLike(e.touches[0])); } finally { touchHitScale = 1; }
+        }, { passive: false });
+        window.addEventListener('touchmove', (e) => {
+            if (!e.touches.length) return;
+            const drawing = (state.pendingShape && state.pendingShape.dragging) || (state.pendingPoints && MULTI_CLICK_TOOLS[state.activeTool]);
+            if (!drawing) return;
+            e.preventDefault();
+            onDrawMove(touchToMouseLike(e.touches[0]));
+        }, { passive: false });
+        window.addEventListener('touchend', () => {
+            if (state.pendingShape && state.pendingShape.dragging) onDrawEnd();
+        });
+
+        // Çizerken Ctrl basılı → geçici mıknatıs (TradingView kısayolu)
+        window.addEventListener('keydown', (e) => {
+            if ((e.key === 'Control' || e.key === 'Meta') && !tempMagnet) { tempMagnet = true; updateMagnetChip(true); }
+        });
+        window.addEventListener('keyup', (e) => {
+            if ((e.key === 'Control' || e.key === 'Meta') && tempMagnet) { tempMagnet = false; updateMagnetChip(true); }
+        });
+        window.addEventListener('blur', () => { if (tempMagnet) { tempMagnet = false; updateMagnetChip(true); } });
     }
 
     function resizeDrawCanvas() {
@@ -4045,7 +4941,9 @@ const TradingChart = (() => {
             measure: '<rect x="4" y="9" width="16" height="6" rx="1"></rect><line x1="7" y1="9" x2="7" y2="15"></line><line x1="12" y1="9" x2="12" y2="15"></line><line x1="17" y1="9" x2="17" y2="15"></line>',
             pos_long: '<rect x="4" y="12" width="16" height="6" rx="1" opacity="0.4"></rect><rect x="4" y="6" width="16" height="6" rx="1"></rect><line x1="4" y1="9" x2="20" y2="9" stroke-dasharray="2 2"></line>',
             pos_short: '<rect x="4" y="6" width="16" height="6" rx="1" opacity="0.4"></rect><rect x="4" y="12" width="16" height="6" rx="1"></rect><line x1="4" y1="15" x2="20" y2="15" stroke-dasharray="2 2"></line>',
-            undo: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path>',
+            undo: '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path>',
+            redo: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path>',
+            list: '<line x1="9" y1="6" x2="21" y2="6"></line><line x1="9" y1="12" x2="21" y2="12"></line><line x1="9" y1="18" x2="21" y2="18"></line><circle cx="4" cy="6" r="1.3" fill="currentColor"></circle><circle cx="4" cy="12" r="1.3" fill="currentColor"></circle><circle cx="4" cy="18" r="1.3" fill="currentColor"></circle>',
             clear: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>',
             magnet: '<path d="M6 3v9a6 6 0 0 0 12 0V3"></path><path d="M6 3H2v9"></path><path d="M22 3h-4v9"></path>',
             lock: '<rect x="5" y="11" width="14" height="10" rx="1"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
@@ -4177,10 +5075,12 @@ const TradingChart = (() => {
 
         const utilityHtml =
             '<span class="tv-toolbar-sep" aria-hidden="true"></span>' +
-            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.magnetMode ? ' active' : '') + '" data-action="magnet" title="Mıknatıs Modu">' + toolIcon('magnet') + '</button>' +
+            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (magnetModeValue() !== 'off' ? ' active' : '') + '" data-action="magnet" title="Mıknatıs: ' + MAGNET_LABELS[magnetModeValue()] + ' (tıkla: değiştir)">' + toolIcon('magnet') + '</button>' +
             '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.drawingsLocked ? ' active' : '') + '" data-action="lock" title="Çizimleri Kilitle">' + toolIcon('lock') + '</button>' +
             '<button type="button" class="tv-tool-btn tv-tool-toggle' + (state.drawingsHidden ? ' active' : '') + '" data-action="hide" title="Çizimleri Gizle/Göster">' + toolIcon('hide') + '</button>' +
-            '<button type="button" class="tv-tool-btn" data-action="undo" title="Geri Al">' + toolIcon('undo') + '</button>' +
+            '<button type="button" class="tv-tool-btn' + (drawHistory.undo.length ? '' : ' tv-tool-disabled') + '" data-action="undo" title="Geri Al (Ctrl+Z)">' + toolIcon('undo') + '</button>' +
+            '<button type="button" class="tv-tool-btn' + (drawHistory.redo.length ? '' : ' tv-tool-disabled') + '" data-action="redo" title="Yinele (Ctrl+Y)">' + toolIcon('redo') + '</button>' +
+            '<button type="button" class="tv-tool-btn tv-tool-toggle' + (byId('tv-draw-list') && byId('tv-draw-list').classList.contains('open') ? ' active' : '') + '" data-action="list" title="Çizim Listesi">' + toolIcon('list') + '</button>' +
             '<button type="button" class="tv-tool-btn" data-action="clear" title="Tümünü Temizle">' + toolIcon('clear') + '</button>';
 
         toolbar.innerHTML = groupsHtml + utilityHtml;
@@ -4235,6 +5135,7 @@ const TradingChart = (() => {
         if (state.activeTool !== 'measure') state.measureShape = null;
         updateToolbarActiveState();
         syncDrawCanvasCursor();
+        updateMagnetChip();
     }
 
     function updateToolbarActiveState() {
@@ -4276,19 +5177,30 @@ const TradingChart = (() => {
             // şekle dönüşmesine yol açabiliyordu. selectTool() ve Escape
             // tuşu zaten bunu sıfırlıyor (bkz. aşağıda); "Tümünü Sil" de
             // aynı sıfırlamayı yapmalı.
-            state.drawings = [];
+            // (24 Eylül 2026) Kilitli çizimler "Tümünü Temizle"de korunur,
+            // işlem Geri Al ile geri getirilebilir.
+            (state.drawings || []).forEach(sh => {
+                if (!sh.locked && sh.alert && sh.alert.kind === 'price' && sh.alert.alertId &&
+                    window.TradingEngine && typeof window.TradingEngine.deletePriceAlert === 'function') {
+                    window.TradingEngine.deletePriceAlert(sh.alert.alertId);
+                }
+            });
+            state.drawings = state.drawings.filter(sh => sh.locked);
             state.selectedDrawingIndex = -1;
             state.pendingShape = null;
             state.pendingPoints = null;
             state.measureShape = null;
+            closeDrawSettings();
             redrawDrawings();
+            scheduleHistoryCheck(0);
         } else if (action === 'undo') {
-            state.drawings.pop();
-            state.selectedDrawingIndex = -1;
-            redrawDrawings();
+            undoDrawings();
+        } else if (action === 'redo') {
+            redoDrawings();
+        } else if (action === 'list') {
+            toggleDrawList();
         } else if (action === 'magnet') {
-            state.magnetMode = !state.magnetMode;
-            updateToggleButtonState('magnet', state.magnetMode);
+            cycleMagnetMode();
         } else if (action === 'lock') {
             state.drawingsLocked = !state.drawingsLocked;
             updateToggleButtonState('lock', state.drawingsLocked);
@@ -4438,7 +5350,8 @@ const TradingChart = (() => {
     }
 
     function snapToOHLC(dp) {
-        if (!state.magnetMode || dp.idx < 0 || !state.candles[dp.idx] || dp.price === null) return dp;
+        const mode = effectiveMagnetMode();
+        if (mode === 'off' || dp.idx < 0 || !state.candles[dp.idx] || dp.price === null) return dp;
         const c = state.candles[dp.idx];
         const candidates = [c.open, c.high, c.low, c.close];
         let best = candidates[0], bestDist = Math.abs(dp.price - best);
@@ -4446,6 +5359,12 @@ const TradingChart = (() => {
             const d = Math.abs(dp.price - v);
             if (d < bestDist) { bestDist = d; best = v; }
         });
+        // (24 Eylül 2026) "Zayıf" mıknatıs: sadece imleç o fiyata ekranda
+        // yakınsa (birkaç piksel) yapıştır — TradingView'deki gibi.
+        if (mode === 'weak' && candleSeries) {
+            const yb = candleSeries.priceToCoordinate(best), yc = candleSeries.priceToCoordinate(dp.price);
+            if (yb === null || yc === null || Math.abs(yb - yc) > MAGNET_WEAK_PX * touchHitScale) return dp;
+        }
         return { time: dp.time, price: best, idx: dp.idx };
     }
 
@@ -4865,7 +5784,9 @@ const TradingChart = (() => {
     // Bir Fibonacci şekli için seviye listesi üretir. Mevcut listedeki
     // açık/kapalı durumları korur (palet değişince sadece renkler yenilenir).
     function buildFibLevels(type, paletteId, existing) {
-        const ratios = FIB_LEVEL_SETS[type] || FIB_LEVEL_SETS.fib;
+        // (24 Eylül 2026) Mevcut liste verilirse ONUN oranları korunur —
+        // kullanıcının eklediği özel seviyeler palet değişince kaybolmasın.
+        const ratios = (existing && existing.length) ? existing.map(l => l.r) : (FIB_LEVEL_SETS[type] || FIB_LEVEL_SETS.fib);
         return ratios.map((r, i) => {
             const prev = existing && existing.find ? existing.find(l => l.r === r) : null;
             return { r: r, on: prev ? prev.on !== false : true, color: fibColorForRatio(paletteId, r, i) };
@@ -4882,7 +5803,10 @@ const TradingChart = (() => {
                 // (kullanıcı "Varsayılan yap" dediğinde kaydedilir); şeklin
                 // kendi stiline kopyalanmaz, sadece seviye renklerine uygulanır.
                 delete shape.style.colorsByRatio;
-                shape.style.levels = buildFibLevels(shape.type, shape.style.palette, null);
+                delete shape.style.ratiosByType;
+                const savedRatios = d.fib.ratiosByType && d.fib.ratiosByType[shape.type];
+                shape.style.levels = buildFibLevels(shape.type, shape.style.palette,
+                    (Array.isArray(savedRatios) && savedRatios.length) ? savedRatios.map(r => ({ r: r, on: true })) : null);
                 if (d.fib.colorsByRatio) {
                     shape.style.levels.forEach(l => {
                         const c = d.fib.colorsByRatio[String(l.r)];
@@ -4969,9 +5893,16 @@ const TradingChart = (() => {
         });
         const maxLabelW = labels.reduce((m, t) => Math.max(m, t ? drawCtx.measureText(t).width : 0), 0);
         // Hepsi sağa sığmıyorsa hepsi birden çizginin içine (sola) alınır.
-        const labelX = (xEnd + 6 + maxLabelW > plot.width)
-            ? Math.max(2, xEnd - maxLabelW - 6)
-            : xEnd + 6;
+        // (24 Eylül 2026) Etiket konumu ayarlanabilir: sağda (varsayılan) / solda.
+        let labelX;
+        if (st.labelSide === 'left') {
+            labelX = xStart - maxLabelW - 6;
+            if (labelX < 2) labelX = Math.min(xStart + 6, Math.max(2, plot.width - maxLabelW - 2));
+        } else {
+            labelX = (xEnd + 6 + maxLabelW > plot.width)
+                ? Math.max(2, xEnd - maxLabelW - 6)
+                : xEnd + 6;
+        }
 
         rows.forEach((row, i) => {
             drawCtx.strokeStyle = row.color;
@@ -5004,9 +5935,11 @@ const TradingChart = (() => {
         // renklerine düşsün.
         if (!state.drawingsHidden) {
             state.drawings.forEach((shape, i) => {
+                if (!shape || shape.hidden) return;
                 activeShapeStyle = getShapeStyle(shape);
                 drawShape(shape, i === state.selectedDrawingIndex);
                 activeShapeStyle = null;
+                drawAlertBadge(shape);
             });
         }
         if (state.pendingShape) {
@@ -5020,6 +5953,9 @@ const TradingChart = (() => {
         drawCtx.restore();
         try { lastViewportSig = drawingViewportSignature(); } catch (e) { lastViewportSig = ''; }
         updateDrawSelectionBar();
+        updateMagnetChip();
+        updateDrawListPanel();
+        if (historyTicker) scheduleHistoryCheck(400, true);
     }
 
     // Thin dashed vertical marker + label at the most recent bar, shown only
@@ -5432,9 +6368,10 @@ const TradingChart = (() => {
 
     function hitTestDrawings(x, y) {
         if (state.drawingsLocked || state.drawingsHidden) return -1;
-        const HIT_TOLERANCE = 6;
+        const HIT_TOLERANCE = 6 * touchHitScale;
         for (let i = state.drawings.length - 1; i >= 0; i--) {
             const shape = state.drawings[i];
+            if (!shape || shape.hidden) continue;
 
             if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
                 if (!shape.points || shape.points.length < 2) continue;
@@ -5509,7 +6446,7 @@ const TradingChart = (() => {
     function hitTestHandle(shape, x, y) {
         if (!shape || !shape.p1 || !shape.p2) return null;
         if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') return null;
-        const HANDLE_TOLERANCE = 8;
+        const HANDLE_TOLERANCE = 8 * touchHitScale;
         const a = dataPointToPixel(shape.p1);
         if (a.x !== null && a.y !== null && Math.hypot(x - a.x, y - a.y) <= HANDLE_TOLERANCE) return 'p1';
         const b = dataPointToPixel(shape.p2);
@@ -5567,6 +6504,7 @@ const TradingChart = (() => {
             if (copiedDrawing.target !== undefined) clone.target = copiedDrawing.target;
             if (copiedDrawing.label !== undefined) clone.label = copiedDrawing.label;
         }
+        if (copiedDrawing.style) clone.style = JSON.parse(JSON.stringify(copiedDrawing.style));
 
         state.drawings.push(clone);
         state.selectedDrawingIndex = state.drawings.length - 1;
@@ -5577,13 +6515,11 @@ const TradingChart = (() => {
     function deleteSelectedDrawing() {
         if (state.selectedDrawingIndex < 0) return false;
         if (state.drawingsLocked) return false;
-        state.drawings.splice(state.selectedDrawingIndex, 1);
-        state.selectedDrawingIndex = -1;
-        // Silinen çizimin ayar paneli açık kalmamalı (aksi halde panel
-        // artık var olmayan bir index'i düzenlemeye çalışırdı).
-        if (typeof closeDrawSettings === 'function') closeDrawSettings();
-        redrawDrawings();
-        return true;
+        const sel = state.drawings[state.selectedDrawingIndex];
+        if (sel && sel.locked) { chartToast('Bu çizim kilitli — silmek için önce kilidini aç.'); return false; }
+        // (24 Eylül 2026) removeDrawingAt: ayar panelini kapatır, varsa bağlı
+        // fiyat alarmını da siler, geri alınabilir adım olarak kaydeder.
+        return removeDrawingAt(state.selectedDrawingIndex);
     }
 
     // (19 Temmuz 2026, on ikinci oturum) Bir çizimi indexDelta (mum sayısı
@@ -5656,6 +6592,13 @@ const TradingChart = (() => {
         if (shape.offset !== undefined) moved.offset = shape.offset;
         if (shape.target !== undefined) moved.target = shape.target + priceDelta;
         if (shape.label !== undefined) moved.label = shape.label;
+        // (24 Eylül 2026) Önceden taşınan çizimin stili (Fibonacci renkleri,
+        // kalınlık vb.) kayboluyordu — artık korunuyor.
+        if (shape.id) moved.id = shape.id;
+        if (shape.style) moved.style = JSON.parse(JSON.stringify(shape.style));
+        if (shape.hidden) moved.hidden = true;
+        if (shape.locked) moved.locked = true;
+        if (shape.alert) moved.alert = JSON.parse(JSON.stringify(shape.alert));
         return moved;
     }
 
@@ -5666,7 +6609,7 @@ const TradingChart = (() => {
         // handlers so we can intercept clicks that land on a drawing, while
         // letting clicks on empty chart area fall through untouched for
         // normal chart panning.
-        chartContainer.addEventListener('mousedown', (e) => {
+        const onSelectDown = (e) => {
             if (state.activeTool !== 'cursor') return;
             const rect = chartContainer.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -5676,7 +6619,8 @@ const TradingChart = (() => {
             // genel gövde-sürükleme (moveDrag) mantığına hiç girmeden SADECE
             // o uç noktayı taşıyacak şekilde endpointDrag başlatılır —
             // böylece tüm şekil kaymaz, yalnızca eğimi değişir.
-            if (state.selectedDrawingIndex >= 0 && !state.drawingsLocked) {
+            if (state.selectedDrawingIndex >= 0 && !state.drawingsLocked &&
+                !(state.drawings[state.selectedDrawingIndex] || {}).locked) {
                 const selShape = state.drawings[state.selectedDrawingIndex];
                 const handle = hitTestHandle(selShape, x, y);
                 if (handle) {
@@ -5700,7 +6644,7 @@ const TradingChart = (() => {
                 // seçili çizimin üstüne basıp sürüklemek onu olduğu yerde
                 // taşır — kopyala/yapıştır/sil ile aynı seviyede temel bir
                 // düzenleme eylemi, ayrı bir "taşıma modu" seçmeye gerek yok.
-                if (!state.drawingsLocked) {
+                if (!state.drawingsLocked && !state.drawings[hitIndex].locked) {
                     const dp = pixelToDataPoint(x, y);
                     if (dp.idx >= 0) {
                         moveDrag = {
@@ -5714,20 +6658,23 @@ const TradingChart = (() => {
             } else if (state.selectedDrawingIndex >= 0) {
                 selectDrawing(-1);
             }
-        }, true);
+        };
+        chartContainer.addEventListener('mousedown', onSelectDown, true);
 
         // Sürükleme sırasında şekli sürekli yeniden hesapla (orijinalden +
         // o anki toplam fark) — mousedown/mouseup'tan bağımsız, window
         // seviyesinde dinliyoruz ki imleç çizim alanının dışına taşsa bile
         // sürükleme kopmasın (onDrawMove/onDrawEnd'in zaten kullandığı
         // desenin aynısı).
-        window.addEventListener('mousemove', (e) => {
+        const onSelectMove = (e) => {
             const rect = chartContainer.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
 
             // (23 Temmuz 2026 — eğim/uç nokta düzenleme) Uç nokta sürükleme
             // aktifse, güncel imleç konumu SADECE endpointDrag.which alanına
             // yazılır — original'daki diğer uç nokta hiç dokunulmadan kalır.
+            if (endpointDrag && !state.drawings[endpointDrag.index]) endpointDrag = null;
+            if (moveDrag && !state.drawings[moveDrag.index]) moveDrag = null;
             if (endpointDrag) {
                 const dp = pixelToDataPoint(x, y);
                 if (dp.idx < 0 || dp.time === null) return;
@@ -5745,12 +6692,41 @@ const TradingChart = (() => {
             const priceDelta = dp.price - moveDrag.startPrice;
             state.drawings[moveDrag.index] = translateShapePoints(moveDrag.original, indexDelta, priceDelta);
             redrawDrawings();
-        });
+        };
+        window.addEventListener('mousemove', onSelectMove);
 
         window.addEventListener('mouseup', () => {
+            const wasDragging = !!(moveDrag || endpointDrag);
             moveDrag = null;
             endpointDrag = null;
+            if (wasDragging) scheduleHistoryCheck(0);
         });
+
+        // (24 Eylül 2026) DOKUNMATİK: telefonda/tablette de bir çizime
+        // dokununca seçilir (üstte araç çubuğu çıkar), parmakla taşınır ya
+        // da ucundan sürüklenir. Çizimin olmadığı yere dokunmak grafiği
+        // eskisi gibi kaydırır. Parmak fareden kalın olduğu için isabet
+        // toleransı dokunmada büyütülüyor.
+        chartContainer.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1 || state.activeTool !== 'cursor') return;
+            const ev = touchToMouseLike(e.touches[0]);
+            touchHitScale = 2.4;
+            try { onSelectDown(ev); } finally { touchHitScale = 1; }
+            if (ev._sp || ev._pd) { e.preventDefault(); e.stopPropagation(); }
+        }, { capture: true, passive: false });
+        window.addEventListener('touchmove', (e) => {
+            if (!(moveDrag || endpointDrag) || !e.touches.length) return;
+            e.preventDefault();
+            onSelectMove(touchToMouseLike(e.touches[0]));
+        }, { passive: false });
+        const endTouchDrag = () => {
+            if (!(moveDrag || endpointDrag)) return;
+            moveDrag = null;
+            endpointDrag = null;
+            scheduleHistoryCheck(0);
+        };
+        window.addEventListener('touchend', endTouchDrag);
+        window.addEventListener('touchcancel', endTouchDrag);
 
         // Seçili çizimin üstündeyken (henüz sürüklemeden) fare imlecini
         // "move" yaparak taşınabilir olduğunu gösterir — yeni özelliğin
@@ -5943,15 +6919,20 @@ const TradingChart = (() => {
                 h += '<label class="tv-ds-level">' +
                     '<input type="checkbox" data-ds="level-on" data-i="' + i + '"' + (l.on !== false ? ' checked' : '') + '>' +
                     '<span class="tv-ds-level-r">' + l.r + '</span>' +
-                    '<input type="color" data-ds="level-color" data-i="' + i + '" value="' + l.color + '">' +
+                    '<input type="color" data-ds="level-color" data-i="' + i + '" value="' + toHexColor(l.color) + '">' +
+                    '<button type="button" class="tv-ds-lvl-del" data-ds-action="level-del" data-i="' + i + '" title="Seviyeyi sil">×</button>' +
                     '</label>';
             });
             h += '</div>';
+            // (24 Eylül 2026) Özel seviye ekleme (ör. 0.705, 1.414, -0.272)
+            h += dsRow('Seviye ekle', '<input type="number" step="0.001" min="-10" max="10" class="tv-ds-lvl-new" placeholder="0.705">' +
+                '<button type="button" class="tv-ds-mini" data-ds-action="level-add">Ekle</button>');
             if (shape.type === 'fib' || shape.type === 'fib_ext') {
                 h += dsRow('Dolgu bantları', dsCheck('fill', st.fill) +
                     '<input type="range" data-ds="fillOpacity" min="0" max="0.4" step="0.01" value="' + st.fillOpacity + '">');
                 h += dsRow('Uzat', dsCheck('extendLeft', st.extendLeft, 'Sola') + dsCheck('extendRight', st.extendRight, 'Sağa'));
                 h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Oran') + dsCheck('showPrice', st.showPrice, '₺'));
+                h += dsRow('Etiket konumu', dsSelect('labelSide', [['right', 'Sağda'], ['left', 'Solda']], st.labelSide || 'right'));
             } else {
                 h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Göster'));
             }
@@ -6026,6 +7007,8 @@ const TradingChart = (() => {
                 st.color = target.value;
             } else if (key === 'fillOpacity') {
                 st.fillOpacity = parseFloat(target.value);
+            } else if (key === 'labelSide') {
+                st.labelSide = target.value === 'left' ? 'left' : 'right';
             } else if (target.type === 'checkbox') {
                 st[key] = target.checked;
             }
@@ -6035,11 +7018,44 @@ const TradingChart = (() => {
         body.addEventListener('input', (e) => applyChange(e.target));
         body.addEventListener('change', (e) => applyChange(e.target));
 
+        function addFibLevelFromInput(shape) {
+            const input = body.querySelector('.tv-ds-lvl-new');
+            const r = input ? parseFloat(String(input.value).replace(',', '.')) : NaN;
+            if (!Number.isFinite(r) || r < -10 || r > 10) { if (input) input.focus(); return; }
+            const st = getShapeStyle(shape);
+            const rr = Math.round(r * 10000) / 10000;
+            if ((st.levels || []).some(l => Math.abs(l.r - rr) < 1e-9)) { chartToast('Bu seviye zaten var.'); return; }
+            const pal = FIB_PALETTES[st.palette] ? st.palette : 'tv';
+            st.levels.push({ r: rr, on: true, color: fibColorForRatio(pal, rr, st.levels.length) });
+            st.levels.sort((a, b) => a.r - b.r);
+            body.innerHTML = renderDrawSettingsBody(shape);
+            redrawDrawings();
+        }
+        body.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('tv-ds-lvl-new')) {
+                e.preventDefault();
+                const shape = currentSettingsShape();
+                if (shape) addFibLevelFromInput(shape);
+            }
+        });
+
         panel.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-ds-action]');
             if (!btn) return;
             const action = btn.dataset.dsAction;
             const shape = currentSettingsShape();
+            if (action === 'level-del' && shape) {
+                const st = getShapeStyle(shape);
+                if ((st.levels || []).length <= 1) return;
+                st.levels.splice(+btn.dataset.i, 1);
+                body.innerHTML = renderDrawSettingsBody(shape);
+                redrawDrawings();
+                return;
+            }
+            if (action === 'level-add' && shape) {
+                addFibLevelFromInput(shape);
+                return;
+            }
             if (action === 'close') {
                 closeDrawSettings();
             } else if (action === 'default' && shape) {
@@ -6049,8 +7065,11 @@ const TradingChart = (() => {
                     d.fib = {
                         palette: st.palette, width: st.width, dash: st.dash, fill: st.fill,
                         fillOpacity: st.fillOpacity, showPercent: st.showPercent, showPrice: st.showPrice,
-                        extendLeft: st.extendLeft, extendRight: st.extendRight, colorsByRatio: {}
+                        extendLeft: st.extendLeft, extendRight: st.extendRight, labelSide: st.labelSide || 'right',
+                        colorsByRatio: {},
+                        ratiosByType: Object.assign({}, (d.fib && d.fib.ratiosByType) || {})
                     };
+                    d.fib.ratiosByType[shape.type] = (st.levels || []).map(l => l.r);
                     (st.levels || []).forEach(l => { d.fib.colorsByRatio[String(l.r)] = l.color; });
                 } else {
                     d.generic = { color: st.color, width: st.width, dash: st.dash, fillOpacity: st.fillOpacity };
@@ -6301,11 +7320,20 @@ const TradingChart = (() => {
         // `time` alanında tutuyor, bu yüzden burada `date` → `time` eşlemesi
         // yapılıyor.
         debugGetCandleSample: (i) => state.candles[i]
-            ? { time: state.candles[i].date, close: state.candles[i].close, high: state.candles[i].high, low: state.candles[i].low }
+            ? { time: state.candles[i].date, open: state.candles[i].open, close: state.candles[i].close, high: state.candles[i].high, low: state.candles[i].low }
             : null,
         debugAddDrawing: (shape) => { state.drawings.push(shape); redrawDrawings(); return state.drawings.length - 1; },
         // (24 Eylül 2026 — Madde 7 doğrulaması) Bir fiyatın o anki piksel y'si.
         debugPriceToY: (price) => (candleSeries ? candleSeries.priceToCoordinate(price) : null),
+        // (24 Eylül 2026) Çizim deposu (finteclubBridge.js senkronu) + geri al/yinele
+        exportDrawingsStore: (owner) => exportDrawingsStore(owner),
+        applyRemoteDrawings: (map, owner) => applyRemoteDrawings(map, owner),
+        undoDrawings: () => undoDrawings(),
+        redoDrawings: () => redoDrawings(),
+        debugToggleDrawingAlert: (i) => toggleDrawingAlert(i),
+        debugGetMagnetMode: () => magnetModeValue(),
+        debugFlushDrawingHistory: () => flushDrawingHistoryCheck(),
+        debugGetVisibleRange: () => (chart ? chart.timeScale().getVisibleLogicalRange() : null),
         debugOpenDrawSettings: (index, x, y) => openDrawSettings(index, x != null ? x : 240, y != null ? y : 120),
         debugGetShapeStyle: (index) => state.drawings[index]
             ? JSON.parse(JSON.stringify(getShapeStyle(state.drawings[index])))

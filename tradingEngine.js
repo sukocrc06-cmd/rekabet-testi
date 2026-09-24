@@ -2253,7 +2253,12 @@ const TradingEngine = (() => {
             if (e.ctrlKey || e.metaKey || e.altKey) {
                 // Ctrl+Z: undo last drawing. (Ctrl+C/V/Delete for drawings are
                 // already handled inside tradingChart.js's own listener.)
-                if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) {
+                // (24 Eylül 2026) Ctrl+Shift+Z ya da Ctrl+Y: yinele.
+                const k = e.key.toLowerCase();
+                if ((e.ctrlKey || e.metaKey) && !isTyping && (k === 'y' || (k === 'z' && e.shiftKey))) {
+                    e.preventDefault();
+                    document.querySelector('#chart-toolbar [data-action="redo"]')?.click();
+                } else if (k === 'z' && (e.ctrlKey || e.metaKey) && !isTyping) {
                     e.preventDefault();
                     document.querySelector('#chart-toolbar [data-action="undo"]')?.click();
                 }
@@ -6066,6 +6071,20 @@ const TradingEngine = (() => {
         // (24 Eylül 2026) finteclubBridge.js başka bir cihazdan gelen portföyü
         // sayfa yenilemeden uygulasın diye — bkz. applySyncedPortfolio().
         applySyncedPortfolio,
+        // (24 Eylül 2026) Grafikteki çizimden alarm kurma — tradingChart.js
+        // yatay çizgiden gerçek fiyat alarmı kurar, trend çizgisi alarmı
+        // tetiklenince aynı ses/bildirim yolunu kullanır.
+        addPriceAlert: (symbol, condition, price) => addAlert(symbol, condition, price),
+        deletePriceAlert: (id) => deleteAlert(id),
+        isPriceAlertActive: (id) => priceAlerts.some(a => a.id === id && !a.triggered),
+        notifyAlert: (title, body) => {
+            showToast(body);
+            try { playAlertChime(); } catch (err) { /* ses kapalı */ }
+            flashAlertBadge();
+            if (window.Notification && Notification.permission === 'granted') {
+                try { new Notification(title, { body: String(body).replace(/^🔔\s*/, '') }); } catch (err) { /* engelli */ }
+            }
+        },
         // (24 Eylül 2026) Admin panelinin "İptal Et" komutu için — bkz.
         // cancelOcoOrder() üstündeki yorum. true = iptal edildi.
         cancelOcoOrder: (orderId, source) => cancelOcoOrder(orderId, source) === true,

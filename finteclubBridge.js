@@ -1229,6 +1229,148 @@
         applyCloudPortfolioRecordIfNewer(rec);
     }
 
+    /* ══════════════════════════════════════════════════════════════════
+       (24 Eylül 2026) GRAFİK ÇİZİMLERİ SENKRONU — oplab_drawings/{e-posta}
+       ──────────────────────────────────────────────────────────────────
+       tradingChart.js çizimleri sembol başına tarayıcıda saklıyor ve her
+       değişiklikte 'optipulse-drawings-changed' olayı yayınlıyor. Burada:
+         - giriş yapan kullanıcının kendi belgesi dinlenir; başka cihazdan
+           gelen daha yeni sembol çizimleri grafiğe uygulanır,
+         - bu cihazdaki değişiklikler 2,5 sn bekletilip TEK yazmada
+           (sembol → {t, d}) buluta gönderilir (sürükleme sırasında her
+           harekette yazma yok — Firestore kotası korunur),
+         - ilk bağlantıda bu cihazda olup bulutta olmayan/daha eski olan
+           semboller buluta yüklenir.
+       Çakışmada sembol bazında EN SON değiştirilen kazanır. Portföy
+       senkronundan tamamen ayrı bir belge — biri diğerini etkilemez. */
+    var DRAWINGS_COLLECTION = 'oplab_drawings';
+    var DRAWINGS_WRITE_DELAY_MS = 2500;
+    var DRAWINGS_MAX_SYMBOL_BYTES = 200000;
+    var drawingsOwner = null;
+    var drawingsUnsub = null;
+    var drawingsPending = {};
+    var drawingsTimer = null;
+    var drawingsRemoteSizes = {};
+    var DRAWINGS_MAX_DOC_BYTES = 900000; // Firestore belge sınırı 1 MiB
+
+    function byteLength(str) {
+        try { return new TextEncoder().encode(str).length; } catch (e) { return String(str).length * 2; }
+    }
+
+    function stopDrawingsSync() {
+        if (drawingsTimer) { clearTimeout(drawingsTimer); drawingsTimer = null; }
+        flushDrawingsWrites();
+        if (drawingsUnsub) { try { drawingsUnsub(); } catch (e) { /* yok say */ } }
+        drawingsUnsub = null;
+        drawingsOwner = null;
+        drawingsPending = {};
+    }
+
+    function startDrawingsSync() {
+        var email = currentUserKey();
+        if (!fsFirestore || !email) { stopDrawingsSync(); return; }
+        if (drawingsOwner === email && drawingsUnsub) return;
+        stopDrawingsSync();
+        drawingsOwner = email;
+        var ref = fsFirestore.collection(DRAWINGS_COLLECTION).doc(email);
+        drawingsUnsub = ref.onSnapshot(function (snap) {
+            if (drawingsOwner !== email) return;
+            var data = snap.exists ? (snap.data() || {}) : {};
+            var syms = data.symbols || {};
+            var parsed = {};
+            drawingsRemoteSizes = {};
+            Object.keys(syms).forEach(function (k) {
+                var ent = syms[k];
+                if (!ent || typeof ent.d !== 'string') return;
+                drawingsRemoteSizes[k] = byteLength(ent.d) + 64;
+                try { parsed[k] = { t: Number(ent.t) || 0, d: JSON.parse(ent.d) }; } catch (e) { /* bozuk kayıt */ }
+            });
+            var TC = window.TradingChart;
+            if (TC && typeof TC.applyRemoteDrawings === 'function') TC.applyRemoteDrawings(parsed, email);
+            // Önbellekten gelen (sunucuyu henüz görmemiş) görüntüye göre
+            // yükleme yapılmaz — sunucudaki daha yeni veri ezilmesin.
+            if (snap.metadata && snap.metadata.fromCache) return;
+            // HER sunucu görüntüsünde: bu cihazda buluttakinden DAHA YENİ olan
+            // sembol varsa (ör. çevrimdışıyken yapılmış, ya da gecikmiş eski
+            // bir yazma buluttakini geriye götürmüşse) tekrar yüklenir —
+            // cihazlar kalıcı olarak ayrışık kalmaz.
+            if (TC && typeof TC.exportDrawingsStore === 'function') {
+                var local = TC.exportDrawingsStore(email) || {};
+                Object.keys(local).forEach(function (k) {
+                    var lt = Number(local[k] && local[k].t) || 0;
+                    var rt = parsed[k] ? parsed[k].t : 0;
+                    var pend = drawingsPending[k];
+                    if (lt > rt && Array.isArray(local[k].d) && !(pend && pend.t >= lt)) queueDrawingsWrite(k, lt, local[k].d);
+                });
+            }
+        }, function (err) {
+            console.warn('[Çizim senkronu] Bulut çizim kanalı dinlenemedi (güvenlik kuralları yayınlanmamış olabilir).', err);
+        });
+    }
+
+    function queueDrawingsWrite(ticker, t, shapes) {
+        var json;
+        try { json = JSON.stringify(shapes || []); } catch (e) { return; }
+        if (byteLength(json) > DRAWINGS_MAX_SYMBOL_BYTES) {
+            console.warn('[Çizim senkronu] ' + ticker + ' çizimleri çok büyük (' + json.length + ' bayt) — sadece bu cihazda saklanıyor.');
+            return;
+        }
+        drawingsPending[ticker] = { t: t, d: json };
+        if (drawingsTimer) clearTimeout(drawingsTimer);
+        drawingsTimer = setTimeout(flushDrawingsWrites, DRAWINGS_WRITE_DELAY_MS);
+    }
+
+    function flushDrawingsWrites() {
+        if (drawingsTimer) { clearTimeout(drawingsTimer); drawingsTimer = null; }
+        var email = drawingsOwner;
+        var batch = drawingsPending;
+        if (!email || !fsFirestore || !Object.keys(batch).length) return;
+        drawingsPending = {};
+        // Belgenin toplam boyutu 1 MiB'ı aşmasın: sığmayan semboller sadece
+        // bu cihazda kalır (sonsuz reddedilen yazma döngüsü olmasın).
+        var sizes = Object.assign({}, drawingsRemoteSizes);
+        Object.keys(batch).forEach(function (k) { sizes[k] = byteLength(batch[k].d) + 64; });
+        var total = Object.keys(sizes).reduce(function (a, k) { return a + sizes[k]; }, 0);
+        if (total > DRAWINGS_MAX_DOC_BYTES) {
+            Object.keys(batch).sort(function (x, y) { return sizes[y] - sizes[x]; }).forEach(function (k) {
+                if (total <= DRAWINGS_MAX_DOC_BYTES) return;
+                total -= sizes[k] - (drawingsRemoteSizes[k] || 0);
+                delete batch[k];
+                console.warn('[Çizim senkronu] Toplam çizim boyutu sınırı aşıldı — ' + k + ' çizimleri sadece bu cihazda saklanıyor.');
+            });
+            if (!Object.keys(batch).length) return;
+        }
+        fsFirestore.collection(DRAWINGS_COLLECTION).doc(email).set({
+            email: email,
+            symbols: batch,
+            updatedAt: new Date().toISOString(),
+            deviceId: getDeviceId()
+        }, { merge: true }).catch(function (err) {
+            var code = err && err.code;
+            if (code === 'permission-denied' || code === 'invalid-argument' || code === 'failed-precondition' || code === 'resource-exhausted') {
+                console.warn('[Çizim senkronu] Bulut yazmayı reddetti (' + code + ') — çizimler bu cihazda saklanmaya devam ediyor. Güvenlik kurallarının yayınlandığından emin ol.', err);
+                return;
+            }
+            console.warn('[Çizim senkronu] Buluta yazılamadı, 15 sn sonra tekrar denenecek.', err);
+            if (drawingsOwner !== email) return;
+            Object.keys(batch).forEach(function (k) {
+                if (!drawingsPending[k] || drawingsPending[k].t < batch[k].t) drawingsPending[k] = batch[k];
+            });
+            if (!drawingsTimer) drawingsTimer = setTimeout(flushDrawingsWrites, 15000);
+        });
+    }
+
+    window.addEventListener('optipulse-drawings-changed', function (e) {
+        var d = e && e.detail;
+        if (!d || !drawingsOwner || d.owner !== drawingsOwner || !d.ticker) return;
+        queueDrawingsWrite(d.ticker, d.t, d.shapes);
+    });
+    // Sekme kapanırken/arka plana geçerken bekleyen yazmayı hemen gönder.
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') flushDrawingsWrites();
+    });
+    window.addEventListener('pagehide', flushDrawingsWrites);
+
     function stopPortfolioSync() {
         syncGen++;
         if (myPortfolioUnsub) { try { myPortfolioUnsub(); } catch (e) { /* ignore */ } }
@@ -1609,6 +1751,9 @@
                 window.FTC_AUTH_STATE.email = user ? user.email : null;
                 window.dispatchEvent(new CustomEvent('ftc-auth-changed', { detail: window.FTC_AUTH_STATE }));
                 syncLoginUI();
+                // (24 Eylül 2026) Grafik çizimleri senkronu — onay beklemeden,
+                // giriş yapan her kullanıcının kendi belgesiyle çalışır.
+                if (user) startDrawingsSync(); else stopDrawingsSync();
 
                 // (Modal her açılışta gösterilir) Bu karar, checkApplicationStatus()
                 // ÇAĞRILMADAN ÖNCE verilir — zaten giriş yapmış bir yarışmacı için
