@@ -4311,7 +4311,17 @@ const TradingEngine = (() => {
     // + rastgele parça), pratikte çakışma ihtimali yok — bu yüzden iptal
     // ederken hangi deftere ait olduğunu ayrıca bilmeye gerek yok, ikisinde de
     // aranıp bulunduğu defterden çıkarılıyor.
-    function cancelOcoOrder(orderId) {
+    // (24 Eylül 2026 — admin "İptal Et" düzeltmesi) Admin panelindeki
+    // "İptal Et" düğmesi finteclubBridge.js üzerinden bu fonksiyonu
+    // window.TradingEngine.cancelOcoOrder(id, 'ADMIN') olarak çağırıyor ve
+    // sonucun === true olmasını bekliyordu — ama fonksiyon dışa açık DEĞİLDİ
+    // ve hiçbir şey döndürmüyordu, bu yüzden admin iptali hiç çalışmıyordu.
+    // Artık: dışa açık, iptal ettiyse true, emir bulunamadıysa false döner.
+    // Firestore'dan gelen id bazen sayı bazen metin olabildiği için
+    // karşılaştırma String() ile yapılıyor.
+    function cancelOcoOrder(orderId, source) {
+        const idKey = String(orderId);
+        if (!portfolio) return false; // init() henüz çalışmadı
         // (9 Ağustos 2026 — Binance/Midas tarzı teminat kilidi) LIMIT ve
         // MARKET_QUEUED emirleri kurulurken teminat ANINDA kilitleniyor
         // (bkz. queuePendingLimitOrder/queuePendingMarketOrder) — iptal
@@ -4322,25 +4332,26 @@ const TradingEngine = (() => {
         // yapılmıyor.
         let order = null, orderMarket = null;
         if (portfolio.pendingOrders) {
-            const found = portfolio.pendingOrders.find(o => o.id === orderId);
+            const found = portfolio.pendingOrders.find(o => String(o.id) === idKey);
             if (found) { order = found; orderMarket = 'NORMAL'; }
         }
         if (!order && portfolio.viopPendingOrders) {
-            const found = portfolio.viopPendingOrders.find(o => o.id === orderId);
+            const found = portfolio.viopPendingOrders.find(o => String(o.id) === idKey);
             if (found) { order = found; orderMarket = 'VIOP'; }
         }
-        if (!order) return;
+        if (!order) return false;
         if (order.reservedAmount) portfolio.balance += order.reservedAmount;
         if (orderMarket === 'VIOP') {
-            portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => o.id !== orderId);
+            portfolio.viopPendingOrders = portfolio.viopPendingOrders.filter(o => String(o.id) !== idKey);
         } else {
-            portfolio.pendingOrders = portfolio.pendingOrders.filter(o => o.id !== orderId);
+            portfolio.pendingOrders = portfolio.pendingOrders.filter(o => String(o.id) !== idKey);
         }
         savePortfolio();
         renderPendingOcoOrders();
         renderAccountSummary();
         const kindLabel = order.kind === 'LIMIT' ? 'Limit emri' : order.kind === 'MARKET_QUEUED' ? 'Sıradaki piyasa emri' : 'OCO emri';
-        showToast(kindLabel + ' iptal edildi' + (order.reservedAmount ? ` — kilitli teminat (₺${fmtTRY(order.reservedAmount).replace('₺', '')}) bakiyenize iade edildi.` : '.'));
+        showToast(kindLabel + (source === 'ADMIN' ? ' yönetici tarafından iptal edildi' : ' iptal edildi') + (order.reservedAmount ? ` — kilitli teminat (₺${fmtTRY(order.reservedAmount).replace('₺', '')}) bakiyenize iade edildi.` : '.'));
+        return true;
     }
     window.__optipulseCancelOco = cancelOcoOrder; // used by inline onclick in rendered rows
 
@@ -6055,6 +6066,9 @@ const TradingEngine = (() => {
         // (24 Eylül 2026) finteclubBridge.js başka bir cihazdan gelen portföyü
         // sayfa yenilemeden uygulasın diye — bkz. applySyncedPortfolio().
         applySyncedPortfolio,
+        // (24 Eylül 2026) Admin panelinin "İptal Et" komutu için — bkz.
+        // cancelOcoOrder() üstündeki yorum. true = iptal edildi.
+        cancelOcoOrder: (orderId, source) => cancelOcoOrder(orderId, source) === true,
         // (18 Temmuz 2026, dördüncü tur, Madde 5f — sayı/para birimi formatı
         // denetimi) app.js'in kendi ayrı .toFixed(2) çağrılarıyla ₺ fiyatları
         // biçimlendirmesi yerine (ki bu, watchlist/pozisyon panellerindeki
