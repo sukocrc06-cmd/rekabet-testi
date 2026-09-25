@@ -60,10 +60,30 @@ service cloud.firestore {
     // sahte ziyaretçi/yarışmacı kaydı enjekte edip belgeyi Firestore'un kendi
     // 1MB sert sınırına kadar şişirebilirdi. Düzeltme: gerçek kısıtlamayı
     // İÇ map'in kendi boyutuna (visitors.size()/competitors.size()) uyguluyoruz.
+    // (25 Eylül 2026 — yarışma kuralı 4.9/6.11 + hile koruması) Bu iki belge
+    // artık SADECE admin tarafından okunabilir (önceden herkes okuyabiliyordu:
+    // bir yarışmacı konsoldan diğerlerinin pozisyonlarını/işlemlerini ve
+    // öğrencilerin e-postalarını görebiliyordu). Yazma: giriş yapmış
+    // yarışmacı SADECE kendi satırını (e-postası kendi oturum e-postasıyla
+    // aynı olan tek bir girdiyi) değiştirebilir — başkasının portföy değerini
+    // değiştirip sıralamayı bozamaz. Herkese açık sıralama artık
+    // finteclub/public_leaderboard belgesinde (sadece isim/değer/sıra; admin yazar).
+    function ownMapEntryOnly(field) {
+      let before = resource == null ? {} : resource.data.get(field, {});
+      let after = request.resource.data.get(field, {});
+      let changed = after.diff(before).affectedKeys();
+      let key = changed.toList()[0];
+      return request.auth != null && request.auth.token.email != null
+        && request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasOnly([field])
+        && changed.size() == 1
+        && key in after
+        && after[key].email.lower() == request.auth.token.email.lower()
+        && (!(key in before) || before[key].email.lower() == request.auth.token.email.lower())
+        && after.size() < 2000;
+    }
     match /finteclub/oplab_activity {
-      allow read: if true;
-      allow write: if request.resource.data.size() < 5
-        && (!('visitors' in request.resource.data) || request.resource.data.visitors.size() < 2000);
+      allow read: if isFinteClubAdmin();
+      allow write: if isFinteClubAdmin() || ownMapEntryOnly('visitors');
       // (9 Ağustos 2026) Belgeyi TAMAMEN silme artık sadece admin'e ait —
       // önceden "request.auth != null" idi, yani herhangi bir öğrenci kendi
       // Firebase Authentication oturumuyla TÜM ziyaretçi/aktivite verisini
@@ -73,9 +93,8 @@ service cloud.firestore {
       allow delete: if isFinteClubAdmin();
     }
     match /finteclub/oplab_live_portfolio {
-      allow read: if true;
-      allow write: if request.resource.data.size() < 5
-        && (!('competitors' in request.resource.data) || request.resource.data.competitors.size() < 2000);
+      allow read: if isFinteClubAdmin();
+      allow write: if isFinteClubAdmin() || ownMapEntryOnly('competitors');
       allow delete: if isFinteClubAdmin();
     }
 
@@ -148,7 +167,9 @@ service cloud.firestore {
     // sayısı makul sınırlarla tutuluyor. Silme yalnızca admin'e (ve Admin SDK
     // kullanan api/delete-user.js'e — kuralları zaten atlar) ait.
     match /oplab_portfolios/{emailId} {
-      allow get: if true;
+      // (25 Eylül 2026 — kural 4.9) Kişisel portföy sadece sahibine ve admine açık.
+      allow get: if (request.auth != null && request.auth.token.email != null
+        && request.auth.token.email.lower() == emailId) || isFinteClubAdmin();
       allow list: if isFinteClubAdmin();
       allow create, update: if request.auth != null
         && request.auth.token.email != null
@@ -179,7 +200,9 @@ service cloud.firestore {
     // (Örn. biri konsoldan yeni, rastgele bir belge oluşturmaya çalışırsa.)
     // Varsayılan olarak KAPALI — sadece admin girişi yapmış biri yazabilir.
     match /finteclub/{document} {
-      allow read: if true;
+      // Firestore kuralları "VEYA" ile birleşir: yukarıda admin'e kısıtlanan
+      // belgeler bu genel kuralla yeniden herkese açılmasın diye hariç tutuluyor.
+      allow read: if !(document in ['oplab_live_portfolio', 'oplab_activity']) || isFinteClubAdmin();
       allow write: if isFinteClubAdmin();
     }
 

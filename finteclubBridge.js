@@ -614,7 +614,16 @@
                 }
             });
         });
-        var equity = portfolio.balance + usedMargin + openPnl;
+        // (25 Eylül 2026 — kural 9.2/9.4: portföy değeri) Bekleyen limit/sıradaki
+        // emirler için kilitlenen teminat bakiyeden düşülmüş durumda ama hâlâ
+        // yarışmacının parası — portföy değerine geri ekleniyor. Önceden
+        // yarışma sonunda bekleyen emri olan biri sıralamada olduğundan
+        // düşük görünüyordu.
+        var reserved = 0;
+        (portfolio.pendingOrders || []).concat(portfolio.viopPendingOrders || []).forEach(function (o) {
+            if (o && typeof o.reservedAmount === 'number' && o.reservedAmount > 0) reserved += o.reservedAmount;
+        });
+        var equity = portfolio.balance + usedMargin + openPnl + reserved;
 
         // (8 Ağustos 2026 — "admin panelinde herşeyi görebilmem") admin artık
         // sadece açık pozisyonları değil, bekleyen (OCO) emirleri ve en son
