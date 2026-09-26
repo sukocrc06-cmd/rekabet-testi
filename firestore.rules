@@ -114,9 +114,36 @@ service cloud.firestore {
     // engellemiyor — sadece yeni bir komut YAZMASINI engelliyor. Öğrenci
     // tarafı zaten hiç yazmadığından (sadece onListen ile okuyor) bu
     // kısıtlama üretimde hiçbir şeyi bozmaz.
+    // (26 Eylül 2026 — entegrasyon denetimi) Yarışmacının cihazı, admin
+    // komutunu uyguladıktan sonra "uygulandı" (appliedAt) bilgisini aynı
+    // girdiye geri yazar. Önceden bu yazma reddediliyordu; bu yüzden eski bir
+    // bakiye/SIFIRLAMA komutu, yarışmacı YENİ bir cihazda (ör. laboratuvardaki
+    // başka bilgisayarda) giriş yaptığında TEKRAR uygulanabiliyordu. Artık giriş
+    // yapmış kullanıcı yalnızca MEVCUT tek bir komut girdisinin applied*
+    // alanlarını güncelleyebilir; yeni komut yazamaz, bakiye/sıfırlama
+    // değerlerini değiştiremez.
+    function commandAckOnly() {
+      let before = resource.data.get('commands', {});
+      let after = request.resource.data.get('commands', {});
+      let changed = after.diff(before).affectedKeys();
+      let k = changed.toList()[0];
+      return request.auth != null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commands'])
+        && changed.size() == 1
+        && (k in before) && (k in after)
+        && after[k].diff(before[k]).affectedKeys().hasOnly(['appliedAt', 'appliedDeviceId', 'applied']);
+    }
     match /finteclub/oplab_balance_commands {
       allow read: if true;
-      allow write: if isFinteClubAdmin();
+      allow create: if isFinteClubAdmin();
+      allow update: if isFinteClubAdmin() || commandAckOnly();
+      allow delete: if isFinteClubAdmin();
+    }
+    match /finteclub/oplab_action_commands {
+      allow read: if true;
+      allow create: if isFinteClubAdmin();
+      allow update: if isFinteClubAdmin() || commandAckOnly();
+      allow delete: if isFinteClubAdmin();
     }
 
     // (9 Ağustos 2026 — KRİTİK güvenlik açığı düzeltmesi, KISMİ) oplab_user_portfolios:
