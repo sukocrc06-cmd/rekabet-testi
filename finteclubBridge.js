@@ -430,7 +430,9 @@
     function logActivity(app) {
         if (!fsActivityDoc || !app || loggedActivityForId === app.id) return;
         loggedActivityForId = app.id;
-        var payload = { visitors: {} };
+        // (26 Eylül 2026) lastWriter: güvenlik kuralı hangi girdinin bu yazana
+        // ait olduğunu bu alandan anlar (bkz. firestore.rules ownMapEntryOnly).
+        var payload = { visitors: {}, lastWriter: String(app.id) };
         payload.visitors[String(app.id)] = {
             name: app.name || '',
             email: app.email || '',
@@ -908,7 +910,7 @@
         if (!force && !changed && !refreshDue) return;
         lastLiveKey = contentKey;
         lastLivePushAt = now;
-        var payload = { competitors: {} };
+        var payload = { competitors: {}, lastWriter: String(verifiedApp.id) };
         payload.competitors[String(verifiedApp.id)] = {
             name: verifiedApp.name || '',
             email: verifiedApp.email || '',
@@ -1532,7 +1534,7 @@
         // dosyadaki diğer tüm push fonksiyonlarında da aynı şekilde
         // kullanılıyor).
         if (fsBalanceCommandsDoc && verifiedApp) {
-            var ack = { commands: {} };
+            var ack = { commands: {}, lastWriter: String(verifiedApp.id) };
             ack.commands[String(verifiedApp.id)] = { appliedAt: new Date().toISOString(), appliedDeviceId: getDeviceId() };
             fsBalanceCommandsDoc.set(ack, { merge: true }).catch(function (e) {
                 console.warn('Bakiye güncellemesi onaylanamadı (appliedAt yazılamadı).', e);
@@ -1608,7 +1610,7 @@
         // Admin'e "uygulandı" bilgisini geri yaz — applyBalanceCommand'daki
         // AYNI ack deseni (merge:true, requestedAt/type/orderId/symbol SİLİNMEZ).
         if (fsActionCommandsDoc && verifiedApp) {
-            var ack = { commands: {} };
+            var ack = { commands: {}, lastWriter: String(verifiedApp.id) };
             ack.commands[String(verifiedApp.id)] = { appliedAt: new Date().toISOString(), applied: applied, appliedDeviceId: getDeviceId() };
             fsActionCommandsDoc.set(ack, { merge: true }).catch(function (e) {
                 console.warn('Aksiyon komutu onaylanamadı (appliedAt yazılamadı).', e);

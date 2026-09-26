@@ -68,7 +68,24 @@ service cloud.firestore {
     // aynı olan tek bir girdiyi) değiştirebilir — başkasının portföy değerini
     // değiştirip sıralamayı bozamaz. Herkese açık sıralama artık
     // finteclub/public_leaderboard belgesinde (sadece isim/değer/sıra; admin yazar).
+    // Yarışmacı bu belgelerde YALNIZCA kendi girdisini (e-postası kendi oturum
+    // e-postasıyla aynı olan tek girdi) yazabilir. Yazan, girdinin anahtarını
+    // aynı yazmada `lastWriter` alanıyla bildirir (kural dili bir kümeden eleman
+    // seçemediği için). ownMapEntryOnlyLegacy: lastWriter göndermeyen eski
+    // istemciler için geçiş amaçlı yedek.
     function ownMapEntryOnly(field) {
+      let key = request.resource.data.get('lastWriter', '');
+      let before = resource == null ? {} : resource.data.get(field, {});
+      let after = request.resource.data.get(field, {});
+      return request.auth != null && request.auth.token.email != null
+        && request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasOnly([field, 'lastWriter'])
+        && after.diff(before).affectedKeys().hasOnly([key])
+        && key in after
+        && after[key].email.lower() == request.auth.token.email.lower()
+        && (!(key in before) || before[key].email.lower() == request.auth.token.email.lower())
+        && after.size() < 2000;
+    }
+    function ownMapEntryOnlyLegacy(field) {
       let before = resource == null ? {} : resource.data.get(field, {});
       let after = request.resource.data.get(field, {});
       let changed = after.diff(before).affectedKeys();
@@ -83,7 +100,7 @@ service cloud.firestore {
     }
     match /finteclub/oplab_activity {
       allow read: if isFinteClubAdmin();
-      allow write: if isFinteClubAdmin() || ownMapEntryOnly('visitors');
+      allow write: if isFinteClubAdmin() || ownMapEntryOnly('visitors') || ownMapEntryOnlyLegacy('visitors');
       // (9 Ağustos 2026) Belgeyi TAMAMEN silme artık sadece admin'e ait —
       // önceden "request.auth != null" idi, yani herhangi bir öğrenci kendi
       // Firebase Authentication oturumuyla TÜM ziyaretçi/aktivite verisini
@@ -94,7 +111,7 @@ service cloud.firestore {
     }
     match /finteclub/oplab_live_portfolio {
       allow read: if isFinteClubAdmin();
-      allow write: if isFinteClubAdmin() || ownMapEntryOnly('competitors');
+      allow write: if isFinteClubAdmin() || ownMapEntryOnly('competitors') || ownMapEntryOnlyLegacy('competitors');
       allow delete: if isFinteClubAdmin();
     }
 
@@ -123,15 +140,14 @@ service cloud.firestore {
     // alanlarını güncelleyebilir; yeni komut yazamaz, bakiye/sıfırlama
     // değerlerini değiştiremez.
     function commandAckOnly() {
+      let key = request.resource.data.get('lastWriter', '');
       let before = resource.data.get('commands', {});
       let after = request.resource.data.get('commands', {});
-      let changed = after.diff(before).affectedKeys();
-      let k = changed.toList()[0];
       return request.auth != null
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commands'])
-        && changed.size() == 1
-        && (k in before) && (k in after)
-        && after[k].diff(before[k]).affectedKeys().hasOnly(['appliedAt', 'appliedDeviceId', 'applied']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commands', 'lastWriter'])
+        && after.diff(before).affectedKeys().hasOnly([key])
+        && (key in before) && (key in after)
+        && after[key].diff(before[key]).affectedKeys().hasOnly(['appliedAt', 'appliedDeviceId', 'applied']);
     }
     match /finteclub/oplab_balance_commands {
       allow read: if true;
