@@ -277,7 +277,13 @@ const DataController = (() => {
 
         const timeInMinutes = hour * 60 + minute;
         const openTime = 9 * 60 + 55;  // 09:55 TRT
-        const closeTime = 18 * 60;     // 18:00 TRT
+        let closeTime = 18 * 60;     // 18:00 TRT
+        // (26 Eylül 2026) Resmî tatil / yarım gün — FinTeClub admin panelindeki
+        // sezon planından (finteclubBridge.js → window.FTC_MARKET_HOLIDAYS/HALFDAYS).
+        const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+        if (Array.isArray(window.FTC_MARKET_HOLIDAYS) && window.FTC_MARKET_HOLIDAYS.indexOf(ymd) !== -1) return false;
+        const half = window.FTC_MARKET_HALFDAYS && window.FTC_MARKET_HALFDAYS[ymd];
+        if (typeof half === 'string' && /^\d\d:\d\d$/.test(half)) closeTime = parseInt(half.slice(0, 2), 10) * 60 + parseInt(half.slice(3), 10);
 
         const isWeekend = weekday === 'Sat' || weekday === 'Sun';
         const isTradingHours = timeInMinutes >= openTime && timeInMinutes < closeTime;

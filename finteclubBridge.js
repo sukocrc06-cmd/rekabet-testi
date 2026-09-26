@@ -511,9 +511,17 @@
         var match = apps.filter(function (a) {
             return (a.email || '').toLowerCase() === email && a.status === 'onayli' && !a.pastCompetitor;
         })[0];
+        // (26 Eylül 2026 — Lig: sezon planı) Sezon planı açıkken yalnızca AKTİF
+        // haftanın (currentCohortId) yarışmacısı yarışmacı olarak doğrulanır;
+        // ileri bir haftaya onaylanmış biri kendi haftası başlayana kadar bekler.
+        var futureWeek = null;
+        if (match && seasonOn() && Number(match.cohortId) !== Number(lastSharedData.currentCohortId)) {
+            futureWeek = seasonWeek(match.cohortId);
+            match = null;
+        }
         if (match) {
             setBadgeVisible(true);
-            setVerifyStatus('✓ Giriş başarılı — ' + match.name, 'ok');
+            setVerifyStatus('✓ Giriş başarılı — ' + match.name + (Number(match.penaltyTotal) > 0 ? ' · Kural ihlali kesintisi: ₺' + Number(match.penaltyTotal).toLocaleString('tr-TR', { maximumFractionDigits: 0 }) + ' (sıralamada portföy değerinden düşülür)' : ''), 'ok');
             applyVerifiedProfile(match.name);
             logActivity(match);
             verifiedApp = { id: match.id, name: match.name, email: match.email };
@@ -526,12 +534,15 @@
             startPortfolioSyncForCurrentUser();
         } else {
             setBadgeVisible(false);
-            setVerifyStatus(pastMatch
+            setVerifyStatus(futureWeek
+                ? ('Başvurun onaylı — yarışma haftan: Hafta ' + futureWeek.no + (futureWeek.start ? ' (' + fmtDm(futureWeek.start) + '–' + fmtDm(futureWeek.end) + ')' : '') + '. OPLab portföyün o hafta başladığında açılır.')
+                : pastMatch
                 ? 'Yarışma haftan sona erdi — bu hesap artık geçmiş yarışmacı statüsünde, canlı senkron/izlemeye dahil değil.'
-                : 'Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', 'error');
+                : 'Hesabına giriş yapıldı ama bu e-postayla onaylı bir FinteLig başvurusu yok (ya henüz onaylanmadı ya da hiç başvuru yapılmadı).', futureWeek ? 'pending' : 'error');
             verifiedApp = null;
             stopPortfolioSync();
         }
+        updateTradingHaltState(); // kişisel kısıtlar verifiedApp'e bağlı — hemen tazele
     }
 
     function loginErrorMessage(err) {
@@ -1637,7 +1648,107 @@
     // kaynağından besleniyor), ama TAM EKRAN kilit YERİNE tradingEngine.js'in
     // kendi qt-submit buton/uyarı mantığını tetikler.
     function updateTradingHaltState() {
-        window.FTC_TRADING_STATE.halted = !!(lastSharedData && lastSharedData.tradingHalted === true);
+        var st = computeTradingState(Date.now());
+        window.FTC_TRADING_STATE.halted = st.halted;
+        window.FTC_TRADING_STATE.message = st.message || '';
+        window.FTC_TRADING_STATE.viopDisabled = st.viopDisabled;
+        var season = seasonOn() ? lastSharedData.season : null;
+        window.FTC_MARKET_HOLIDAYS = season && Array.isArray(season.holidays) ? season.holidays.slice() : [];
+        window.FTC_MARKET_HALFDAYS = season && season.halfDays ? season.halfDays : {};
+        renderAnnouncement();
+    }
+
+    /* ── (26 Eylül 2026) LİG: sezon planı, seans saatleri, kişisel kısıtlar ──
+       Admin panelindeki "Sezon & Hafta Planı / Yarışma Günü / Yaptırım"
+       sayfaları finteclub/shared_state'e yazar; burada yalnızca OKUNUR.
+       Öncelik: genel durdurma → diskalifiye → inceleme (12.3) → 15 dk kuralı
+       (15.3) → ihlal kısıtlaması (21.2) → eşitlik ek süresi (9.11) →
+       yarışma/seans saatleri ve tatiller (7.2, 7.3). */
+    var IST_OFF_MS = 3 * 3600000;
+    function seasonOn() {
+        var s = lastSharedData && lastSharedData.season;
+        return !!(s && s.enabled && s.weeks && s.weeks.length);
+    }
+    function seasonWeek(no) {
+        var s = lastSharedData && lastSharedData.season;
+        if (!s || !s.weeks) return null;
+        for (var i = 0; i < s.weeks.length; i++) if (Number(s.weeks[i].no) === Number(no)) return s.weeks[i];
+        return null;
+    }
+    function istDateStr(ms) { return new Date(ms + IST_OFF_MS).toISOString().slice(0, 10); }
+    function istMsAt(date, hm) { return Date.parse(date + 'T' + (hm || '00:00') + ':00+03:00'); }
+    function fmtDm(d) { return d ? d.slice(8, 10) + '.' + d.slice(5, 7) : ''; }
+    function fmtHm(ms) { return new Date(ms + IST_OFF_MS).toISOString().slice(11, 16); }
+    function myAppRecord() {
+        if (!verifiedApp || !lastSharedData) return null;
+        var apps = lastSharedData.applications || [];
+        for (var i = 0; i < apps.length; i++) if (String(apps[i].id) === String(verifiedApp.id)) return apps[i];
+        return null;
+    }
+    function computeTradingState(now) {
+        var d = lastSharedData;
+        var out = { halted: false, message: '', viopDisabled: false };
+        if (!d) return out;
+        if (d.tradingHalted === true) { out.halted = true; out.message = 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu (kural 13.3). Portföyün korunuyor.'; return out; }
+        if (!seasonOn()) return out;
+        var s = d.season;
+        var app = myAppRecord();
+        if (!app) {
+            // Giriş yapmış ama bu haftanın doğrulanmış yarışmacısı değil (ör. ileri bir haftaya onaylı):
+            // kendi haftası başlamadan işlem yapıp avantaj sağlamasın (kural 4.1).
+            if (currentAuthUser) { out.halted = true; out.message = 'İşlem yapma hakkı yalnızca bu haftanın onaylı yarışmacılarına açık. Yarışma haftan başladığında işlemlerin otomatik açılır.'; }
+            return out;
+        }
+        var week = seasonWeek(d.currentCohortId);
+        out.viopDisabled = !!(week && week.viop === false);
+        if (app.disqualified) { out.halted = true; out.message = 'Yarışmadan diskalifiye edildin' + (app.dqReason ? ' (' + app.dqReason + ')' : '') + '. İşlem yapamazsın (kural 21).'; return out; }
+        if (app.reviewHalt) { out.halted = true; out.message = 'Hesabın yarışma yönetimi incelemesi nedeniyle geçici olarak işleme kapatıldı (kural 12.3). İnceleme bitince otomatik açılır.'; return out; }
+        if (app.lockedOut) { out.halted = true; out.message = 'Yarışma başladıktan sonraki ' + (s.lateMinutes || 15) + ' dakika içinde katılmadığın için bu haftanın yarışmasına alınmadın (kural 15.3). Bir hata olduğunu düşünüyorsan görevliye başvur.'; return out; }
+        if (app.tradeLockUntil && now < app.tradeLockUntil) { out.halted = true; out.message = 'Kural ihlali nedeniyle ' + fmtHm(app.tradeLockUntil) + '\'e kadar işlem kısıtlaması uygulanıyor (kural 21.2).'; return out; }
+        var tb = d.tieBreak;
+        if (tb && !tb.done && now < tb.endsAt) {
+            if ((tb.appIds || []).indexOf(String(app.id)) !== -1) return out; // eşitlik ek süresi — yalnızca eşitler işlem yapar
+            out.halted = true; out.message = 'Yarışma sona erdi. Şu an yalnızca eşitlik bozma ek süresindeki yarışmacılar işlem yapabilir (kural 9.11).'; return out;
+        }
+        if (!d.competitionActive) { out.halted = true; out.message = 'Yarışma şu anda aktif değil — işlemler yarışma başladığında açılır.'; return out; }
+        var today = istDateStr(now);
+        var dow = new Date(today + 'T12:00:00Z').getUTCDay();
+        if ((s.holidays || []).indexOf(today) !== -1) { out.halted = true; out.message = 'Bugün resmî tatil — Borsa İstanbul kapalı, işlem yapılamaz (kural 7.3). Portföyün bir sonraki işlem gününe devam eder.'; return out; }
+        if (dow === 0 || dow === 6) { out.halted = true; out.message = 'Hafta sonu — işlemler bir sonraki işlem günü ' + (s.sessionStart || '10:00') + '\'da açılır (kural 7.2).'; return out; }
+        if (week && week.start && week.end && (today < week.start || today > week.end)) { out.halted = true; out.message = 'Bugün yarışma haftanın işlem günü değil (Hafta ' + week.no + ': ' + fmtDm(week.start) + '–' + fmtDm(week.end) + ').'; return out; }
+        var open = istMsAt(today, s.sessionStart || '10:00');
+        var close = istMsAt(today, (s.halfDays || {})[today] || s.sessionEnd || '18:00');
+        if (now < open || now >= close) { out.halted = true; out.message = 'Yarışma seansı dışında — işlemler yalnızca ' + (s.sessionStart || '10:00') + '–' + ((s.halfDays || {})[today] || s.sessionEnd || '18:00') + ' arasında yapılabilir (kural 7.2).'; return out; }
+        return out;
+    }
+    // Duyuru bandı (admin → Yarışma Günü → OPLab Duyurusu)
+    var ANNOUNCE_DISMISS_KEY = 'ftc_announce_dismissed_v1';
+    function renderAnnouncement() {
+        var a = lastSharedData && lastSharedData.oplabAnnouncement;
+        var bar = byId('ftc-announce');
+        var dismissed = null;
+        try { dismissed = localStorage.getItem(ANNOUNCE_DISMISS_KEY); } catch (e) { /* private mode */ }
+        if (!a || !a.text || String(a.at) === dismissed) { if (bar) bar.style.display = 'none'; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'ftc-announce';
+            bar.setAttribute('role', 'status');
+            bar.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:99990;max-width:min(760px,calc(100vw - 24px));display:flex;align-items:center;gap:12px;padding:10px 14px 10px 16px;border-radius:10px;font:600 13.5px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.35);';
+            bar.innerHTML = '<span data-ftc-ann-icon aria-hidden="true"></span><span data-ftc-ann-text style="flex:1;min-width:0;"></span><button type="button" aria-label="Kapat" style="background:none;border:none;color:inherit;font-size:18px;line-height:1;cursor:pointer;opacity:.8;padding:0 2px;">×</button>';
+            bar.querySelector('button').addEventListener('click', function () {
+                try { localStorage.setItem(ANNOUNCE_DISMISS_KEY, bar.getAttribute('data-at') || ''); } catch (e) { /* private mode */ }
+                bar.style.display = 'none';
+            });
+            document.body.appendChild(bar);
+        }
+        var warn = a.level === 'warn';
+        bar.style.background = warn ? '#7c2d12' : '#1e3a8a';
+        bar.style.color = '#fff';
+        bar.style.border = '1px solid ' + (warn ? '#f97316' : '#60a5fa');
+        bar.setAttribute('data-at', String(a.at));
+        bar.querySelector('[data-ftc-ann-icon]').textContent = warn ? '⚠' : '📣';
+        bar.querySelector('[data-ftc-ann-text]').textContent = 'FinteLig duyurusu: ' + a.text;
+        bar.style.display = 'flex';
     }
 
     // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
@@ -1800,6 +1911,9 @@
         // bir şey değiştiyse (ya da açık pozisyonların fiyatı için belirli
         // aralıklarla) buluta çıkar. Bkz. pushFullPortfolioToCloud/pushLiveSnapshot.
         setInterval(syncTick, PORTFOLIO_PUSH_INTERVAL_MS);
+        // (26 Eylül 2026) Seans açılış/kapanışı ve süreli kısıtlar veri değişmeden
+        // de geçerliliğini yitirir — işlem durumunu periyodik olarak tazele.
+        setInterval(updateTradingHaltState, 5000);
     }
 
     if (document.readyState === 'loading') {

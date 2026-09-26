@@ -79,8 +79,15 @@ const TradingEngine = (() => {
     function isTradingAllowedNow() {
         return isMarketOpenForTrading() && !isTradingHaltedByAdmin();
     }
+    // (26 Eylül 2026 — Lig) FinTeLig haftasında VİOP kapalı olabilir (admin → Sezon planı).
+    function isViopDisabledByAdmin() {
+        return !!(window.FTC_TRADING_STATE && window.FTC_TRADING_STATE.viopDisabled);
+    }
     function tradingBlockedReason() {
-        if (isTradingHaltedByAdmin()) return 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu.';
+        // (26 Eylül 2026) Köprü (finteclubBridge.js) kısıtın NEDENİNİ de yazar:
+        // seans dışı, resmî tatil, ihlal kısıtlaması, inceleme, 15 dk kuralı…
+        if (isTradingHaltedByAdmin()) return (window.FTC_TRADING_STATE && window.FTC_TRADING_STATE.message) || 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu.';
+        if (state.market === 'VIOP' && isViopDisabledByAdmin()) return 'Bu yarışma haftasında VİOP işlemleri kapalı — yalnızca pay piyasasında işlem yapabilirsin.';
         if (!isMarketOpenForTrading()) return 'Piyasa şu anda kapalı — BIST seans saatleri: hafta içi 09:55–18:00 (TRT). Emir gönderilemez.';
         return '';
     }
@@ -103,7 +110,7 @@ const TradingEngine = (() => {
         // yine tam pasif.
         const haltedByAdmin = isTradingHaltedByAdmin();
         const marketClosed = !isMarketOpenForTrading();
-        const blockedHard = haltedByAdmin || (marketClosed && state.orderType === 'OCO');
+        const blockedHard = haltedByAdmin || (state.market === 'VIOP' && isViopDisabledByAdmin()) || (marketClosed && state.orderType === 'OCO');
         if (submitBtn) {
             submitBtn.disabled = blockedHard;
             submitBtn.title = blockedHard ? tradingBlockedReason() : (marketClosed ? 'Piyasa kapalı — emriniz sıraya alınıp açılışta otomatik gerçekleştirilecek.' : '');
@@ -3504,7 +3511,7 @@ const TradingEngine = (() => {
         // olmadan hemen önce tıklanması) veya klavye/programatik tetiklemeye
         // karşı asıl, atlanamaz kontrol burası. Admin durdurması HER ZAMAN
         // tam blok (kuyruğa bile alınamaz).
-        if (isTradingHaltedByAdmin()) {
+        if (isTradingHaltedByAdmin() || (state.market === 'VIOP' && isViopDisabledByAdmin())) {
             const m = tradingBlockedReason();
             showToast(m); showTicketAlert(m, 'error');
             return;
@@ -4741,6 +4748,14 @@ const TradingEngine = (() => {
         market = market === 'VIOP' ? 'VIOP' : 'NORMAL';
         const pos = book(market).positions[symbol];
         if (!pos) return;
+        // (26 Eylül 2026) Admin/lig kısıtı (inceleme, ihlal kısıtlaması, seans dışı,
+        // diskalifiye) sürerken MANUEL kapama da bir işlemdir — engellenir.
+        // Otomatik SL/TP/likidasyon ve admin kapaması (reason dolu) etkilenmez.
+        if (!reason && isTradingHaltedByAdmin()) {
+            const m = tradingBlockedReason();
+            showToast(m);
+            return;
+        }
 
         // (10 Ağustos 2026 — VİOP asgari tutma süresi) `reason` OTOMATİK
         // kapamalarda (SL/TP/TRAILING/LIQUIDATION) dolu gelir — manuel
