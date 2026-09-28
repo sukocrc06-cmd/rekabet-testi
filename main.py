@@ -293,6 +293,185 @@ def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: s
         return df
 
 
+# ════════════════════════════════════════════════════════════════════════
+# (29 Eylül 2026 — "bütün hisseler için güncel kapanış fiyatını endeksle")
+# KÖK NEDEN: Yahoo'nun BIST GÜNLÜK (1d) verisi bir işlem günü geriden geliyor
+# (ör. Pazartesi akşamı son günlük bar hâlâ Cuma: ALARK 107,0 — gerçek
+# kapanış 104,0). /api/v1/quotes ve günlük grafik bu yüzden bayat fiyat/önceki
+# kapanış gösteriyordu. Çözüm: iki kaynak birleştirilir —
+#   • GÜN İÇİ (15 dk, son 5 gün): en güncel işlem gününün SON fiyatı,
+#   • GÜNLÜK (son 10 gün): RESMİ kapanışlar (önceki kapanış için).
+# Kural: referans gün = gün içi verinin son günü. Önceki kapanış = o günden
+# ÖNCEKİ son resmi günlük kapanış. Son fiyat = gün içi son fiyat; piyasa
+# kapalıyken ve günlük veri o günü de içeriyorsa resmi günlük kapanış.
+# ════════════════════════════════════════════════════════════════════════
+import datetime as _dt
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _IST_TZ = _ZoneInfo("Europe/Istanbul")
+except Exception:  # pragma: no cover
+    _IST_TZ = _dt.timezone(_dt.timedelta(hours=3))
+_IST_NAME = "Europe/Istanbul"
+_REF_INTRADAY_TTL_SEC = 60        # gün içi toplu veri (seans içi)
+_REF_INTRADAY_TTL_CLOSED_SEC = 900  # piyasa kapalıyken daha seyrek
+_REF_DAILY_TTL_SEC = 1800         # resmi günlük kapanışlar
+_ref_cache = {}                   # (kind, key) -> (ts, data)
+
+
+def _bist_open_now():
+    now = _dt.datetime.now(_IST_TZ)
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    return (9 * 60 + 55) <= hm < (18 * 60 + 10)
+
+
+def _to_local_dates(index):
+    """DatetimeIndex → İstanbul takvim günleri (tz'li ise çevrilir, tz'siz ise olduğu gibi)."""
+    try:
+        if getattr(index, "tz", None) is not None:
+            index = index.tz_convert(_IST_NAME)
+    except Exception:
+        pass
+    out = []
+    for d in index:
+        try:
+            out.append(d.date())
+        except Exception:
+            out.append(d)
+    return out
+
+
+def _close_series(raw, formatted):
+    if raw is None or getattr(raw, "empty", True):
+        return None
+    try:
+        s = raw[formatted]["Close"] if raw.columns.nlevels > 1 else raw["Close"]
+    except Exception:
+        return None
+    try:
+        s = s.dropna()
+    except Exception:
+        return None
+    return s if len(s) else None
+
+
+def _ref_download(kind, formatted_list, period, interval, ttl):
+    key = (kind, ",".join(sorted(formatted_list)))
+    hit = _ref_cache.get(key)
+    if hit and (time.time() - hit[0]) < ttl:
+        return hit[1]
+    with _single_flight_lock(("ref",) + key):
+        hit = _ref_cache.get(key)
+        if hit and (time.time() - hit[0]) < ttl:
+            return hit[1]
+        try:
+            raw = _yf_call_with_backoff(
+                lambda: yf.download(tickers=list(formatted_list), period=period, interval=interval,
+                                    group_by="ticker", threads=True, progress=False, session=session),
+                label=f"referans {kind} toplu indirme")
+        except Exception as e:
+            print(f"[ref] {kind} indirilemedi: {e}")
+            raw = None
+        data = {}
+        for f in formatted_list:
+            s = _close_series(raw, f)
+            if s is None:
+                continue
+            dates = _to_local_dates(s.index)
+            vals = [float(v) for v in s.values]
+            if kind == "intraday":
+                last_date = dates[-1]
+                prev_intra = None
+                for d, v in zip(reversed(dates), reversed(vals)):
+                    if d < last_date:
+                        prev_intra = v
+                        break
+                data[f] = {"date": last_date, "last": vals[-1], "prevIntra": prev_intra}
+            else:
+                # aynı güne düşen birden çok satır olursa sonuncusu geçerli
+                by_day = {}
+                for d, v in zip(dates, vals):
+                    by_day[d] = v
+                data[f] = sorted(by_day.items())
+        if data or raw is not None:
+            _ref_cache[key] = (time.time(), data)
+        return data
+
+
+def _reference_prices(formatted_list):
+    """{formatted: {"last": float, "prev": float|None, "date": date}} — bkz. yukarıdaki kural."""
+    is_open = _bist_open_now()
+    intra = _ref_download("intraday", formatted_list, "5d", "15m",
+                          _REF_INTRADAY_TTL_SEC if is_open else _REF_INTRADAY_TTL_CLOSED_SEC)
+    daily = _ref_download("daily", formatted_list, "10d", "1d", _REF_DAILY_TTL_SEC)
+    out = {}
+    for f in formatted_list:
+        i = intra.get(f)
+        d = daily.get(f) or []
+        if not i and not d:
+            continue
+        ref_date = i["date"] if i else d[-1][0]
+        if d and d[-1][0] > ref_date:  # günlük veri daha yeniyse (nadir) onu esas al
+            ref_date = d[-1][0]
+            i = None
+        prev = None
+        for day, close in reversed(d):
+            if day < ref_date:
+                prev = close
+                break
+        if prev is None and i:
+            prev = i.get("prevIntra")
+        official_today = d[-1][1] if d and d[-1][0] == ref_date else None
+        if i and not (official_today is not None and not is_open):
+            last = i["last"]
+        else:
+            last = official_today if official_today is not None else (d[-1][1] if d else None)
+        if last is None:
+            continue
+        out[f] = {"last": round(last, 2), "prev": round(prev, 2) if prev is not None else None, "date": ref_date}
+    return out
+
+
+def _append_missing_daily_bars(hist, stock, formatted):
+    """Günlük grafik (1d) bir gün geriden geliyorsa eksik günleri gün içi veriden tamamla."""
+    try:
+        import pandas as _pd
+        intra = _cached_history(stock, formatted, "5d", "15m", timeout=10)
+        if intra is None or intra.empty:
+            return hist
+        intra = intra.dropna(subset=[c for c in ("Open", "High", "Low", "Close") if c in intra.columns])
+        if intra.empty:
+            return hist
+        last_daily = hist["Date"].iloc[-1]
+        last_daily_date = last_daily.tz_convert(_IST_NAME).date() if getattr(last_daily, "tzinfo", None) is not None else _pd.Timestamp(last_daily).date()
+        idates = _to_local_dates(intra.index)
+        intra = intra.assign(_d=idates)
+        rows = []
+        for day, g in intra.groupby("_d", sort=True):
+            if day <= last_daily_date:
+                continue
+            if getattr(last_daily, "tzinfo", None) is not None:
+                ts = _pd.Timestamp(day).tz_localize(_IST_NAME)
+            else:
+                ts = _pd.Timestamp(day)
+            row = {c: None for c in hist.columns}
+            row.update({"Date": ts, "Open": float(g["Open"].iloc[0]), "High": float(g["High"].max()),
+                        "Low": float(g["Low"].min()), "Close": float(g["Close"].iloc[-1])})
+            if "Volume" in hist.columns and "Volume" in g.columns:
+                row["Volume"] = float(g["Volume"].fillna(0).sum())
+            for c in ("Dividends", "Stock Splits"):
+                if c in hist.columns:
+                    row[c] = 0.0
+            rows.append(row)
+        if rows:
+            hist = _pd.concat([hist, _pd.DataFrame(rows, columns=hist.columns)], ignore_index=True)
+        return hist
+    except Exception as e:
+        print(f"[ohlcv] {formatted}: günlük bar tamamlama atlandı ({e})")
+        return hist
+
+
 class QuotesRequest(BaseModel):
     tickers: List[str]
 
@@ -518,6 +697,8 @@ def get_data(ticker: str, interval: str = "1d"):
             hist = hist.dropna(subset=price_cols)
         if hist.empty:
             raise ValueError("No historical data found for this ticker")
+        if yf_interval == "1d":
+            hist = _append_missing_daily_bars(hist, stock, formatted)
         data = hist.to_dict(orient="records")
         for record in data:
             for k, v in list(record.items()):
@@ -752,6 +933,10 @@ def get_quotes(request: QuotesRequest):
         return _fetch_quotes_locked(tickers, cache_key, now)
 
 
+class _QuotesAllResolved(Exception):
+    pass
+
+
 def _fetch_quotes_locked(tickers, cache_key, now):
 
     formatted_map = {}
@@ -760,10 +945,27 @@ def _fetch_quotes_locked(tickers, cache_key, now):
 
     quotes = {}
     prev_closes = {}
+    # (29 Eylül 2026) Önce referans fiyatlar (gün içi son fiyat + resmi önceki kapanış —
+    # bkz. _reference_prices). Yahoo günlük verisi bir gün geriden gelebildiği için eski
+    # "2 günlük günlük veri" yolu artık yalnızca referansı alınamayan semboller için yedek.
     try:
+        ref = _reference_prices(list(formatted_map.keys()))
+        for formatted, original in formatted_map.items():
+            r = ref.get(formatted)
+            if not r:
+                continue
+            quotes[original] = r["last"]
+            if r["prev"] is not None:
+                prev_closes[original] = r["prev"]
+    except Exception as e:
+        print(f"[quotes] referans fiyatlar alınamadı, günlük veriye düşülüyor: {e}")
+    fallback_map = {f: o for f, o in formatted_map.items() if o not in quotes}
+    try:
+        if not fallback_map:
+            raise _QuotesAllResolved()
         raw = _yf_call_with_backoff(
             lambda: yf.download(
-                tickers=list(formatted_map.keys()),
+                tickers=list(fallback_map.keys()),
                 period="2d",
                 interval="1d",
                 group_by="ticker",
@@ -785,7 +987,7 @@ def _fetch_quotes_locked(tickers, cache_key, now):
         # sızmıyordu — sadece o sembol senkronize olmuyordu). Doğru kontrol,
         # sembol sayısını TAHMİN ETMEK değil, DataFrame'in gerçekten MultiIndex
         # olup olmadığına doğrudan bakmak: `raw.columns.nlevels > 1`.
-        for formatted, original in formatted_map.items():
+        for formatted, original in fallback_map.items():
             try:
                 close_series = raw[formatted]["Close"] if raw.columns.nlevels > 1 else raw["Close"]
                 close_series = close_series.dropna()
@@ -810,6 +1012,8 @@ def _fetch_quotes_locked(tickers, cache_key, now):
         missing = [original for original in formatted_map.values() if original not in quotes]
         if missing:
             print(f"[quotes] {len(missing)}/{len(formatted_map)} sembol için veri dönmedi (muhtemelen geçici/delisted): {missing}")
+    except _QuotesAllResolved:
+        pass
     except Exception as e:
         print(f"[quotes] Batch download failed ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
 
@@ -899,6 +1103,25 @@ def _fetch_market_ticker_locked(now):
             print(f"[market-ticker] {len(missing)}/{len(_MARKET_TICKER_ITEMS)} sembol için veri dönmedi: {missing}")
     except Exception as e:
         print(f"[market-ticker] Batch download failed ({'rate-limited' if _is_rate_limit_error(e) else 'error'}): {e}")
+
+    # (29 Eylül 2026) BIST 100 vb. için de bir gün geriden gelen günlük veri yerine referans fiyat.
+    try:
+        ref = _reference_prices(symbols)
+        by_sym = {o["symbol"]: o for o in items_out}
+        for it in _MARKET_TICKER_ITEMS:
+            r = ref.get(it["symbol"])
+            if not r:
+                continue
+            o = by_sym.get(it["symbol"])
+            if o is None:
+                o = {"symbol": it["symbol"], "label": it["label"]}
+                items_out.append(o)
+            o["price"] = round(r["last"], 4)
+            o["changePct"] = round((r["last"] - r["prev"]) / r["prev"] * 100, 2) if r["prev"] else o.get("changePct")
+        order = {it["symbol"]: k for k, it in enumerate(_MARKET_TICKER_ITEMS)}
+        items_out.sort(key=lambda o: order.get(o["symbol"], 99))
+    except Exception as e:
+        print(f"[market-ticker] referans fiyat birleştirme atlandı: {e}")
 
     _market_ticker_cache["ts"] = now
     _market_ticker_cache["data"] = items_out
