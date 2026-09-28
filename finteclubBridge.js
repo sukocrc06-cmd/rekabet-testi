@@ -929,11 +929,42 @@
             recentTrades: snap.recentTrades,
             updatedAt: new Date().toISOString()
         };
-        fsPortfolioDoc.set(payload, { merge: true }).catch(function (e) {
+        var sentEq = snap.equity;
+        setLiveChip('wait', 'Sıralamaya gönderiliyor…');
+        fsPortfolioDoc.set(payload, { merge: true }).then(function () {
+            liveSentOk = true;
+            setLiveChip('ok', '✓ Sıralamaya gönderildi · ' + new Date().toLocaleTimeString('tr-TR') + ' · ₺' + Number(sentEq).toLocaleString('tr-TR', { maximumFractionDigits: 0 }));
+        }).catch(function (e) {
             lastLiveKey = null; // bir sonraki turda tekrar denensin
+            setLiveChip('bad', '⚠ Sıralamaya gönderilemedi (' + ((e && e.code) || 'bağlantı') + ') — tekrar denenecek');
             console.warn('OPLab canlı portföy verisi Firestore\'a yazılamadı.', e);
             if (e && e.code === 'permission-denied') showSyncWarningBanner('⚠ Portföyün yarışma sıralamasına gönderilemiyor (sunucu reddetti). Lütfen yarışma görevlisine haber ver.');
         });
+    }
+
+    // (28 Eylül 2026) Ekranın sol altında küçük "sıralama bağlantısı" göstergesi:
+    // yarışmacı ve görevli, işlemlerin yayına gidip gitmediğini tek bakışta görür.
+    var liveSentOk = false;
+    function setLiveChip(kind, text) {
+        var el = byId('ftc-live-chip');
+        if (!kind) { if (el) el.style.display = 'none'; return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'ftc-live-chip';
+            el.setAttribute('role', 'status');
+            el.style.cssText = 'position:fixed;left:66px;bottom:80px;z-index:99980;padding:5px 11px;border-radius:999px;font:600 12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:none;max-width:calc(100vw - 24px);';
+            (document.body || document.documentElement).appendChild(el);
+        }
+        var c = kind === 'ok' ? ['#052e16', '#86efac', '#16a34a'] : kind === 'wait' ? ['#1e293b', '#cbd5e1', '#475569'] : ['#450a0a', '#fecaca', '#dc2626'];
+        el.style.background = c[0]; el.style.color = c[1]; el.style.border = '1px solid ' + c[2];
+        el.textContent = text; el.style.display = '';
+    }
+    function refreshLiveChip() {
+        var active = !!(lastSharedData && lastSharedData.competitionActive);
+        if (!active) { setLiveChip(null); return; }
+        if (!verifiedApp) { setLiveChip('bad', currentAuthUser ? '⚠ Bu hesap yarışmacı değil — işlemler sıralamaya gitmez' : '⚠ Giriş yapmadın — işlemler sıralamaya gitmez'); return; }
+        var el = byId('ftc-live-chip');
+        if (!liveSentOk || !el || el.style.display === 'none') setLiveChip('wait', 'Sıralamaya bağlanıyor…');
     }
 
     // Admin komutları (bakiye/iptal) ve test yardımcıları için: hem kişisel
@@ -961,6 +992,7 @@
         immediateSyncTimer = setTimeout(function () {
             immediateSyncTimer = null;
             pushFullPortfolioToCloud({ ignoreBackoff: true });
+            pushLiveSnapshot(false);
         }, 400);
     }
 
@@ -1406,6 +1438,7 @@
         myPortfolioUnsub = null;
         syncStartedForKey = null;
         syncReady = false;
+        liveSentOk = false;
         lastSyncedHash = null;
         lastLiveKey = null;
         lastLivePushAt = 0;
@@ -1665,6 +1698,7 @@
         window.FTC_MARKET_HOLIDAYS = season && Array.isArray(season.holidays) ? season.holidays.slice() : [];
         window.FTC_MARKET_HALFDAYS = season && season.halfDays ? season.halfDays : {};
         renderAnnouncement();
+        refreshLiveChip();
     }
 
     /* ── (26 Eylül 2026) LİG: sezon planı, seans saatleri, kişisel kısıtlar ──
