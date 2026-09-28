@@ -594,7 +594,10 @@
     }
 
     function computeLightPortfolioSnapshot() {
-        var portfolio = readLocalPortfolio();
+        // (28 Eylül 2026) Henüz hiç işlem yapmamış (yerelde portföyü olmayan)
+        // doğrulanmış yarışmacı da başlangıç bakiyesiyle bildirilir — admin
+        // "OPLab'a girdi" olarak görür, yayında da bağlı sayılır.
+        var portfolio = readLocalPortfolio() || (verifiedApp ? freshPortfolio() : null);
         if (!portfolio || typeof portfolio.balance !== 'number') return null;
         if (typeof window.TradingEngine === 'undefined' || typeof window.TradingEngine.getPrice !== 'function') return null;
 
@@ -724,8 +727,11 @@
     var PORTFOLIO_OWNER_KEY = 'optipulselab_portfolio_owner_v1';
     var PORTFOLIO_KNOWN_EPOCH_KEY = 'optipulselab_portfolio_known_epoch_v1';
     var FOREIGN_OWNER_MARK = '__baska_kullanici__'; // hiçbir e-postaya eşit olamaz
-    var LIVE_REFRESH_VISIBLE_MS = 120000;
-    var LIVE_REFRESH_HIDDEN_MS = 600000;
+    // (28 Eylül 2026 — "işlemler yayına anlık yansımıyor") Açık pozisyon varken
+    // fiyat değişimi kaynaklı portföy değeri 30 sn'de bir (arka planda 2 dk'da bir)
+    // gönderilir; işlem/bakiye değişikliği zaten 5 sn içinde gider.
+    var LIVE_REFRESH_VISIBLE_MS = 30000;
+    var LIVE_REFRESH_HIDDEN_MS = 120000;
     var FRESH_PORTFOLIO_BALANCE = 100000; // tradingEngine.js DEFAULT_BALANCE ile AYNI
 
     var myPortfolioRef = null;       // oplab_portfolios/{e-posta}
@@ -926,6 +932,7 @@
         fsPortfolioDoc.set(payload, { merge: true }).catch(function (e) {
             lastLiveKey = null; // bir sonraki turda tekrar denensin
             console.warn('OPLab canlı portföy verisi Firestore\'a yazılamadı.', e);
+            if (e && e.code === 'permission-denied') showSyncWarningBanner('⚠ Portföyün yarışma sıralamasına gönderilemiyor (sunucu reddetti). Lütfen yarışma görevlisine haber ver.');
         });
     }
 
@@ -1692,6 +1699,17 @@
         var out = { halted: false, message: '', viopDisabled: false };
         if (!d) return out;
         if (d.tradingHalted === true) { out.halted = true; out.message = 'Alım-satım şu anda yönetici tarafından geçici olarak durduruldu (kural 13.3). Portföyün korunuyor.'; return out; }
+        // (28 Eylül 2026) Yarışma sürerken yalnızca giriş yapmış ve doğrulanmış
+        // yarışmacı işlem yapabilir. Önceden misafir modda ("giriş yapmadan devam
+        // et") da emir verilebiliyordu; bu işlemler yalnızca o tarayıcıda kalıyor,
+        // sıralamaya/yayına hiç gitmiyordu. Yarışma yokken demo herkese açık kalır.
+        if (d.competitionActive && !verifiedApp) {
+            out.halted = true;
+            out.message = currentAuthUser
+                ? 'Bu hesap şu anki yarışmanın onaylı yarışmacısı değil — işlemlerin sıralamaya yansımaz. Başvurduğun e-postayla giriş yaptığından emin ol; sorun sürerse görevliye başvur.'
+                : 'FinteLig yarışması sürüyor: işlem yapmak için sağ üstten yarışmacı hesabınla (başvurduğun e-posta + şifre) GİRİŞ YAP. Giriş yapmadan yapılan işlemler sıralamaya ve yayına yansımaz.';
+            return out;
+        }
         if (!seasonOn()) return out;
         var s = d.season;
         var app = myAppRecord();
