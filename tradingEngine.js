@@ -1153,10 +1153,17 @@ const TradingEngine = (() => {
         if (!json || !json.quotes || typeof json.quotes !== 'object') return;
 
         let anyUpdated = false;
+        // (29 Eylül 2026 — "piyasa kapalıyken fiyat 107 ↔ 104 gidip geliyor") Toplu servis
+        // Yahoo'nun GÜNLÜK verisinden okuyor; seans kapandıktan sonra bu veri çoğu zaman
+        // bir önceki günün kapanışında kalıyor, grafik ise gerçek son fiyatı veriyor. Piyasa
+        // kapalıyken bu sembol için zaten gerçek bir fiyat varsa toplu servis fiyatı
+        // DEĞİŞTİRMEZ — kapalı piyasada fiyat tek kaynaktan gelir ve oynamaz.
+        const marketClosedNow = !!(DC && DC.isMarketOpenNow && !DC.isMarketOpenNow());
         Object.keys(json.quotes).forEach((symbol) => {
             const price = json.quotes[symbol];
             const p = priceProfiles[symbol];
             if (!p || typeof price !== 'number' || !(price > 0)) return;
+            if (marketClosedNow && p.hasRealAnchor === true) return;
             // (17 Ağustos 2026 — "TradingView'de düşüş varken bizde yükseliş"
             // kök neden düzeltmesi) ÖNCEDEN dayOpen sadece gerçek fiyat mevcut
             // %6'lık banttan TAŞARSA yeniden merkezleniyordu — bu bir tahminti,
