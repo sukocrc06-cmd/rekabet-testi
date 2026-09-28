@@ -771,8 +771,39 @@ const TradingEngine = (() => {
         refreshOrderConfirmModalIfOpen();
     }
 
+    // (28 Eylül 2026 — "F5 yapınca toplam varlığım artıyor" düzeltmesi) Sayfa
+    // açılışında priceProfiles SENTETİK tohum fiyatlarla (STOCK_PROFILES /
+    // sembol hash'i) başlıyor; gerçek fiyat ilk toplu senkronla (~10–60 sn)
+    // geliyor. Önceden getPrice bu uydurma tohumu döndürdüğü için yenilemeden
+    // sonraki ilk dakikada portföy değeri (ve sıralamaya giden değer) şişiyor/
+    // düşüyor, hatta bu fiyattan emir verilebiliyordu. Artık:
+    //   getPrice     → YALNIZCA gerçek veriye dayanan fiyat (emir, SL/TP, OCO,
+    //                  likidasyon için) — yoksa null (emir "fiyat yükleniyor").
+    //   getMarkPrice → portföy değerlemesi için: gerçek fiyat, yoksa bu cihazın
+    //                  gördüğü SON gerçek fiyat (5 gün içinde), yoksa null.
     function getPrice(symbol) {
-        return priceProfiles[symbol] ? priceProfiles[symbol].price : null;
+        const p = priceProfiles[symbol];
+        return (p && p.hasRealAnchor === true && p.price > 0) ? p.price : null;
+    }
+    const LAST_REAL_PX_KEY = 'optipulselab_last_real_px_v1';
+    const LAST_REAL_PX_MAX_AGE_MS = 5 * 86400000;
+    let lastRealPx = {};
+    try { lastRealPx = JSON.parse(localStorage.getItem(LAST_REAL_PX_KEY) || '{}') || {}; } catch (e) { lastRealPx = {}; }
+    function getMarkPrice(symbol) {
+        const r = getPrice(symbol);
+        if (r) return r;
+        const c = lastRealPx[symbol];
+        return (Array.isArray(c) && c[0] > 0 && Date.now() - c[1] < LAST_REAL_PX_MAX_AGE_MS) ? c[0] : null;
+    }
+    function saveLastRealPrices() {
+        const now = Date.now();
+        let n = 0;
+        Object.keys(priceProfiles).forEach(sym => {
+            const p = priceProfiles[sym];
+            if (p && p.hasRealAnchor === true && p.price > 0) { lastRealPx[sym] = [p.price, now]; n++; }
+        });
+        if (!n) return;
+        try { localStorage.setItem(LAST_REAL_PX_KEY, JSON.stringify(lastRealPx)); } catch (e) { /* kota/private mode */ }
     }
 
     // (22 Temmuz 2026, on ikinci oturum — ızgara ekranı anlık fiyat) 2x2
@@ -1267,7 +1298,7 @@ const TradingEngine = (() => {
             const positions = book(market).positions;
             Object.keys(positions).forEach(symbol => {
                 const pos = positions[symbol];
-                const current = getPrice(symbol) || pos.avgPrice;
+                const current = getMarkPrice(symbol) || pos.avgPrice;
                 if (pos.side === 'LONG') longValue += pos.qty * current;
                 else shortValue += pos.qty * current;
             });
@@ -2765,13 +2796,13 @@ const TradingEngine = (() => {
             // sembol için izleme listesi + hızlı alım-satım paneli + grafik
             // başlığı üçü de aynı kaynaktan, tutarlı bir % gösterir — canlı
             // tik daha önce gelmiş olsa bile.
-            if (priceProfiles[symbol] && chartInfo && typeof chartInfo.dailyPrevClose === 'number' && chartInfo.dailyPrevClose > 0) {
+            if (priceProfiles[symbol] && chartInfo && !chartInfo.synthetic && typeof chartInfo.dailyPrevClose === 'number' && chartInfo.dailyPrevClose > 0) {
                 priceProfiles[symbol].dayOpen = chartInfo.dailyPrevClose;
                 renderWatchlistPrices();
                 updateActiveSymbolTicket();
             }
 
-            if (!alreadyHasLiveTick && chartInfo && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
+            if (!alreadyHasLiveTick && chartInfo && !chartInfo.synthetic && chartInfo.lastClose && priceProfiles[symbol] && applyRealPriceUpdate(symbol, chartInfo.lastClose, (prof, val) => {
                 prof.price = val;
                 prof.liveAnchor = val;
             })) {
@@ -3542,6 +3573,7 @@ const TradingEngine = (() => {
 
         if (!qty || qty <= 0) { showToast('Geçerli bir miktar girin.'); showTicketAlert('Geçerli bir miktar girin.', 'error'); return; }
         if (!enteredPrice || enteredPrice <= 0) { showToast('Fiyat bilgisi alınamadı.'); showTicketAlert('Fiyat bilgisi alınamadı.', 'error'); return; }
+        if (!getPrice(state.activeSymbol)) { const m = 'Güncel fiyat henüz yüklenmedi — birkaç saniye sonra tekrar dene.'; showToast(m); showTicketAlert(m, 'error'); return; }
 
         if (state.orderType === 'OCO') {
             // OCO zaten "anında gerçekleşmeyen, koşula bağlı" bir emir türü
@@ -5014,7 +5046,7 @@ const TradingEngine = (() => {
         let html = '';
         symbols.forEach(symbol => {
             const pos = positions[symbol];
-            const current = getPrice(symbol) || pos.avgPrice;
+            const current = getMarkPrice(symbol) || pos.avgPrice;
             const unrealized = pos.side === 'LONG'
                 ? (current - pos.avgPrice) * pos.qty
                 : (pos.avgPrice - current) * pos.qty;
@@ -5636,7 +5668,7 @@ const TradingEngine = (() => {
             const positions = book(market).positions;
             Object.keys(positions).forEach(symbol => {
                 const pos = positions[symbol];
-                const current = getPrice(symbol) || pos.avgPrice;
+                const current = getMarkPrice(symbol) || pos.avgPrice;
                 const leverage = pos.leverage || 1;
                 // (10 Ağustos 2026) Özkaynak/kullanılan marj artık GERÇEK
                 // kilitli marja (pos.lockedMargin, varsa) göre — bkz.
@@ -6021,7 +6053,9 @@ const TradingEngine = (() => {
         setInterval(syncWatchlistPrices, WATCHLIST_SYNC_INTERVAL_MS);
         // İlk senkronizasyonu birkaç saniye geciktir ki ilk sembol seçimi ve
         // canlı akış (WS) bağlantısı önce kurulsun, ağ istekleri çakışmasın.
-        setTimeout(syncWatchlistPrices, 8000);
+        setTimeout(syncWatchlistPrices, 3000);
+        setInterval(saveLastRealPrices, 10000);
+        window.addEventListener('pagehide', saveLastRealPrices);
 
         // (29 Temmuz 2026 — Madde 3) Kayan piyasa şeridi — bağımsız, döviz/
         // emtia/BIST100 endeksi verisi watchlist senkronizasyonundan ayrı
@@ -6078,6 +6112,7 @@ const TradingEngine = (() => {
         init,
         selectSymbol,
         getPrice,
+        getMarkPrice,
         getChangePercent,
         syncPriceAnchor,
         closePosition,
@@ -6151,7 +6186,7 @@ const TradingEngine = (() => {
         // belirsizleştiriyor. Bekleyen emir tetikleme mantığını piyasa
         // saatlerinden bağımsız test edebilmek için ayrı bir QA girişi.
         debugCheckPendingOrdersNow: () => checkPendingOcoOrders(),
-        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; priceProfiles[symbol].liveAnchor = price; } },
+        debugSetPrice: (symbol, price) => { if (priceProfiles[symbol]) { priceProfiles[symbol].price = price; priceProfiles[symbol].dayOpen = price; priceProfiles[symbol].liveAnchor = price; priceProfiles[symbol].hasRealAnchor = true; } },
         // (9 Ağustos 2026 — admin panelinden "Kurumsal Mavi" tema kontrolü)
         // finteclubBridge.js'in shared_state dinleyicisi tarafından çağrılır.
         setAdminForcedTheme

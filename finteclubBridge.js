@@ -601,7 +601,8 @@
         if (!portfolio || typeof portfolio.balance !== 'number') return null;
         if (typeof window.TradingEngine === 'undefined' || typeof window.TradingEngine.getPrice !== 'function') return null;
 
-        var usedMargin = 0, openPnl = 0, positionsCount = 0;
+        var usedMargin = 0, openPnl = 0, positionsCount = 0, unpriced = 0;
+        var TE = window.TradingEngine;
         var positionsOut = [];
         var books = [
             { positions: portfolio.positions || {}, market: 'NORMAL' },
@@ -611,7 +612,11 @@
             Object.keys(book.positions).forEach(function (symbol) {
                 var pos = book.positions[symbol];
                 if (!pos || !pos.qty) return;
-                var current = window.TradingEngine.getPrice(symbol) || pos.avgPrice;
+                // (28 Eylül 2026) Sentetik açılış tohum fiyatıyla DEĞİL, gerçek (ya da
+                // bu cihazın gördüğü son gerçek) fiyatla değerle — bkz. getMarkPrice.
+                var mark = typeof TE.getMarkPrice === 'function' ? TE.getMarkPrice(symbol) : TE.getPrice(symbol);
+                if (!mark) unpriced++;
+                var current = mark || pos.avgPrice;
                 var leverage = pos.leverage || 1;
                 var margin = (pos.avgPrice * pos.qty) / leverage;
                 usedMargin += margin;
@@ -669,7 +674,8 @@
             positionsCount: positionsCount,
             positions: positionsOut,
             pendingOrders: pendingOut,
-            recentTrades: histOut
+            recentTrades: histOut,
+            unpriced: unpriced
         };
     }
 
@@ -896,6 +902,9 @@
         if (!localPortfolioBelongsToCurrentUser()) return;
         var snap = computeLightPortfolioSnapshot();
         if (!snap) return;
+        // Açık pozisyonlardan birinin gerçek fiyatı henüz yoksa (yeni cihaz, ilk
+        // dakika) değer tahmin olur — sıralamaya gönderme, fiyat gelince gider.
+        if (snap.unpriced > 0) { setLiveChip('wait', 'Fiyatlar yükleniyor — sıralama birazdan güncellenecek'); return; }
         var contentKey = stableStringify({
             b: snap.balance,
             p: snap.positions.map(function (p) { return [p.symbol, p.market, p.side, p.qty, p.avgPrice]; }),
@@ -964,6 +973,8 @@
         if (!active) { setLiveChip(null); return; }
         if (!verifiedApp) { setLiveChip('bad', currentAuthUser ? '⚠ Bu hesap yarışmacı değil — işlemler sıralamaya gitmez' : '⚠ Giriş yapmadın — işlemler sıralamaya gitmez'); return; }
         var el = byId('ftc-live-chip');
+        var sn = computeLightPortfolioSnapshot();
+        if (sn && sn.unpriced > 0) { setLiveChip('wait', 'Fiyatlar yükleniyor — sıralama birazdan güncellenecek'); return; }
         if (!liveSentOk || !el || el.style.display === 'none') setLiveChip('wait', 'Sıralamaya bağlanıyor…');
     }
 

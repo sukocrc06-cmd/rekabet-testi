@@ -1276,7 +1276,9 @@ const TradingChart = (() => {
         const dailyPrevCloseForInfo = state.dailyCandles.length > 1
             ? state.dailyCandles[state.dailyCandles.length - 2].close
             : (last ? last.open : null);
-        return { ticker, lastClose: last ? last.close : null, dayOpen: last ? last.open : null, dailyPrevClose: dailyPrevCloseForInfo };
+        // (28 Eylül 2026) synthetic: grafik gerçek veri alamayıp sentetik yedeğe düştüyse
+        // bu "son kapanış" UYDURMADIR — TradingEngine bunu gerçek fiyat saymaz.
+        return { ticker, lastClose: last ? last.close : null, dayOpen: last ? last.open : null, dailyPrevClose: dailyPrevCloseForInfo, synthetic: !!state.dailyDataIsSynthetic };
     }
 
     function getLastClose() {

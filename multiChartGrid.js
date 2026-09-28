@@ -215,7 +215,9 @@ const MultiChartGrid = (() => {
         } catch (e) { /* fall through to simulated data */ }
 
         const generated = DC.generateOHLCV(symbol, 90);
-        return generated.map(c => ({ time: c.date, open: c.open, high: c.high, low: c.low, close: c.close }));
+        const out = generated.map(c => ({ time: c.date, open: c.open, high: c.high, low: c.low, close: c.close }));
+        out._synthetic = true; // (28 Eylül 2026) uydurma veri — gerçek fiyat çapası sayılmaz
+        return out;
     }
 
     async function loadCell(index, symbol) {
@@ -229,7 +231,7 @@ const MultiChartGrid = (() => {
         // güncellemesinde fiyat rozeti ve mum, önceden birikmiş ayrı bir
         // simülasyon durumuna aniden ve gerçekçi olmayan bir şekilde
         // sıçrayabilir (bkz. syncPriceAnchor yorumu, tradingEngine.js).
-        if (window.TradingEngine && candles.length && typeof window.TradingEngine.syncPriceAnchor === 'function') {
+        if (window.TradingEngine && candles.length && !candles._synthetic && typeof window.TradingEngine.syncPriceAnchor === 'function') {
             window.TradingEngine.syncPriceAnchor(symbol, candles[candles.length - 1].close);
         }
         refreshCellOverlay(index);
