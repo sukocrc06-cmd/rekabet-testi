@@ -4298,6 +4298,14 @@ const TradingEngine = (() => {
                 // gerçekleştirilir.
                 if (order.kind === 'MARKET_QUEUED') {
                     changed = true;
+                    // (29 Eylül 2026) Sıradaki "pozisyon kapat" emri yalnızca kapatır: pozisyon bu
+                    // arada küçüldüyse kalan kadarını kapatır, kapandıysa emir düşer (ters pozisyon açmaz).
+                    if (order.closeOnly) {
+                        const cpos = book(market).positions[order.symbol];
+                        const want = order.side === 'SELL' ? 'LONG' : 'SHORT';
+                        if (!cpos || cpos.side !== want) { showToast(`${order.symbol} için sıradaki kapatma emri düştü — pozisyon zaten kapalı.`); return; }
+                        order.qty = Math.min(order.qty, cpos.qty);
+                    }
                     if (order.reservedAmount) portfolio.balance += order.reservedAmount;
                     const result = placeOrder(order.symbol, order.side, order.qty, price, order.commissionPct, order.leverage, market);
                     if (result.ok) {
@@ -4824,6 +4832,44 @@ const TradingEngine = (() => {
                 // basmıyoruz, aksi halde 2 saniyede bir spam olurdu.
                 return;
             }
+        }
+
+        // (29 Eylül 2026 — "borsa kapalıyken satış yaptım") Alım emri seans dışında sıraya
+        // alınıyordu ama pozisyon kartındaki "Kapat" düğmesi ANINDA, son kapanış fiyatından
+        // satıyordu. Artık seans dışında manuel kapama da sıraya alınır ve piyasa açılınca o
+        // anki fiyattan gerçekleşir. Otomatik SL/TP/Trailing/likidasyon seans dışında
+        // tetiklenmez (piyasa açılınca yeniden kontrol edilir). Yalnızca admin kapaması anında.
+        if (reason !== 'ADMIN' && !isMarketOpenForTrading()) {
+            if (reason) return;
+            const qb = book(market);
+            if (!Array.isArray(qb.pending)) qb.pending = [];
+            if (qb.pending.some(o => o.kind === 'MARKET_QUEUED' && o.closeOnly && o.symbol === symbol)) {
+                showToast(`${symbol} için kapatma emrin zaten sırada — piyasa açılınca gerçekleşecek.`);
+                return;
+            }
+            qb.pending.push({
+                id: genId(),
+                kind: 'MARKET_QUEUED',
+                closeOnly: true,
+                symbol: symbol,
+                side: pos.side === 'LONG' ? 'SELL' : 'BUY',
+                qty: pos.qty,
+                leverage: pos.leverage || 1,
+                commissionPct: getCommissionPct(),
+                market: market,
+                slPrice: null,
+                tpPrice: null,
+                useTrailing: false,
+                trailingPct: null,
+                reservedAmount: 0,
+                createdAt: Date.now()
+            });
+            savePortfolio();
+            renderPendingOcoOrders();
+            renderPositions();
+            renderAccountSummary();
+            showToast(`Piyasa kapalı — ${symbol} pozisyonunu kapatma emrin sıraya alındı. Piyasa açılınca (hafta içi 09:55) o anki fiyattan gerçekleşecek; istersen Bekleyen Emirler'den iptal edebilirsin.`);
+            return;
         }
 
         const price = getPrice(symbol);
