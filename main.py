@@ -65,6 +65,29 @@ import threading
 # gibi Render'ın ücretsiz katmanında test edilmemiş, riskli bir bağımlılık
 # yolu ile DEĞİL. `session` nesnesi zaten aşağıdaki kendi kendine "ısınma"
 # pingi (_self_ping_loop) için de kullanılıyor.
+# (30 Eylül 2026 — bellek) glibc her iş parçacığı için ayrı bellek alanı (arena) açar;
+# yf.download'ın toplu indirme iş parçacıklarıyla bu alanlar çoğalıp boşalan belleği işletim
+# sistemine geri vermiyordu (RSS sürekli artıyordu). Alan sayısı 2 ile sınırlanır.
+_YF_THREADS = 6
+try:
+    import ctypes as _ctypes
+    _libc = _ctypes.CDLL("libc.so.6")
+    _libc.mallopt(-8, 2)  # M_ARENA_MAX = 2
+except Exception:  # pragma: no cover — Linux dışı
+    _libc = None
+
+
+def _rss_mb():
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    return None
+
+
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -168,7 +191,34 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # bir sınırlamanın kendini toparlaması için zaman kazanmayı sağlar —
 # günlük mum verisi için 5 dakikalık bayatlık pratikte fark edilmez.
 _HISTORY_CACHE_TTL_SEC = 300
-_history_cache = {}  # key: (formatted_ticker, period, interval) -> (timestamp, DataFrame)
+# (30 Eylül 2026 — Render "exceeded its memory limit" KÖK NEDENİ) Bu önbellek
+# önceden SINIRSIZDI ve süresi dolan kayıtlar hiç silinmiyordu: her sembol ×
+# her zaman dilimi (1d/5m/15m/30m/60m) için bir DataFrame sonsuza dek bellekte
+# kalıyordu (97 sembol × 5 = ~500 tablo). 512 MB'lık ücretsiz instance zamanla
+# doluyor ve Render servisi yeniden başlatıyordu. Artık: en fazla
+# _HISTORY_CACHE_MAX_ENTRIES kayıt (en eskisi atılır), yalnızca grafiğin
+# kullandığı sütunlar saklanır, süresi dolanlar arka plan temizliğiyle silinir.
+from collections import OrderedDict as _OrderedDict
+import gc as _gc
+_HISTORY_CACHE_MAX_ENTRIES = 120
+_HISTORY_KEEP_COLS = ("Open", "High", "Low", "Close", "Volume", "Dividends", "Stock Splits")
+_history_cache = _OrderedDict()  # key: (formatted_ticker, period, interval) -> (timestamp, DataFrame)
+_history_cache_lock = threading.Lock()
+
+
+def _history_cache_put(key, df):
+    try:
+        drop = [c for c in df.columns if c not in _HISTORY_KEEP_COLS]
+        if drop:
+            df = df.drop(columns=drop)
+    except Exception:
+        pass
+    with _history_cache_lock:
+        _history_cache.pop(key, None)
+        _history_cache[key] = (time.time(), df)
+        while len(_history_cache) > _HISTORY_CACHE_MAX_ENTRIES:
+            _history_cache.popitem(last=False)
+    return df
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -289,7 +339,7 @@ def _cached_history(stock: "yf.Ticker", formatted: str, period: str, interval: s
             _single_flight_failures[("history",) + key] = (time.time(), e)
             raise
         if df is not None and not df.empty:
-            _history_cache[key] = (time.time(), df)
+            df = _history_cache_put(key, df)
         return df
 
 
@@ -315,7 +365,7 @@ _IST_NAME = "Europe/Istanbul"
 _REF_INTRADAY_TTL_SEC = 60        # gün içi toplu veri (seans içi)
 _REF_INTRADAY_TTL_CLOSED_SEC = 900  # piyasa kapalıyken daha seyrek
 _REF_DAILY_TTL_SEC = 1800         # resmi günlük kapanışlar
-_ref_cache = {}                   # (kind, key) -> (ts, data)
+_ref_cache = {}                   # (kind, formatted) -> (ts, veri | None) — sembol başına (30 Eylül 2026)
 
 
 def _bist_open_now():
@@ -356,47 +406,69 @@ def _close_series(raw, formatted):
     return s if len(s) else None
 
 
+def _ref_parse(kind, raw, f):
+    s_ = _close_series(raw, f)
+    if s_ is None:
+        return None
+    dates = _to_local_dates(s_.index)
+    vals = [float(v) for v in s_.values]
+    if kind == "intraday":
+        last_date = dates[-1]
+        prev_intra = None
+        for d, v in zip(reversed(dates), reversed(vals)):
+            if d < last_date:
+                prev_intra = v
+                break
+        return {"date": last_date, "last": vals[-1], "prevIntra": prev_intra}
+    # aynı güne düşen birden çok satır olursa sonuncusu geçerli
+    by_day = {}
+    for d, v in zip(dates, vals):
+        by_day[d] = v
+    return sorted(by_day.items())
+
+
 def _ref_download(kind, formatted_list, period, interval, ttl):
-    key = (kind, ",".join(sorted(formatted_list)))
-    hit = _ref_cache.get(key)
-    if hit and (time.time() - hit[0]) < ttl:
-        return hit[1]
-    with _single_flight_lock(("ref",) + key):
-        hit = _ref_cache.get(key)
-        if hit and (time.time() - hit[0]) < ttl:
-            return hit[1]
+    def collect():
+        now = time.time()
+        out, need = {}, []
+        for f in formatted_list:
+            hit = _ref_cache.get((kind, f))
+            if hit and (now - hit[0]) < ttl:
+                if hit[1] is not None:
+                    out[f] = hit[1]
+            else:
+                need.append(f)
+        return out, need
+
+    out, need = collect()
+    if not need:
+        return out
+    with _single_flight_lock(("ref", kind)):
+        out, need = collect()
+        if not need:
+            return out
+        if _recent_failure(("ref", kind)) is not None:
+            return out
         try:
             raw = _yf_call_with_backoff(
-                lambda: yf.download(tickers=list(formatted_list), period=period, interval=interval,
-                                    group_by="ticker", threads=True, progress=False, session=session),
+                lambda: yf.download(tickers=list(need), period=period, interval=interval,
+                                    group_by="ticker", threads=_YF_THREADS, progress=False, session=session),
                 label=f"referans {kind} toplu indirme")
         except Exception as e:
             print(f"[ref] {kind} indirilemedi: {e}")
-            raw = None
-        data = {}
-        for f in formatted_list:
-            s = _close_series(raw, f)
-            if s is None:
-                continue
-            dates = _to_local_dates(s.index)
-            vals = [float(v) for v in s.values]
-            if kind == "intraday":
-                last_date = dates[-1]
-                prev_intra = None
-                for d, v in zip(reversed(dates), reversed(vals)):
-                    if d < last_date:
-                        prev_intra = v
-                        break
-                data[f] = {"date": last_date, "last": vals[-1], "prevIntra": prev_intra}
-            else:
-                # aynı güne düşen birden çok satır olursa sonuncusu geçerli
-                by_day = {}
-                for d, v in zip(dates, vals):
-                    by_day[d] = v
-                data[f] = sorted(by_day.items())
-        if data or raw is not None:
-            _ref_cache[key] = (time.time(), data)
-        return data
+            _single_flight_failures[("ref", kind)] = (time.time(), e)
+            return out
+        now = time.time()
+        for f in need:
+            try:
+                val = _ref_parse(kind, raw, f)
+            except Exception:
+                val = None
+            _ref_cache[(kind, f)] = (now, val)
+            if val is not None:
+                out[f] = val
+        del raw
+        return out
 
 
 def _reference_prices(formatted_list):
@@ -503,7 +575,7 @@ async def get_index():
 # birlikte HEAD'i de kabul edecek şekilde genişletildi.
 @app.api_route("/api/v1/health", methods=["GET", "HEAD"])
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "rssMB": _rss_mb(), "historyCache": len(_history_cache), "refCache": len(_ref_cache)}
 
 # (27 Ağustos 2026 — yarışma günü hız hazırlığı, üçüncü tur: "Render'ı hiç
 # uyutma") Yukarıdaki UptimeRobot düzeltmesi (25 Ağustos) dış bir servise
@@ -581,6 +653,48 @@ async def _self_ping_loop():
             await asyncio.to_thread(session.get, _SELF_PING_URL, timeout=10)
         except Exception:
             pass  # sessiz — bu sadece Render'ı uyanık tutmak için, kritik değil
+
+
+# (30 Eylül 2026 — bellek) Süresi dolan önbellek kayıtlarını siler, çöp toplar ve boşalan
+# belleği işletim sistemine iade eder (malloc_trim). Önceki sürümde hiçbir önbellek temizlenmiyordu.
+_MEM_SWEEP_INTERVAL_SEC = 120
+
+
+def _mem_sweep_once():
+    now = time.time()
+    with _history_cache_lock:
+        for k in [k for k, v in _history_cache.items() if now - v[0] > _HISTORY_CACHE_TTL_SEC]:
+            _history_cache.pop(k, None)
+    for k in [k for k, v in list(_ref_cache.items()) if now - v[0] > 2 * _REF_DAILY_TTL_SEC]:
+        _ref_cache.pop(k, None)
+    for k in [k for k, v in list(_single_flight_failures.items()) if now - v[0] > 4 * _SINGLE_FLIGHT_FAIL_TTL_SEC]:
+        _single_flight_failures.pop(k, None)
+    for k in [k for k, v in list(_fundamentals_cache.items()) if now - v[0] > _FUNDAMENTALS_CACHE_TTL_SEC]:
+        _fundamentals_cache.pop(k, None)
+    with _single_flight_guard:
+        if len(_single_flight_locks) > 500:
+            for k in [k for k, lk in _single_flight_locks.items() if not lk.locked()]:
+                _single_flight_locks.pop(k, None)
+    _gc.collect()
+    if _libc is not None:
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
+async def _mem_sweep_loop():
+    while True:
+        await asyncio.sleep(_MEM_SWEEP_INTERVAL_SEC)
+        try:
+            await asyncio.to_thread(_mem_sweep_once)
+        except Exception as e:
+            print(f"[mem] temizlik hatası: {e}")
+
+
+@app.on_event("startup")
+async def _start_mem_sweep():
+    asyncio.create_task(_mem_sweep_loop())
 
 
 @app.on_event("startup")
@@ -969,7 +1083,7 @@ def _fetch_quotes_locked(tickers, cache_key, now):
                 period="2d",
                 interval="1d",
                 group_by="ticker",
-                threads=True,
+                threads=_YF_THREADS,
                 progress=False,
                 session=session,
             ),
@@ -1071,7 +1185,7 @@ def _fetch_market_ticker_locked(now):
                 period="5d",
                 interval="1d",
                 group_by="ticker",
-                threads=True,
+                threads=_YF_THREADS,
                 progress=False,
                 session=session,
             ),
@@ -1259,7 +1373,7 @@ async def _refresh_live_prices_once():
                 period="1d",
                 interval="1m",
                 group_by="ticker",
-                threads=True,
+                threads=_YF_THREADS,
                 progress=False,
                 session=session,
             ),
