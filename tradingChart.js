@@ -5197,6 +5197,34 @@ const TradingChart = (() => {
 
     function closeAllFlyouts() {
         document.querySelectorAll('.tv-tool-flyout.open').forEach(f => f.classList.remove('open'));
+        // (29 Eylül 2026) Gövdeye taşınmış menüler yerine döner (bkz. toggleFlyout).
+        document.querySelectorAll('body > .tv-tool-flyout.tv-flyout-portal').forEach(f => {
+            f.classList.remove('tv-flyout-portal');
+            if (f._ftcHome && f._ftcHome.isConnected) f._ftcHome.appendChild(f); else f.remove();
+        });
+    }
+    // (29 Eylül 2026 — "telefonda gösterge/araç menüsü açılmıyor") Dar ekranda #chart-toolbar
+    // yatay kaydırılabilir bir kutu (overflow-x:auto + -webkit-overflow-scrolling:touch).
+    // iOS Safari böyle bir kutunun içindeki position:fixed menüleri kutunun sınırına kırpıyor —
+    // menü açılıyor ama GÖRÜNMÜYOR, araç seçilemiyor, çizim yapılamıyordu. Menü açılırken
+    // gövdeye (body) taşınır; tıklamalar araç çubuğundakiyle aynı işleyiciye gider.
+    function handleFlyoutClick(e) {
+        const indicatorItem = e.target.closest('.tv-indicator-flyout-item');
+        if (indicatorItem) { handleIndicatorFlyoutClick(indicatorItem); return true; }
+        const moreLink = e.target.closest('[data-action="open-indicator-modal"]');
+        if (moreLink) { closeAllFlyouts(); byId('btn-open-indicators')?.click(); return true; }
+        const flyoutItem = e.target.closest('.tv-tool-flyout-item');
+        if (flyoutItem) {
+            const home = flyoutItem.closest('.tv-tool-flyout');
+            const groupEl = (home && home._ftcHome) || flyoutItem.closest('.tv-tool-group');
+            const groupId = groupEl ? groupEl.dataset.group : null;
+            if (groupId) groupLastTool[groupId] = flyoutItem.dataset.tool;
+            selectTool(flyoutItem.dataset.tool);
+            closeAllFlyouts();
+            renderToolbar();
+            return true;
+        }
+        return false;
     }
     // (22 Temmuz 2026, on ikinci oturum — madde 7 "profil paneli") window.
     // __optipulseCloseOtherModals ile aynı köprü deseni: tradingEngine.js'teki
@@ -5214,6 +5242,15 @@ const TradingChart = (() => {
         const chartTypeDropdown = byId('chart-type-dropdown');
         if (chartTypeDropdown) chartTypeDropdown.classList.remove('open');
         if (willOpen) {
+            if (!window.matchMedia('(min-width: 981px)').matches && groupEl && flyout.parentNode !== document.body) {
+                flyout._ftcHome = groupEl;
+                flyout.classList.add('tv-flyout-portal');
+                if (!flyout._ftcPortalBound) {
+                    flyout._ftcPortalBound = true;
+                    flyout.addEventListener('click', (ev) => { if (flyout.classList.contains('tv-flyout-portal')) { ev.stopPropagation(); handleFlyoutClick(ev); } });
+                }
+                document.body.appendChild(flyout);
+            }
             if (anchorBtn) {
                 const rect = anchorBtn.getBoundingClientRect();
                 // Masaüstünde (>=981px) #chart-toolbar sol dikey raya sabitlenmiş
@@ -5353,15 +5390,8 @@ const TradingChart = (() => {
             // eşleşmesinden ÖNCE ele alınmalı, aksi halde aşağıdaki genel dal
             // bunları bir "çizim aracı seç" tıklaması sanıp state.activeTool'u
             // bozardı.
-            const indicatorItem = e.target.closest('.tv-indicator-flyout-item');
-            if (indicatorItem) {
-                handleIndicatorFlyoutClick(indicatorItem);
-                return;
-            }
-            const moreLink = e.target.closest('[data-action="open-indicator-modal"]');
-            if (moreLink) {
-                closeAllFlyouts();
-                byId('btn-open-indicators')?.click();
+            if (e.target.closest('.tv-indicator-flyout-item') || e.target.closest('[data-action="open-indicator-modal"]')) {
+                handleFlyoutClick(e);
                 return;
             }
             const checklistToggle = e.target.closest('[data-checklist-toggle]');
@@ -5420,6 +5450,13 @@ const TradingChart = (() => {
         document.addEventListener('click', (e) => {
             if (!toolbar.contains(e.target)) closeAllFlyouts();
         });
+        // (29 Eylül 2026) Dokunmatikte grafik alanı "click" üretmeyebilir (grafik kütüphanesi
+        // dokunuşu kendisi işliyor) — menü dışına dokununca da kapansın.
+        document.addEventListener('pointerdown', (e) => {
+            if (!document.querySelector('.tv-tool-flyout.open')) return;
+            if (toolbar.contains(e.target) || (e.target.closest && e.target.closest('.tv-tool-flyout'))) return;
+            closeAllFlyouts();
+        }, true);
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeAllFlyouts();

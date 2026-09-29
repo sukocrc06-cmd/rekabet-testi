@@ -6134,3 +6134,23 @@ body.compact-mode .status-item {
     .tv-res-btn { padding-top: 2px; padding-bottom: 2px; }
     .trading-chart-section { flex: 1 1 auto; min-height: 0 !important; }
 }
+
+/* (29 Eylül 2026 — iPhone) 100vh Safari'de adres/sekme çubuğunun ARKASINA taşar; yatay
+   ekranda grafiğin alt fiyat/zaman ekseni görünmüyordu. Dinamik görünür yükseklik (dvh). */
+@supports (height: 100dvh) {
+    body, .dashboard-container { height: 100dvh; }
+}
+.tv-tool-flyout.tv-flyout-portal { z-index: 2000; }
+@media (max-width: 950px) and (pointer: coarse), (max-width: 640px) {
+    /* Sıralama etiketi grafiğin ortasını kapatmasın: sol altta küçük */
+    #ftc-live-chip {
+        left: 6px !important; right: auto !important; top: auto !important;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 6px) !important;
+        font-size: 10px !important; padding: 2px 8px !important;
+        max-width: 62vw !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        opacity: .9;
+    }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+    .dashboard-container { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+}
