@@ -3947,7 +3947,7 @@ const TradingChart = (() => {
             : JSON.stringify(state.drawings, (k, v) => (k === 'alert' ? undefined : v));
     }
     function isDrawingInteractionActive() {
-        return !!(moveDrag || endpointDrag || (state.pendingShape && state.pendingShape.dragging));
+        return !!(moveDrag || endpointDrag || (state.pendingShape && state.pendingShape.dragging) || state.clickPending || state.widthPending);
     }
     function resetDrawingHistory(ticker) {
         historyTicker = ticker;
@@ -4698,6 +4698,12 @@ const TradingChart = (() => {
         return bar;
     }
     function updateDrawSelectionBar() {
+        // (30 Eylül 2026) Çizim sürerken (araç seçili / yarım çizim) üstteki çubuk gizli
+        if (state.activeTool !== 'cursor' || state.pendingShape || state.clickPending || state.widthPending) {
+            const b0 = byId('tv-draw-selbar');
+            if (b0 && drawBarShownFor !== null) { b0.classList.remove('open'); drawBarShownFor = null; }
+            return;
+        }
         const idx = state.selectedDrawingIndex;
         const shape = (idx >= 0 && !state.drawingsHidden) ? state.drawings[idx] : null;
         let bar = byId('tv-draw-selbar');
@@ -4750,7 +4756,7 @@ const TradingChart = (() => {
         }, { passive: false });
         window.addEventListener('touchmove', (e) => {
             if (!e.touches.length) return;
-            const drawing = (state.pendingShape && state.pendingShape.dragging) || (state.pendingPoints && MULTI_CLICK_TOOLS[state.activeTool]);
+            const drawing = (state.pendingShape && state.pendingShape.dragging) || (state.pendingPoints && MULTI_CLICK_TOOLS[state.activeTool]) || state.clickPending || state.widthPending;
             if (!drawing) return;
             e.preventDefault();
             onDrawMove(touchToMouseLike(e.touches[0]));
@@ -4975,8 +4981,12 @@ const TradingChart = (() => {
         { id: 'fibgroup', label: 'Fibonacci', tools: [
             { id: 'fib', label: 'Fibonacci Geri Çekilme' },
             { id: 'fib_ext', label: 'Fibonacci Uzantı' },
+            { id: 'fib_channel', label: 'Fibonacci Kanalı' },
+            { id: 'fib_time', label: 'Fibonacci Zaman Bölgesi' },
+            { id: 'fib_tb_time', label: 'Trend Bazlı Fibonacci Zamanı' },
             { id: 'fib_fan', label: 'Fibonacci Yelpazesi' },
-            { id: 'fib_time', label: 'Fibonacci Zaman Bölgesi' }
+            { id: 'fib_arcs', label: 'Fibonacci Yayları' },
+            { id: 'fib_circles', label: 'Fibonacci Çemberleri' }
         ] },
         // (17 Temmuz 2026, yedinci oturum) Tier 2 çizim araçları: Gann Fan
         // (pivot + 1x1 açı noktasından türetilen klasik Gann açı seti) ve
@@ -4985,6 +4995,8 @@ const TradingChart = (() => {
         // yalnızca görsel etiketleme sağlayan — bir sayım aracı).
         { id: 'advanced', label: 'Gelişmiş Araçlar', tools: [
             { id: 'gann_fan', label: 'Gann Yelpazesi' },
+            { id: 'gann_box', label: 'Gann Kutusu' },
+            { id: 'gann_square', label: 'Gann Karesi (Sabit)' },
             { id: 'elliott', label: 'Elliott Dalgası (Manuel)' }
         ] },
         // (18 Temmuz 2026, onuncu oturum, ikinci tur) Kullanıcı isteği:
@@ -4997,7 +5009,7 @@ const TradingChart = (() => {
         // da düz bir doğrusal ekstrapolasyon — YATIRIM TAVSİYESİ DEĞİLDİR,
         // sadece mevcut eğimin görsel devamı.
         { id: 'patterns', label: 'Desenler', tools: [
-            { id: 'abcd', label: 'ABCD Deseni (Manuel)' }
+            { id: 'abcd', label: 'ABCD Deseni (oranlı)' }
         ] },
         { id: 'forecast', label: 'Tahmin', tools: [
             { id: 'trend_projection', label: 'Trend Projeksiyonu (Doğrusal — yatırım tavsiyesi değildir)' }
@@ -5038,6 +5050,12 @@ const TradingChart = (() => {
             fib_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="21" y2="11"></line><line x1="3" y1="21" x2="21" y2="17"></line>',
             fib_time: '<line x1="4" y1="3" x2="4" y2="21"></line><line x1="10" y1="3" x2="10" y2="21"></line><line x1="16" y1="3" x2="16" y2="21"></line><line x1="21" y1="3" x2="21" y2="21"></line>',
             gann_fan: '<line x1="3" y1="21" x2="21" y2="21"></line><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="12" y2="3"></line><line x1="3" y1="21" x2="21" y2="12"></line><line x1="3" y1="21" x2="21" y2="17"></line><circle cx="3" cy="21" r="1.6" fill="currentColor"></circle>',
+            fib_channel: '<line x1="3" y1="15" x2="15" y2="3"></line><line x1="6" y1="19" x2="18" y2="7" stroke-dasharray="2 2"></line><line x1="9" y1="23" x2="21" y2="11"></line>',
+            fib_tb_time: '<polyline points="2,16 6,6 10,12"></polyline><line x1="13" y1="3" x2="13" y2="21"></line><line x1="17" y1="3" x2="17" y2="21"></line><line x1="22" y1="3" x2="22" y2="21"></line>',
+            fib_arcs: '<path d="M3 20a9 9 0 0 1 18 0"></path><path d="M7 20a5 5 0 0 1 10 0"></path><line x1="12" y1="20" x2="4" y2="6" stroke-dasharray="2 2"></line>',
+            fib_circles: '<circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>',
+            gann_box: '<rect x="3" y="4" width="18" height="16" rx="1"></rect><line x1="3" y1="12" x2="21" y2="12"></line><line x1="12" y1="4" x2="12" y2="20"></line><line x1="3" y1="20" x2="21" y2="4" stroke-dasharray="2 2"></line>',
+            gann_square: '<rect x="3" y="3" width="18" height="18" rx="1"></rect><line x1="3" y1="21" x2="21" y2="3"></line><line x1="3" y1="21" x2="21" y2="12"></line><path d="M3 12a9 9 0 0 1 9 9"></path>',
             elliott: '<polyline points="2,18 7,6 11,14 16,3 20,11"></polyline><circle cx="2" cy="18" r="1.4" fill="currentColor"></circle><circle cx="20" cy="11" r="1.4" fill="currentColor"></circle>',
             abcd: '<polyline points="3,19 9,6 14,15 21,3"></polyline><circle cx="3" cy="19" r="1.6" fill="currentColor"></circle><circle cx="9" cy="6" r="1.6" fill="currentColor"></circle><circle cx="14" cy="15" r="1.6" fill="currentColor"></circle><circle cx="21" cy="3" r="1.6" fill="currentColor"></circle>',
             trend_projection: '<line x1="3" y1="19" x2="12" y2="9"></line><line x1="12" y1="9" x2="21" y2="2" stroke-dasharray="2.5 2.5"></line><circle cx="3" cy="19" r="1.6" fill="currentColor"></circle>',
@@ -5282,6 +5300,13 @@ const TradingChart = (() => {
         state.activeTool = tool;
         state.pendingShape = null;
         state.pendingPoints = null;
+        // (30 Eylül 2026) tıkla-tıkla / kanal genişliği aşamaları da iptal
+        state.clickPending = null;
+        state.widthPending = null;
+        // Çizim aracı seçilince açık ayar paneli kapanır, seçim çubuğu gizlenir —
+        // "Fibonacci çizerken ayar paneli çizime engel oluyor" şikâyeti.
+        if (tool !== 'cursor') { try { closeDrawSettings(); } catch (e) { /* panel yok */ } }
+        try { updateDrawSelectionBar(); } catch (e) { /* çubuk yok */ }
         // Ölçüm aracından başka bir araca geçilirken son ölçüm sonucu da
         // ekrandan kalkmalı (bkz. Madde 14 — measureShape artık kalıcı bir
         // çizim değil, sadece "aktif ölçüm aracı" ekranıyla ilişkili).
@@ -5460,10 +5485,12 @@ const TradingChart = (() => {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeAllFlyouts();
-                if (state.pendingPoints) {
+                if (state.pendingPoints || state.clickPending || state.widthPending) {
                     // Cancel an in-progress multi-click drawing (e.g. Elliott
                     // Wave) without discarding the active tool selection.
                     state.pendingPoints = null;
+                    state.clickPending = null;
+                    state.widthPending = null;
                     state.pendingShape = null;
                     redrawDrawings();
                 }
@@ -5480,12 +5507,12 @@ const TradingChart = (() => {
 
     const SINGLE_POINT_TOOLS = ['vline', 'cross'];
     const FREEHAND_TOOLS = ['brush'];
-    const DERIVED_THIRD_POINT_TOOLS = ['channel', 'triangle', 'pos_long', 'pos_short'];
+    const DERIVED_THIRD_POINT_TOOLS = ['channel', 'fib_channel', 'triangle', 'pos_long', 'pos_short'];
     // Manuel Elliott Dalgası: tek bir sürükleme yerine, kullanıcının sırayla
     // tıklayarak 0-1-2-3-4-5 dalga noktalarını işaretlediği bir araç (klasik
     // 5 dalgalı itki + düzeltme sayımı). `state.pendingPoints` bu tıklamalar
     // arasında birikir; gerekli nokta sayısına ulaşınca çizim tamamlanır.
-    const MULTI_CLICK_TOOLS = { elliott: 6, abcd: 4 };
+    const MULTI_CLICK_TOOLS = { elliott: 6, abcd: 4, fib_tb_time: 3 };
 
     function priceRangeApprox() {
         if (!state.candles.length) return 1;
@@ -5628,7 +5655,9 @@ const TradingChart = (() => {
     }
 
     let lastAutoSelectedShape = null;
+    let lastFinishAt = 0;
     function finishDrawing() {
+        lastFinishAt = Date.now();
         selectTool('cursor');
         // (24 Eylül 2026) TradingView'deki gibi: yeni çizilen çizim seçili
         // gelir, üstteki araç çubuğu (⚙ Ayarlar vb.) hemen görünür.
@@ -5706,6 +5735,27 @@ const TradingChart = (() => {
         const dp = pixelToDataPoint(x, y);
         if (dp.time === null || dp.price === null) return;
 
+        // (30 Eylül 2026) Kanal genişliği aşaması: üçüncü tıklama genişliği sabitler.
+        if (state.widthPending) {
+            const wp = state.widthPending;
+            state.widthPending = null;
+            state.pendingShape = null;
+            const off = channelOffsetAt(wp, dp);
+            state.drawings.push({ type: wp.type, p1: wp.p1, p2: wp.p2, offset: off ? off : wp.offset });
+            finishDrawing();
+            return;
+        }
+        // Tıkla-tıkla: ilk tıklama başlangıç, ikinci tıklama bitiş (TradingView gibi).
+        if (state.clickPending) {
+            const cp = state.clickPending;
+            state.clickPending = null;
+            cp.p2 = dp;
+            cp.dragging = true;
+            state.pendingShape = cp;
+            onDrawEnd(true);
+            return;
+        }
+
         if (state.activeTool === 'measure') {
             // Yeni bir ölçüme başlarken önceki geçici sonucu temizle.
             state.measureShape = null;
@@ -5753,6 +5803,23 @@ const TradingChart = (() => {
     }
 
     function onDrawMove(e) {
+        if (state.clickPending || state.widthPending) {
+            const r0 = drawCanvas.getBoundingClientRect();
+            const x0 = e.clientX - r0.left, y0 = e.clientY - r0.top;
+            if (!isInPlotArea(x0, y0)) return;
+            const d0 = pixelToDataPoint(x0, y0);
+            if (d0.time === null || d0.price === null) return;
+            if (state.widthPending) {
+                const off = channelOffsetAt(state.widthPending, d0);
+                if (off) state.widthPending.offset = off;
+                state.pendingShape = state.widthPending;
+            } else {
+                state.clickPending.p2 = d0;
+                state.pendingShape = state.clickPending;
+            }
+            redrawDrawings();
+            return;
+        }
         if (state.pendingPoints && MULTI_CLICK_TOOLS[state.activeTool]) {
             // Rubber-band preview: show the committed points-so-far plus a
             // "live" segment following the cursor, without adding it to
@@ -5783,11 +5850,20 @@ const TradingChart = (() => {
         redrawDrawings();
     }
 
-    function onDrawEnd() {
+    function onDrawEnd(forced) {
         if (!state.pendingShape || !state.pendingShape.dragging) return;
         const pending = state.pendingShape;
         pending.dragging = false;
         state.pendingShape = null;
+
+        // (30 Eylül 2026) Sürüklemeden bırakıldıysa (tek tıklama) çizim bitmez:
+        // ikinci tıklamayı bekler — fare hareketiyle önizleme izler.
+        if (forced !== true && !pending.points && pending.type !== 'measure' && isTinyDrag(pending)) {
+            state.clickPending = pending;
+            state.pendingShape = pending;
+            redrawDrawings();
+            return;
+        }
 
         if (pending.type === 'measure') {
             // (29 Temmuz 2026 — Madde 14) Kalıcı bir çizim OLARAK eklenmiyor —
@@ -5805,8 +5881,14 @@ const TradingChart = (() => {
             }
         } else if (DERIVED_THIRD_POINT_TOOLS.includes(pending.type)) {
             const range = priceRangeApprox();
-            if (pending.type === 'channel') {
-                state.drawings.push({ type: 'channel', p1: pending.p1, p2: pending.p2, offset: range * 0.12 });
+            if (pending.type === 'channel' || pending.type === 'fib_channel') {
+                // (30 Eylül 2026) Genişlik artık sabit değil: fareyle ayarlanır, tıklayınca sabitlenir
+                // (sonradan ortadaki yuvarlak tutamaçla da değiştirilebilir).
+                state.widthPending = { type: pending.type, p1: pending.p1, p2: pending.p2, offset: range * 0.12 };
+                state.pendingShape = state.widthPending;
+                redrawDrawings();
+                if (!channelHintShown) { channelHintShown = true; chartToast('Kanal genişliğini fareyle ayarla, tıklayarak sabitle.'); }
+                return;
             } else if (pending.type === 'triangle') {
                 // (3 Ağustos 2026 EK) idx1/idx2 artık indexForTime()
                 // (virtualTimeToIndex) sayesinde son mumun ÖTESİNDEKİ
@@ -5880,8 +5962,18 @@ const TradingChart = (() => {
     const FIB_LEVEL_SETS = {
         fib:      [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1],
         fib_ext:  [0, 0.618, 1, 1.272, 1.618, 2, 2.618],
-        fib_fan:  [0.236, 0.382, 0.5, 0.618, 0.786, 1],
-        fib_time: [1, 2, 3, 5, 8, 13, 21]
+        // (30 Eylül 2026) Yelpaze: 0 = ana trend (p1→p2), 1 = yatay; TradingView'deki set.
+        fib_fan:  [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1],
+        // Zaman bölgeleri geleceğe uzanır — 34/55/89 eklendi, 0 başlangıç çizgisi.
+        fib_time: [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89],
+        fib_tb_time: [0, 0.382, 0.5, 0.618, 1, 1.382, 1.618, 2, 2.382, 2.618, 3, 3.618, 4.236],
+        fib_channel: [0, 0.618, 1, 1.618, 2.618, 3.618, 4.236],
+        fib_arcs: [0.236, 0.382, 0.5, 0.618, 0.786, 1],
+        fib_circles: [0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618],
+        // Gann: oran = 1x1 eğiminin katı (1x8 = 0.125 … 8x1 = 8)
+        gann_fan: [0.125, 0.25, 0.3333, 0.5, 1, 2, 3, 4, 8],
+        gann_box: [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1],
+        gann_square: [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1]
     };
 
     // İki hazır palet + "özel". Kullanıcı ayar panelinden seçiyor; tek bir
@@ -5923,8 +6015,22 @@ const TradingChart = (() => {
         showPercent: true, showPrice: true, extendLeft: false, extendRight: false
     };
 
-    const FIB_SHAPE_TYPES = ['fib', 'fib_ext', 'fib_fan', 'fib_time'];
+    // (30 Eylül 2026) "Seviyeli" araçlar: seviye başına renk/aç-kapa + palet ayarı olan tüm araçlar.
+    const FIB_SHAPE_TYPES = ['fib', 'fib_ext', 'fib_fan', 'fib_time', 'fib_tb_time', 'fib_channel', 'fib_arcs', 'fib_circles',
+        'gann_fan', 'gann_box', 'gann_square'];
     function isFibShape(type) { return FIB_SHAPE_TYPES.indexOf(type) !== -1; }
+    const GANN_SHAPE_TYPES = ['gann_fan', 'gann_box', 'gann_square'];
+    function isGannShape(type) { return GANN_SHAPE_TYPES.indexOf(type) !== -1; }
+    // Nokta dizisiyle (points) tutulan araçlar
+    const POINTS_SHAPE_TYPES = ['brush', 'elliott', 'abcd', 'fib_tb_time'];
+    function isPointsShape(type) { return POINTS_SHAPE_TYPES.indexOf(type) !== -1; }
+    // Gann yelpazesi renkleri (TradingView düzeni: dıştan içe sıcak → soğuk)
+    const GANN_COLORS = ['#EF5350', '#FF9800', '#FFCA28', '#66BB6A', '#26A69A', '#26C6DA', '#42A5F5', '#5C6BC0', '#AB47BC'];
+    function gannLabel(r) {
+        if (r >= 1) return (Math.round(r * 100) / 100) + 'x1';
+        return '1x' + (Math.round((1 / r) * 100) / 100);
+    }
+    function levelLabel(type, r) { return type === 'gann_fan' ? gannLabel(r) : String(r); }
 
     let drawStyleDefaults = null;
     function getDrawStyleDefaults() {
@@ -5941,7 +6047,8 @@ const TradingChart = (() => {
         try { localStorage.setItem(DRAW_STYLE_KEY, JSON.stringify(getDrawStyleDefaults())); } catch (e) { /* kota/private mode */ }
     }
 
-    function fibColorForRatio(paletteId, ratio, index) {
+    function fibColorForRatio(paletteId, ratio, index, type) {
+        if (type && isGannShape(type) && paletteId !== 'gold') return GANN_COLORS[index % GANN_COLORS.length];
         const pal = FIB_PALETTES[paletteId] || FIB_PALETTES.tv;
         const key = String(ratio);
         if (pal.colors[key]) return pal.colors[key];
@@ -5956,7 +6063,7 @@ const TradingChart = (() => {
         const ratios = (existing && existing.length) ? existing.map(l => l.r) : (FIB_LEVEL_SETS[type] || FIB_LEVEL_SETS.fib);
         return ratios.map((r, i) => {
             const prev = existing && existing.find ? existing.find(l => l.r === r) : null;
-            return { r: r, on: prev ? prev.on !== false : true, color: fibColorForRatio(paletteId, r, i) };
+            return { r: r, on: prev ? prev.on !== false : true, color: fibColorForRatio(paletteId, r, i, type) };
         });
     }
 
@@ -5974,7 +6081,7 @@ const TradingChart = (() => {
                 const savedRatios = d.fib.ratiosByType && d.fib.ratiosByType[shape.type];
                 shape.style.levels = buildFibLevels(shape.type, shape.style.palette,
                     (Array.isArray(savedRatios) && savedRatios.length) ? savedRatios.map(r => ({ r: r, on: true })) : null);
-                if (d.fib.colorsByRatio) {
+                if (d.fib.colorsByRatio && !isGannShape(shape.type)) {
                     shape.style.levels.forEach(l => {
                         const c = d.fib.colorsByRatio[String(l.r)];
                         if (c) l.color = c;
@@ -5987,6 +6094,8 @@ const TradingChart = (() => {
         // Eski bir çizim (ör. kopyala-yapıştır ile gelen) seviye listesi
         // taşımıyorsa burada tamamlanır.
         if (isFibShape(shape.type) && !shape.style.levels) {
+            // Eski (seviyesiz, genel stilli) bir Gann yelpazesi vb. → seviyeli stile yükseltilir
+            shape.style = Object.assign({}, FIB_STYLE_DEFAULT, shape.style);
             shape.style.levels = buildFibLevels(shape.type, shape.style.palette || 'tv', null);
         }
         return shape.style;
@@ -6084,6 +6193,599 @@ const TradingChart = (() => {
         drawCtx.setLineDash([]);
     }
 
+    /* ══════════════════════════════════════════════════════════════════
+       (30 Eylül 2026) GELİŞMİŞ ÇİZİM ARAÇLARI — test geri bildirimi:
+       "paralel kanal genişliği sabit", "Fibonacci yelpazesi düzgün
+       çalışmıyor", "Fibonacci zaman bölgesi eksik", "Gann yelpazesi eksik
+       (renk, şekil, işlev)", "ABCD desenleri çeşit olarak eksik".
+       Eklenen/yenilenen: Paralel Kanal (ayarlanabilir genişlik, dolgu,
+       orta çizgi), Fibonacci Kanalı, Fibonacci Zaman Bölgesi (geleceğe
+       uzanır), Trend Bazlı Fibonacci Zamanı, Fibonacci Yelpazesi (fiyat +
+       zaman ışınları, ızgara, dolgu), Fibonacci Yayları, Fibonacci
+       Çemberleri, Gann Yelpazesi (renkli açılar + dolgu + ayar paneli),
+       Gann Kutusu, Gann Karesi, oranlı ABCD (BC/AB, CD/BC, AB=CD hedefi).
+       Hiçbiri otomatik desen TANIMA yapmaz — kullanıcının işaretlediği
+       noktalardan geometri çizer (yatırım tavsiyesi değildir).
+       ══════════════════════════════════════════════════════════════════ */
+    let channelHintShown = false;
+    function pyOf(price) {
+        if (!candleSeries || price == null || !isFinite(price)) return null;
+        const v = candleSeries.priceToCoordinate(price);
+        return (v === null || v === undefined || isNaN(v)) ? null : v;
+    }
+    // Lightweight Charts logicalToCoordinate() yalnızca TAM SAYI indeks kabul ediyor (kesirlide 0
+    // döndürüyor) — kesirli indeksler (orta nokta, 0.618 zaman oranı…) iki komşu çubuk arasında
+    // doğrusal olarak hesaplanır.
+    function xOfIndex(idx) {
+        if (!chart || idx == null || !isFinite(idx)) return null;
+        const ts = chart.timeScale();
+        const f = Math.floor(idx);
+        const vf = ts.logicalToCoordinate(f);
+        if (vf === null || vf === undefined || isNaN(vf)) return null;
+        if (idx === f) return vf;
+        const vc = ts.logicalToCoordinate(f + 1);
+        if (vc === null || vc === undefined || isNaN(vc)) return vf;
+        return vf + (vc - vf) * (idx - f);
+    }
+    function isTinyDrag(pending) {
+        if (!pending || !pending.p1 || !pending.p2) return false;
+        if (SINGLE_POINT_TOOLS.indexOf(pending.type) !== -1 || pending.type === 'text') return false;
+        const a = dataPointToPixel(pending.p1), b = dataPointToPixel(pending.p2);
+        if (a.x === null || b.x === null || a.y === null || b.y === null) {
+            return pending.p1.time === pending.p2.time && pending.p1.price === pending.p2.price;
+        }
+        return Math.hypot(b.x - a.x, b.y - a.y) < 5;
+    }
+    // Kanalın p1→p2 çizgisine göre, verilen noktanın fiyat farkı (= kanal genişliği)
+    function channelOffsetAt(shape, dp) {
+        if (!shape || !shape.p1 || !shape.p2 || !dp || dp.price == null) return 0;
+        const i1 = indexForTime(shape.p1.time), i2 = indexForTime(shape.p2.time);
+        const idx = (dp.idx != null && dp.idx >= 0) ? dp.idx : indexForTime(dp.time);
+        const t = (i2 !== i1 && i1 >= 0 && i2 >= 0) ? (idx - i1) / (i2 - i1) : 0;
+        const base = shape.p1.price + (shape.p2.price - shape.p1.price) * t;
+        return dp.price - base;
+    }
+    function offHandlePx(shape) {
+        const i1 = indexForTime(shape.p1.time), i2 = indexForTime(shape.p2.time);
+        if (i1 < 0 || i2 < 0) return null;
+        const x = xOfIndex((i1 + i2) / 2);
+        const y = pyOf((shape.p1.price + shape.p2.price) / 2 + (shape.offset || 0));
+        return (x === null || y === null) ? null : { x, y };
+    }
+    function farPoint(a, tx, ty) {
+        const dx = tx - a.x, dy = ty - a.y;
+        const len = Math.hypot(dx, dy);
+        if (!len) return { x: a.x, y: a.y };
+        const k = 6000 / len;
+        return { x: a.x + dx * k, y: a.y + dy * k };
+    }
+    function rayEdgePoint(a, tx, ty, rect) {
+        const dx = tx - a.x, dy = ty - a.y;
+        let t = Infinity;
+        if (dx > 0) t = Math.min(t, (rect.width - a.x) / dx); else if (dx < 0) t = Math.min(t, -a.x / dx);
+        if (dy > 0) t = Math.min(t, (rect.height - a.y) / dy); else if (dy < 0) t = Math.min(t, -a.y / dy);
+        if (!isFinite(t) || t <= 0) return null;
+        return { x: a.x + dx * t, y: a.y + dy * t };
+    }
+    function onLevels(shape) {
+        return (getShapeStyle(shape).levels || []).filter(l => l.on !== false).slice().sort((m, n) => m.r - n.r);
+    }
+    function strokeSeg(x1, y1, x2, y2) {
+        drawCtx.beginPath(); drawCtx.moveTo(x1, y1); drawCtx.lineTo(x2, y2); drawCtx.stroke();
+    }
+    function setLevelLine(st) {
+        drawCtx.setLineDash(dashArrayFor(st));
+        drawCtx.lineWidth = st.width || 1;
+        drawCtx.font = '10px "Fira Code", monospace';
+    }
+    function putLabel(text, x, y, color, rect) {
+        if (!text) return;
+        const w = drawCtx.measureText(text).width;
+        const lx = Math.max(2, Math.min(rect.width - w - 2, x));
+        const ly = Math.max(10, Math.min(rect.height - 3, y));
+        drawCtx.fillStyle = color;
+        drawCtx.fillText(text, lx, ly);
+    }
+    function inBox(a, b, x, y, tol) {
+        return x >= Math.min(a.x, b.x) - tol && x <= Math.max(a.x, b.x) + tol &&
+            y >= Math.min(a.y, b.y) - tol && y <= Math.max(a.y, b.y) + tol;
+    }
+
+    /* ---- Paralel Kanal ---- */
+    function drawPlainChannel(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const off = shape.offset || 0;
+        const y1b = pyOf(shape.p1.price + off), y2b = pyOf(shape.p2.price + off);
+        if (y1b === null || y2b === null) { strokeSeg(a.x, a.y, b.x, b.y); return; }
+        drawCtx.save();
+        drawCtx.setLineDash([]);
+        drawCtx.fillStyle = withAlpha(st.color || COLORS.draw, st.fillOpacity != null ? st.fillOpacity : 0.10);
+        drawCtx.beginPath();
+        drawCtx.moveTo(a.x, a.y); drawCtx.lineTo(b.x, b.y); drawCtx.lineTo(b.x, y2b); drawCtx.lineTo(a.x, y1b);
+        drawCtx.closePath();
+        drawCtx.fill();
+        drawCtx.restore();
+        strokeSeg(a.x, a.y, b.x, b.y);
+        strokeSeg(a.x, y1b, b.x, y2b);
+        if (st.midLine !== false) {
+            drawCtx.save();
+            drawCtx.setLineDash([4, 4]);
+            drawCtx.globalAlpha = 0.7;
+            strokeSeg(a.x, (a.y + y1b) / 2, b.x, (b.y + y2b) / 2);
+            drawCtx.restore();
+        }
+    }
+
+    /* ---- Fibonacci Kanalı: taban çizgisi + genişlik birimi × oranlar ---- */
+    function fibChannelRows(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const off = shape.offset || 0;
+        return onLevels(shape).map(l => {
+            let y1 = pyOf(shape.p1.price + off * l.r), y2 = pyOf(shape.p2.price + off * l.r);
+            if (y1 === null || y2 === null) return null;
+            let x1 = a.x, x2 = b.x;
+            const slope = (y2 - y1) / ((x2 - x1) || 1e-9);
+            if (st.extendRight) { const xr = x2 >= x1 ? rect.width : 0; y2 = y2 + slope * (xr - x2); x2 = xr; }
+            if (st.extendLeft) { const xl = x2 >= x1 ? 0 : rect.width; y1 = y1 + slope * (xl - x1); x1 = xl; }
+            return { l, x1, y1, x2, y2, price: shape.p2.price + off * l.r };
+        }).filter(Boolean);
+    }
+    function drawFibChannel(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const rows = fibChannelRows(a, b, shape, rect);
+        if (!rows.length) return;
+        setLevelLine(st);
+        if (st.fill && rows.length > 1) {
+            for (let i = 0; i < rows.length - 1; i++) {
+                const p = rows[i], q = rows[i + 1];
+                drawCtx.fillStyle = withAlpha(q.l.color, st.fillOpacity);
+                drawCtx.beginPath();
+                drawCtx.moveTo(p.x1, p.y1); drawCtx.lineTo(p.x2, p.y2); drawCtx.lineTo(q.x2, q.y2); drawCtx.lineTo(q.x1, q.y1);
+                drawCtx.closePath();
+                drawCtx.fill();
+            }
+        }
+        rows.forEach(r => {
+            drawCtx.strokeStyle = r.l.color;
+            strokeSeg(r.x1, r.y1, r.x2, r.y2);
+            const parts = [];
+            if (st.showPercent) parts.push(String(r.l.r));
+            if (st.showPrice) parts.push('₺' + fmtPrice(r.price));
+            const rightEnd = r.x2 >= r.x1 ? { x: r.x2, y: r.y2 } : { x: r.x1, y: r.y1 };
+            putLabel(parts.join('  '), rightEnd.x + 4, rightEnd.y - 3, r.l.color, rect);
+        });
+    }
+
+    /* ---- Fibonacci Yelpazesi: fiyat ışınları (+ zaman ışınları, ızgara) ---- */
+    function drawFibFan(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const lv = onLevels(shape);
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+        setLevelLine(st);
+        // Fiyat ışını r: p2'nin zamanındaki fiyat = p2 − (p2−p1)·r  (0 = ana trend, 1 = yatay)
+        const price = lv.map(l => ({ l, tx: b.x, ty: b.y - dy * l.r }));
+        const time = lv.filter(l => l.r > 0).map(l => ({ l, tx: b.x - dx * l.r, ty: b.y }));
+        if (st.fill && price.length > 1) {
+            for (let i = 0; i < price.length - 1; i++) {
+                const f1 = farPoint(a, price[i].tx, price[i].ty), f2 = farPoint(a, price[i + 1].tx, price[i + 1].ty);
+                drawCtx.fillStyle = withAlpha(price[i + 1].l.color, st.fillOpacity);
+                drawCtx.beginPath(); drawCtx.moveTo(a.x, a.y); drawCtx.lineTo(f1.x, f1.y); drawCtx.lineTo(f2.x, f2.y); drawCtx.closePath(); drawCtx.fill();
+            }
+        }
+        if (st.grid !== false) {
+            drawCtx.save();
+            drawCtx.globalAlpha = 0.45;
+            drawCtx.setLineDash([2, 3]);
+            drawCtx.lineWidth = 1;
+            price.forEach(p => { drawCtx.strokeStyle = p.l.color; strokeSeg(a.x, p.ty, b.x, p.ty); });
+            if (st.fanTime !== false) time.forEach(t => { drawCtx.strokeStyle = t.l.color; strokeSeg(t.tx, a.y, t.tx, b.y); });
+            drawCtx.restore();
+        }
+        price.forEach(p => {
+            const f = farPoint(a, p.tx, p.ty);
+            drawCtx.strokeStyle = p.l.color;
+            strokeSeg(a.x, a.y, f.x, f.y);
+            if (st.showPercent) putLabel(levelLabel(shape.type, p.l.r), b.x + (dx >= 0 ? 4 : -30), p.ty - 3, p.l.color, rect);
+        });
+        if (st.fanTime !== false) {
+            time.forEach(t => {
+                const f = farPoint(a, t.tx, t.ty);
+                drawCtx.strokeStyle = t.l.color;
+                strokeSeg(a.x, a.y, f.x, f.y);
+                if (st.showPercent) putLabel(levelLabel(shape.type, t.l.r), t.tx + 2, b.y + (dy >= 0 ? 12 : -4), t.l.color, rect);
+            });
+        }
+    }
+
+    /* ---- Fibonacci Zaman Bölgeleri (geleceğe uzanır) ---- */
+    function fibTimeZoneXs(idx0, unit, shape) {
+        return onLevels(shape).map(l => {
+            const idx = idx0 + unit * l.r;
+            const x = xOfIndex(idx);
+            return x === null ? null : { l, idx, x };
+        }).filter(Boolean);
+    }
+    function drawTimeZonesAt(zones, st, rect, shape) {
+        setLevelLine(st);
+        if (st.fill && zones.length > 1) {
+            const zs = zones.slice().sort((m, n) => m.x - n.x);
+            for (let i = 0; i < zs.length - 1; i++) {
+                drawCtx.fillStyle = withAlpha(zs[i + 1].l.color, (st.fillOpacity || 0.07) * 0.8);
+                drawCtx.fillRect(zs[i].x, 0, zs[i + 1].x - zs[i].x, rect.height);
+            }
+        }
+        zones.forEach(z => {
+            drawCtx.strokeStyle = z.l.color;
+            strokeSeg(z.x, 0, z.x, rect.height);
+            if (st.showPercent) putLabel(levelLabel(shape.type, z.l.r), z.x + 3, rect.height - 6, z.l.color, rect);
+        });
+    }
+    function fibTimeParams(shape) {
+        const i1 = indexForTime(shape.p1.time), i2 = indexForTime(shape.p2.time);
+        if (i1 < 0) return null;
+        let unit = i2 >= 0 ? i2 - i1 : 1;
+        if (!unit) unit = 1;
+        return { idx0: i1, unit };
+    }
+    function drawFibTimeZones(shape, rect) {
+        const p = fibTimeParams(shape);
+        if (!p) return;
+        drawTimeZonesAt(fibTimeZoneXs(p.idx0, p.unit, shape), getShapeStyle(shape), rect, shape);
+    }
+
+    /* ---- Trend Bazlı Fibonacci Zamanı: A-B süresinin oranları C'den ileriye ---- */
+    function fibTbParams(shape) {
+        const P = shape.points || [];
+        if (P.length < 3) return null;
+        const iA = indexForTime(P[0].time), iB = indexForTime(P[1].time), iC = indexForTime(P[2].time);
+        if (iA < 0 || iB < 0 || iC < 0) return null;
+        return { idx0: iC, unit: (iB - iA) || 1 };
+    }
+    function drawFibTbTime(shape, isSelected) {
+        const P = shape.points || [];
+        const pts = P.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
+        const st = getShapeStyle(shape);
+        const rect = getPlotRect();
+        drawCtx.save();
+        const prm = fibTbParams(shape);
+        if (prm) drawTimeZonesAt(fibTimeZoneXs(prm.idx0, prm.unit, shape), st, rect, shape);
+        if (pts.length >= 2) {
+            drawCtx.setLineDash([4, 3]);
+            drawCtx.lineWidth = isSelected ? 2 : 1.25;
+            drawCtx.strokeStyle = isSelected ? '#4FC3F7' : '#9AA0AE';
+            drawCtx.beginPath();
+            drawCtx.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => drawCtx.lineTo(p.x, p.y));
+            drawCtx.stroke();
+        }
+        drawCtx.setLineDash([]);
+        drawCtx.fillStyle = isSelected ? '#4FC3F7' : '#9AA0AE';
+        drawCtx.font = 'bold 10px "Fira Code", monospace';
+        pts.forEach((p, i) => { drawCtx.beginPath(); drawCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); drawCtx.fill(); drawCtx.fillText(['A', 'B', 'C'][i] || '', p.x + 5, p.y - 5); });
+        drawCtx.restore();
+    }
+    function hitFibTbTime(shape, x, y, tol) {
+        const prm = fibTbParams(shape);
+        if (!prm) return false;
+        return fibTimeZoneXs(prm.idx0, prm.unit, shape).some(z => Math.abs(x - z.x) <= tol);
+    }
+
+    /* ---- Fibonacci Yayları: p2 merkezli, p1 tarafına açılan yarım elipsler ---- */
+    function fibArcGeom(a, b) {
+        const rx = Math.max(Math.abs(b.x - a.x), 1), ry = Math.max(Math.abs(b.y - a.y), 1);
+        const down = a.y >= b.y; // p1 ekranda aşağıdaysa yaylar aşağı açılır
+        return { rx, ry, down, s0: down ? 0 : Math.PI, s1: down ? Math.PI : Math.PI * 2 };
+    }
+    function drawFibArcs(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const lv = onLevels(shape).filter(l => l.r > 0);
+        if (Math.abs(b.x - a.x) < 2 && Math.abs(b.y - a.y) < 2) return;
+        const g = fibArcGeom(a, b);
+        drawCtx.save();
+        drawCtx.setLineDash([4, 3]); drawCtx.lineWidth = 1; drawCtx.strokeStyle = '#9AA0AE';
+        strokeSeg(a.x, a.y, b.x, b.y);
+        drawCtx.restore();
+        setLevelLine(st);
+        if (st.fill) {
+            for (let i = 0; i < lv.length; i++) {
+                const r2 = lv[i].r, r1 = i ? lv[i - 1].r : 0;
+                drawCtx.fillStyle = withAlpha(lv[i].color, st.fillOpacity);
+                drawCtx.beginPath();
+                drawCtx.ellipse(b.x, b.y, g.rx * r2, g.ry * r2, 0, g.s0, g.s1, false);
+                if (r1 > 0) drawCtx.ellipse(b.x, b.y, g.rx * r1, g.ry * r1, 0, g.s1, g.s0, true);
+                else drawCtx.lineTo(b.x, b.y);
+                drawCtx.closePath();
+                drawCtx.fill();
+            }
+        }
+        lv.forEach(l => {
+            drawCtx.strokeStyle = l.color;
+            drawCtx.beginPath();
+            drawCtx.ellipse(b.x, b.y, g.rx * l.r, g.ry * l.r, 0, g.s0, g.s1, false);
+            drawCtx.stroke();
+            if (st.showPercent) putLabel(String(l.r), b.x + 3, b.y + (g.down ? 1 : -1) * g.ry * l.r + (g.down ? -3 : 11), l.color, rect);
+        });
+    }
+
+    /* ---- Fibonacci Çemberleri: p1-p2 orta noktası merkez, çizgi = 1.0 çemberinin çapı ---- */
+    function drawFibCircles(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const lv = onLevels(shape).filter(l => l.r > 0);
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, R = Math.hypot(b.x - a.x, b.y - a.y) / 2;
+        if (R < 2) return;
+        drawCtx.save();
+        drawCtx.setLineDash([4, 3]); drawCtx.lineWidth = 1; drawCtx.strokeStyle = '#9AA0AE';
+        strokeSeg(a.x, a.y, b.x, b.y);
+        drawCtx.restore();
+        setLevelLine(st);
+        if (st.fill) {
+            for (let i = 0; i < lv.length; i++) {
+                const r2 = lv[i].r * R, r1 = i ? lv[i - 1].r * R : 0;
+                drawCtx.fillStyle = withAlpha(lv[i].color, st.fillOpacity);
+                drawCtx.beginPath();
+                drawCtx.arc(mx, my, r2, 0, Math.PI * 2);
+                if (r1 > 0) { drawCtx.moveTo(mx + r1, my); drawCtx.arc(mx, my, r1, 0, Math.PI * 2); }
+                drawCtx.fill('evenodd');
+            }
+        }
+        lv.forEach(l => {
+            drawCtx.strokeStyle = l.color;
+            drawCtx.beginPath();
+            drawCtx.arc(mx, my, l.r * R, 0, Math.PI * 2);
+            drawCtx.stroke();
+            if (st.showPercent) putLabel(String(l.r), mx + l.r * R + 3, my - 3, l.color, rect);
+        });
+    }
+
+    /* ---- Gann Yelpazesi: pivot (p1) + 1x1 eğimi (p1→p2) ---- */
+    function gannRays(a, b, shape) {
+        const dy = b.y - a.y;
+        return onLevels(shape).map(l => ({ l, tx: b.x, ty: a.y + dy * l.r }));
+    }
+    function drawGannFan(a, b, shape, rect, isSelected) {
+        const st = getShapeStyle(shape);
+        if (Math.abs(b.x - a.x) < 1) return;
+        const rays = gannRays(a, b, shape);
+        setLevelLine(st);
+        if (st.fill && rays.length > 1) {
+            for (let i = 0; i < rays.length - 1; i++) {
+                const f1 = farPoint(a, rays[i].tx, rays[i].ty), f2 = farPoint(a, rays[i + 1].tx, rays[i + 1].ty);
+                drawCtx.fillStyle = withAlpha(rays[i + 1].l.color, st.fillOpacity);
+                drawCtx.beginPath(); drawCtx.moveTo(a.x, a.y); drawCtx.lineTo(f1.x, f1.y); drawCtx.lineTo(f2.x, f2.y); drawCtx.closePath(); drawCtx.fill();
+            }
+        }
+        rays.forEach(r => {
+            const f = farPoint(a, r.tx, r.ty);
+            const main = Math.abs(r.l.r - 1) < 1e-9;
+            drawCtx.lineWidth = main ? (st.width || 1) + 1 : (st.width || 1);
+            drawCtx.strokeStyle = (main && isSelected) ? '#4FC3F7' : r.l.color;
+            strokeSeg(a.x, a.y, f.x, f.y);
+            if (st.showPercent) {
+                const e = rayEdgePoint(a, r.tx, r.ty, rect);
+                if (e) {
+                    const len = Math.hypot(r.tx - a.x, r.ty - a.y) || 1;
+                    const ux = (r.tx - a.x) / len, uy = (r.ty - a.y) / len;
+                    putLabel(gannLabel(r.l.r), e.x - ux * 30 - 8, e.y - uy * 30 - 3, r.l.color, rect);
+                }
+            }
+        });
+        drawCtx.fillStyle = drawColor();
+        drawCtx.beginPath(); drawCtx.arc(a.x, a.y, 3, 0, Math.PI * 2); drawCtx.fill();
+    }
+
+    /* ---- Gann Kutusu / Gann Karesi ---- */
+    function gannQuarter(dx, dy) {
+        if (dx >= 0 && dy >= 0) return [0, Math.PI / 2];
+        if (dx < 0 && dy >= 0) return [Math.PI / 2, Math.PI];
+        if (dx < 0 && dy < 0) return [Math.PI, Math.PI * 1.5];
+        return [Math.PI * 1.5, Math.PI * 2];
+    }
+    function drawGannBox(a, b, shape, rect) {
+        const st = getShapeStyle(shape);
+        const lv = onLevels(shape);
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        if (x1 - x0 < 2 || y1 - y0 < 2) return;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const hs = lv.map(l => ({ l, y: a.y + dy * l.r, price: shape.p1.price + (shape.p2.price - shape.p1.price) * l.r }));
+        const vs = lv.map(l => ({ l, x: a.x + dx * l.r }));
+        setLevelLine(st);
+        if (st.fill && hs.length > 1) {
+            const hh = hs.slice().sort((m, n) => m.y - n.y);
+            for (let i = 0; i < hh.length - 1; i++) {
+                drawCtx.fillStyle = withAlpha(hh[i + 1].l.color, st.fillOpacity);
+                drawCtx.fillRect(x0, hh[i].y, x1 - x0, hh[i + 1].y - hh[i].y);
+            }
+        }
+        hs.forEach(h => { drawCtx.strokeStyle = h.l.color; strokeSeg(x0, h.y, x1, h.y); });
+        vs.forEach(v => { drawCtx.strokeStyle = v.l.color; strokeSeg(v.x, y0, v.x, y1); });
+        if (shape.type === 'gann_square') {
+            const q = gannQuarter(dx, dy);
+            lv.filter(l => l.r > 0).forEach(l => {
+                drawCtx.strokeStyle = l.color;
+                strokeSeg(a.x, a.y, b.x, a.y + dy * l.r);
+                strokeSeg(a.x, a.y, a.x + dx * l.r, b.y);
+                drawCtx.beginPath();
+                drawCtx.ellipse(a.x, a.y, Math.abs(dx) * l.r, Math.abs(dy) * l.r, 0, q[0], q[1]);
+                drawCtx.stroke();
+            });
+        }
+        if (st.diagonals !== false) {
+            drawCtx.save();
+            drawCtx.setLineDash([5, 4]); drawCtx.lineWidth = 1; drawCtx.strokeStyle = '#9AA0AE';
+            strokeSeg(a.x, a.y, b.x, b.y);
+            strokeSeg(a.x, b.y, b.x, a.y);
+            drawCtx.restore();
+        }
+        if (st.showPercent || st.showPrice) {
+            hs.forEach(h => {
+                const parts = [];
+                if (st.showPercent) parts.push(String(h.l.r));
+                if (st.showPrice && shape.type === 'gann_box') parts.push('₺' + fmtPrice(h.price));
+                putLabel(parts.join('  '), x1 + 4, h.y + 3, h.l.color, rect);
+            });
+            if (st.showPercent) vs.forEach(v => putLabel(String(v.l.r), v.x + 2, y1 + 11, v.l.color, rect));
+        }
+    }
+
+    /* ---- ABCD (oranlı) ---- */
+    function drawAbcd(shape, isSelected) {
+        const P = (shape.points || []).filter(Boolean);
+        const pts = P.map(dataPointToPixel);
+        if (pts.length < 2 || pts.some(p => p.x === null || p.y === null)) {
+            const ok = pts.filter(p => p.x !== null && p.y !== null);
+            if (ok.length < 2) return;
+        }
+        const st = getShapeStyle(shape);
+        const col = isSelected ? '#4FC3F7' : drawColor();
+        const fo = st.fillOpacity != null ? st.fillOpacity : 0.10;
+        const rect = getPlotRect();
+        const valid = (p) => p && p.x !== null && p.y !== null;
+        drawCtx.save();
+        drawCtx.setLineDash([]);
+        const tri = (p, q, r) => {
+            if (!valid(p) || !valid(q) || !valid(r)) return;
+            drawCtx.fillStyle = withAlpha(col, fo);
+            drawCtx.beginPath(); drawCtx.moveTo(p.x, p.y); drawCtx.lineTo(q.x, q.y); drawCtx.lineTo(r.x, r.y); drawCtx.closePath(); drawCtx.fill();
+        };
+        if (pts.length >= 3) tri(pts[0], pts[1], pts[2]);
+        if (pts.length >= 4) tri(pts[1], pts[2], pts[3]);
+        drawCtx.strokeStyle = col;
+        drawCtx.lineWidth = isSelected ? 2.5 : Math.max(1.5, st.width || 2);
+        drawCtx.lineJoin = 'round';
+        drawCtx.setLineDash(isSelected ? [] : dashArrayFor(st));
+        drawCtx.beginPath();
+        let started = false;
+        pts.forEach(p => { if (!valid(p)) return; if (!started) { drawCtx.moveTo(p.x, p.y); started = true; } else drawCtx.lineTo(p.x, p.y); });
+        drawCtx.stroke();
+        drawCtx.font = '10px "Fira Code", monospace';
+        const ratio = (u, v) => (v ? Math.abs(u) / Math.abs(v) : null);
+        const tag = (text, x, y) => {
+            const w = drawCtx.measureText(text).width + 8;
+            const lx = Math.max(2, Math.min(rect.width - w - 2, x - w / 2)), ly = Math.max(2, Math.min(rect.height - 16, y - 8));
+            drawCtx.fillStyle = 'rgba(18,19,26,0.85)';
+            drawCtx.fillRect(lx, ly, w, 15);
+            drawCtx.fillStyle = col;
+            drawCtx.fillText(text, lx + 4, ly + 11);
+        };
+        if (st.showRatios !== false) {
+            drawCtx.setLineDash([4, 4]);
+            drawCtx.lineWidth = 1;
+            if (pts.length >= 3 && valid(pts[0]) && valid(pts[2])) {
+                strokeSeg(pts[0].x, pts[0].y, pts[2].x, pts[2].y);
+                const r = ratio(P[2].price - P[1].price, P[1].price - P[0].price);
+                if (r !== null) tag(r.toFixed(3), (pts[0].x + pts[2].x) / 2, (pts[0].y + pts[2].y) / 2);
+            }
+            if (pts.length >= 4 && valid(pts[1]) && valid(pts[3])) {
+                strokeSeg(pts[1].x, pts[1].y, pts[3].x, pts[3].y);
+                const r = ratio(P[3].price - P[2].price, P[2].price - P[1].price);
+                if (r !== null) tag(r.toFixed(3), (pts[1].x + pts[3].x) / 2, (pts[1].y + pts[3].y) / 2);
+            }
+        }
+        // AB=CD hedefi: D' = C + (B − A)  (zaman ve fiyat)
+        if (pts.length >= 3 && st.showProjection !== false) {
+            const iA = indexForTime(P[0].time), iB = indexForTime(P[1].time), iC = indexForTime(P[2].time);
+            if (iA >= 0 && iB >= 0 && iC >= 0) {
+                const priceD = P[2].price + (P[1].price - P[0].price);
+                const xD = xOfIndex(iC + (iB - iA)), yD = pyOf(priceD);
+                if (xD !== null && yD !== null && valid(pts[2])) {
+                    drawCtx.setLineDash([2, 4]);
+                    drawCtx.lineWidth = 1;
+                    drawCtx.strokeStyle = col;
+                    strokeSeg(pts[2].x, pts[2].y, xD, yD);
+                    drawCtx.setLineDash([]);
+                    drawCtx.beginPath(); drawCtx.arc(xD, yD, 4, 0, Math.PI * 2); drawCtx.stroke();
+                    let t = 'AB=CD ₺' + fmtPrice(priceD);
+                    if (P.length >= 4) {
+                        const cdab = ratio(P[3].price - P[2].price, P[1].price - P[0].price);
+                        if (cdab !== null) t += '  ·  CD/AB ' + cdab.toFixed(2);
+                    }
+                    tag(t, xD, yD + (priceD >= P[2].price ? -14 : 18));
+                }
+            }
+        }
+        // Nokta etiketleri: tepe noktaları üstte, dipler altta
+        drawCtx.setLineDash([]);
+        drawCtx.font = 'bold 11px "Fira Code", monospace';
+        pts.forEach((p, i) => {
+            if (!valid(p)) return;
+            const prev = P[i - 1], next = P[i + 1];
+            const isHigh = (prev ? P[i].price >= prev.price : true) && (next ? P[i].price >= next.price : !prev || P[i].price >= prev.price);
+            drawCtx.fillStyle = col;
+            drawCtx.beginPath(); drawCtx.arc(p.x, p.y, 3, 0, Math.PI * 2); drawCtx.fill();
+            drawCtx.fillText(['A', 'B', 'C', 'D'][i] || String(i), p.x - 4, isHigh ? p.y - 8 : p.y + 16);
+        });
+        drawCtx.restore();
+    }
+
+    /* ---- seçim tutamaçları (nokta dizileri + kanal genişliği) ---- */
+    function drawExtraHandles(shape) {
+        if (!shape) return;
+        drawCtx.save();
+        drawCtx.setLineDash([]);
+        drawCtx.fillStyle = '#4FC3F7';
+        if (isPointsShape(shape.type) && shape.type !== 'brush') {
+            (shape.points || []).forEach(pt => {
+                const p = dataPointToPixel(pt);
+                if (p.x !== null && p.y !== null) drawCtx.fillRect(p.x - 3.5, p.y - 3.5, 7, 7);
+            });
+        }
+        if (shape.type === 'channel' || shape.type === 'fib_channel') {
+            const h = offHandlePx(shape);
+            if (h) {
+                drawCtx.beginPath(); drawCtx.arc(h.x, h.y, 5, 0, Math.PI * 2); drawCtx.fill();
+                drawCtx.strokeStyle = '#0B0C11'; drawCtx.lineWidth = 1.5;
+                drawCtx.beginPath(); drawCtx.moveTo(h.x, h.y - 3); drawCtx.lineTo(h.x, h.y + 3); drawCtx.stroke();
+            }
+        }
+        drawCtx.restore();
+    }
+
+    /* ---- isabet testi (gerçek geometri) ---- */
+    function hitTestAdvanced(shape, a, b, x, y, tol) {
+        const rect = getPlotRect();
+        const t = shape.type;
+        const nearRay = (tx, ty) => { const f = farPoint(a, tx, ty); return distToSegment(x, y, a.x, a.y, f.x, f.y) <= tol; };
+        if (t === 'channel') {
+            const off = shape.offset || 0;
+            return [0, 0.5, 1].some(r => {
+                const y1 = pyOf(shape.p1.price + off * r), y2 = pyOf(shape.p2.price + off * r);
+                return y1 !== null && y2 !== null && distToSegment(x, y, a.x, y1, b.x, y2) <= tol;
+            });
+        }
+        if (t === 'fib_channel') {
+            return fibChannelRows(a, b, shape, rect).some(r => distToSegment(x, y, r.x1, r.y1, r.x2, r.y2) <= tol);
+        }
+        if (t === 'fib_fan') {
+            const st = getShapeStyle(shape), lv = onLevels(shape);
+            const dx = b.x - a.x, dy = b.y - a.y;
+            if (lv.some(l => nearRay(b.x, b.y - dy * l.r))) return true;
+            if (st.fanTime !== false && lv.some(l => l.r > 0 && nearRay(b.x - dx * l.r, b.y))) return true;
+            return inBox(a, b, x, y, tol);
+        }
+        if (t === 'gann_fan') return gannRays(a, b, shape).some(r => nearRay(r.tx, r.ty));
+        if (t === 'fib_time') {
+            const p = fibTimeParams(shape);
+            return !!p && fibTimeZoneXs(p.idx0, p.unit, shape).some(z => Math.abs(x - z.x) <= tol);
+        }
+        if (t === 'fib_arcs') {
+            if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= tol) return true;
+            const g = fibArcGeom(a, b);
+            if (g.down ? y < b.y - tol : y > b.y + tol) return false;
+            const d = Math.hypot((x - b.x) / g.rx, (y - b.y) / g.ry);
+            const m = Math.min(g.rx, g.ry);
+            return onLevels(shape).some(l => l.r > 0 && Math.abs(d - l.r) * m <= tol);
+        }
+        if (t === 'fib_circles') {
+            if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= tol) return true;
+            const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, R = Math.hypot(b.x - a.x, b.y - a.y) / 2;
+            const d = Math.hypot(x - mx, y - my);
+            return onLevels(shape).some(l => l.r > 0 && Math.abs(d - l.r * R) <= tol);
+        }
+        if (t === 'gann_box' || t === 'gann_square') return inBox(a, b, x, y, tol);
+        return false;
+    }
+
     function redrawDrawings() {
         if (!drawCtx || !drawCanvas) return;
         const rect = drawCanvas.getBoundingClientRect();
@@ -6105,6 +6807,7 @@ const TradingChart = (() => {
                 if (!shape || shape.hidden) return;
                 activeShapeStyle = getShapeStyle(shape);
                 drawShape(shape, i === state.selectedDrawingIndex);
+                if (i === state.selectedDrawingIndex) drawExtraHandles(shape);
                 activeShapeStyle = null;
                 drawAlertBadge(shape);
             });
@@ -6179,7 +6882,9 @@ const TradingChart = (() => {
     }
 
     function drawShape(shape, isSelected) {
-        if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
+        if (shape.type === 'abcd') { drawAbcd(shape, isSelected); return; }
+        if (shape.type === 'fib_tb_time') { drawFibTbTime(shape, isSelected); return; }
+        if (isPointsShape(shape.type)) {
             if (!shape.points || shape.points.length < 2) return;
             const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
             if (pts.length < 2) return;
@@ -6395,18 +7100,7 @@ const TradingChart = (() => {
             drawCtx.fillText(text, midX, midY + 3);
             drawCtx.textAlign = 'left';
         } else if (shape.type === 'channel') {
-            drawCtx.beginPath();
-            drawCtx.moveTo(a.x, a.y);
-            drawCtx.lineTo(b.x, b.y);
-            drawCtx.stroke();
-            const y1b = candleSeries.priceToCoordinate(shape.p1.price + shape.offset);
-            const y2b = candleSeries.priceToCoordinate(shape.p2.price + shape.offset);
-            if (y1b !== null && y2b !== null) {
-                drawCtx.beginPath();
-                drawCtx.moveTo(a.x, y1b);
-                drawCtx.lineTo(b.x, y2b);
-                drawCtx.stroke();
-            }
+            drawPlainChannel(a, b, shape, rect);
         } else if (shape.type === 'pos_long' || shape.type === 'pos_short') {
             const targetY = candleSeries.priceToCoordinate(shape.target);
             const xStart = Math.min(a.x, b.x), xEnd = Math.max(a.x, b.x) + 60;
@@ -6433,80 +7127,19 @@ const TradingChart = (() => {
             // sabit bir liste YOK.
             drawFibLevels(a, b, shape);
         } else if (shape.type === 'fib_fan') {
-            const fanStyle = getShapeStyle(shape);
-            drawCtx.setLineDash(dashArrayFor(fanStyle));
-            drawCtx.lineWidth = fanStyle.width;
-            drawCtx.font = '9px "Fira Code", monospace';
-            (fanStyle.levels || []).filter(l => l.on !== false).forEach(l => {
-                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * l.r;
-                const py = candleSeries.priceToCoordinate(price);
-                if (py === null) return;
-                const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
-                drawCtx.strokeStyle = l.color;
-                drawCtx.beginPath();
-                drawCtx.moveTo(a.x, a.y);
-                drawCtx.lineTo(ext.x, ext.y);
-                drawCtx.stroke();
-                if (fanStyle.showPercent) {
-                    drawCtx.fillStyle = l.color;
-                    drawCtx.fillText(String(l.r), ext.x - 26, ext.y - 3);
-                }
-            });
-            drawCtx.setLineDash([]);
+            drawFibFan(a, b, shape, rect);
         } else if (shape.type === 'fib_time') {
-            const timeStyle = getShapeStyle(shape);
-            const idx1 = indexForTime(shape.p1.time), idx2 = indexForTime(shape.p2.time);
-            const unit = Math.max(1, Math.abs(idx2 - idx1));
-            drawCtx.setLineDash(dashArrayFor(timeStyle));
-            drawCtx.lineWidth = timeStyle.width;
-            drawCtx.font = '9px "Fira Code", monospace';
-            (timeStyle.levels || []).filter(l => l.on !== false).forEach(l => {
-                const idx = idx1 + unit * l.r;
-                if (idx < 0 || idx >= state.candles.length) return;
-                const lx = chart.timeScale().logicalToCoordinate(idx);
-                if (lx === null) return;
-                drawCtx.strokeStyle = l.color;
-                drawCtx.beginPath();
-                drawCtx.moveTo(lx, 0);
-                drawCtx.lineTo(lx, rect.height);
-                drawCtx.stroke();
-                if (timeStyle.showPercent) {
-                    drawCtx.fillStyle = l.color;
-                    drawCtx.fillText(String(l.r), lx + 2, 12);
-                }
-            });
-            drawCtx.setLineDash([]);
+            drawFibTimeZones(shape, rect);
+        } else if (shape.type === 'fib_channel') {
+            drawFibChannel(a, b, shape, rect);
+        } else if (shape.type === 'fib_arcs') {
+            drawFibArcs(a, b, shape, rect);
+        } else if (shape.type === 'fib_circles') {
+            drawFibCircles(a, b, shape, rect);
         } else if (shape.type === 'gann_fan') {
-            // Klasik Gann açı seti: p1 = pivot, p2 = "1x1" (45°) açısını
-            // tanımlayan referans nokta. Her oran, p1->p2 fiyat/bar eğiminin
-            // bir katı olarak p2'nin zaman indeksinde bir fiyat üretir, tıpkı
-            // fib_fan'daki interpolasyon gibi — yalnızca oran seti farklı.
-            const GANN_RATIOS = [
-                { r: 1 / 8, label: '1x8' },
-                { r: 1 / 4, label: '1x4' },
-                { r: 1 / 3, label: '1x3' },
-                { r: 1 / 2, label: '1x2' },
-                { r: 1,     label: '1x1' },
-                { r: 2,     label: '2x1' },
-                { r: 3,     label: '3x1' },
-                { r: 4,     label: '4x1' },
-                { r: 8,     label: '8x1' }
-            ];
-            GANN_RATIOS.forEach(g => {
-                const price = shape.p1.price + (shape.p2.price - shape.p1.price) * g.r;
-                const py = candleSeries.priceToCoordinate(price);
-                if (py === null) return;
-                const ext = extendLineToEdge(a, { x: b.x, y: py }, rect);
-                drawCtx.strokeStyle = g.r === 1 ? (isSelected ? '#4FC3F7' : drawColor()) : fibLineColor();
-                drawCtx.lineWidth = g.r === 1 ? 2 : 1;
-                drawCtx.beginPath();
-                drawCtx.moveTo(a.x, a.y);
-                drawCtx.lineTo(ext.x, ext.y);
-                drawCtx.stroke();
-                drawCtx.fillStyle = drawColor();
-                drawCtx.font = '9px "Fira Code", monospace';
-                drawCtx.fillText(g.label, ext.x - 24, ext.y - 3);
-            });
+            drawGannFan(a, b, shape, rect, isSelected);
+        } else if (shape.type === 'gann_box' || shape.type === 'gann_square') {
+            drawGannBox(a, b, shape, rect);
         }
 
         if (isSelected) {
@@ -6540,8 +7173,9 @@ const TradingChart = (() => {
             const shape = state.drawings[i];
             if (!shape || shape.hidden) continue;
 
-            if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') {
+            if (isPointsShape(shape.type)) {
                 if (!shape.points || shape.points.length < 2) continue;
+                if (shape.type === 'fib_tb_time' && hitFibTbTime(shape, x, y, HIT_TOLERANCE)) return i;
                 const pts = shape.points.map(dataPointToPixel).filter(p => p.x !== null && p.y !== null);
                 for (let j = 0; j < pts.length - 1; j++) {
                     if (distToSegment(x, y, pts[j].x, pts[j].y, pts[j + 1].x, pts[j + 1].y) <= HIT_TOLERANCE) return i;
@@ -6553,7 +7187,9 @@ const TradingChart = (() => {
             const b = dataPointToPixel(shape.p2);
             if (a.x === null || b.x === null || a.y === null || b.y === null) continue;
 
-            if (shape.type === 'trend' || shape.type === 'arrow' || shape.type === 'ray' || shape.type === 'extended' || shape.type === 'channel') {
+            if (shape.type === 'channel' || shape.type === 'fib_channel') {
+                if (hitTestAdvanced(shape, a, b, x, y, HIT_TOLERANCE)) return i;
+            } else if (shape.type === 'trend' || shape.type === 'arrow' || shape.type === 'ray' || shape.type === 'extended') {
                 if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
             } else if (shape.type === 'trend_projection') {
                 if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= HIT_TOLERANCE) return i;
@@ -6591,12 +7227,9 @@ const TradingChart = (() => {
                     return ly !== null && Math.abs(y - ly) <= HIT_TOLERANCE;
                 });
                 if (hit) return i;
-            } else if (shape.type === 'fib_fan' || shape.type === 'fib_time' || shape.type === 'gann_fan') {
-                // Low-value to hit-test precisely (fan rays / time-zone verticals extend to the
-                // canvas edge) — a generous bounding-box check keeps selection usable without
-                // duplicating the render geometry here.
-                const rx = Math.min(a.x, b.x) - 20, rw = Math.abs(b.x - a.x) + 40;
-                if (x >= rx && x <= rx + rw) return i;
+            } else if (['fib_fan', 'fib_time', 'gann_fan', 'fib_arcs', 'fib_circles', 'gann_box', 'gann_square'].indexOf(shape.type) !== -1) {
+                // (30 Eylül 2026) Işınlar/zaman çizgileri/yaylar için gerçek geometriyle isabet testi
+                if (hitTestAdvanced(shape, a, b, x, y, HIT_TOLERANCE)) return i;
             }
         }
         return -1;
@@ -6611,6 +7244,21 @@ const TradingChart = (() => {
     // pikselde çakışır — bilerek ÖNCE p1 kontrol ediliyor ki grab her zaman
     // render'ı etkileyen noktaya (p1) denk gelsin.
     function hitTestHandle(shape, x, y) {
+        // (30 Eylül 2026) Çok noktalı çizimlerin (ABCD, Elliott, trend bazlı Fib zamanı) her noktası
+        // ayrı ayrı sürüklenebilir; kanalların genişliği ortadaki yuvarlak tutamaçla değişir.
+        if (shape && isPointsShape(shape.type)) {
+            if (shape.type === 'brush' || !Array.isArray(shape.points)) return null;
+            const T = 8 * touchHitScale;
+            for (let k = 0; k < shape.points.length; k++) {
+                const p = dataPointToPixel(shape.points[k]);
+                if (p.x !== null && p.y !== null && Math.hypot(x - p.x, y - p.y) <= T) return 'pt:' + k;
+            }
+            return null;
+        }
+        if (shape && (shape.type === 'channel' || shape.type === 'fib_channel')) {
+            const hh = offHandlePx(shape);
+            if (hh && Math.hypot(x - hh.x, y - hh.y) <= 9 * touchHitScale) return 'off';
+        }
         if (!shape || !shape.p1 || !shape.p2) return null;
         if (shape.type === 'brush' || shape.type === 'elliott' || shape.type === 'abcd') return null;
         const HANDLE_TOLERANCE = 8 * touchHitScale;
@@ -6661,7 +7309,7 @@ const TradingChart = (() => {
         };
 
         let clone;
-        if (copiedDrawing.type === 'brush' || copiedDrawing.type === 'elliott' || copiedDrawing.type === 'abcd') {
+        if (isPointsShape(copiedDrawing.type)) {
             clone = { type: copiedDrawing.type, points: (copiedDrawing.points || []).map(shiftPoint) };
             if (clone.points.length < 2) return false;
         } else {
@@ -6846,7 +7494,16 @@ const TradingChart = (() => {
                 const dp = pixelToDataPoint(x, y);
                 if (dp.idx < 0 || dp.time === null) return;
                 const updated = Object.assign({}, endpointDrag.original);
-                updated[endpointDrag.which] = { time: dp.time, price: dp.price };
+                const which = endpointDrag.which;
+                if (which === 'off') {
+                    const off = channelOffsetAt(updated, dp);
+                    if (off) updated.offset = off;
+                } else if (which.indexOf('pt:') === 0) {
+                    updated.points = (updated.points || []).slice();
+                    updated.points[+which.slice(3)] = { time: dp.time, price: dp.price };
+                } else {
+                    updated[which] = { time: dp.time, price: dp.price };
+                }
                 state.drawings[endpointDrag.index] = updated;
                 redrawDrawings();
                 return;
@@ -6961,6 +7618,9 @@ const TradingChart = (() => {
         // "Ayarlar…" ile aynı paneli açar.
         chartContainer.addEventListener('dblclick', (e) => {
             if (state.activeTool !== 'cursor') return;
+            // (30 Eylül 2026) Tıkla-tıkla ile biten bir çizimin son iki tıklaması çift tıklama
+            // sayılıp ayar panelini kendiliğinden açıyordu — çizim bittikten hemen sonra yok sayılır.
+            if (Date.now() - lastFinishAt < 900) return;
             const r = chartContainer.getBoundingClientRect();
             const hitIndex = hitTestDrawings(e.clientX - r.left, e.clientY - r.top);
             if (hitIndex >= 0) {
@@ -7085,14 +7745,14 @@ const TradingChart = (() => {
             (st.levels || []).forEach((l, i) => {
                 h += '<label class="tv-ds-level">' +
                     '<input type="checkbox" data-ds="level-on" data-i="' + i + '"' + (l.on !== false ? ' checked' : '') + '>' +
-                    '<span class="tv-ds-level-r">' + l.r + '</span>' +
+                    '<span class="tv-ds-level-r">' + levelLabel(shape.type, l.r) + '</span>' +
                     '<input type="color" data-ds="level-color" data-i="' + i + '" value="' + toHexColor(l.color) + '">' +
                     '<button type="button" class="tv-ds-lvl-del" data-ds-action="level-del" data-i="' + i + '" title="Seviyeyi sil">×</button>' +
                     '</label>';
             });
             h += '</div>';
             // (24 Eylül 2026) Özel seviye ekleme (ör. 0.705, 1.414, -0.272)
-            h += dsRow('Seviye ekle', '<input type="number" step="0.001" min="-10" max="10" class="tv-ds-lvl-new" placeholder="0.705">' +
+            h += dsRow('Seviye ekle', '<input type="number" step="0.001" min="-100" max="1000" class="tv-ds-lvl-new" placeholder="' + (shape.type === 'fib_time' ? '144' : (shape.type === 'gann_fan' ? '1.5' : '0.705')) + '">' +
                 '<button type="button" class="tv-ds-mini" data-ds-action="level-add">Ekle</button>');
             if (shape.type === 'fib' || shape.type === 'fib_ext') {
                 h += dsRow('Dolgu bantları', dsCheck('fill', st.fill) +
@@ -7101,13 +7761,25 @@ const TradingChart = (() => {
                 h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Oran') + dsCheck('showPrice', st.showPrice, '₺'));
                 h += dsRow('Etiket konumu', dsSelect('labelSide', [['right', 'Sağda'], ['left', 'Solda']], st.labelSide || 'right'));
             } else {
-                h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Göster'));
+                const T = shape.type;
+                h += dsRow('Dolgu', dsCheck('fill', st.fill) +
+                    '<input type="range" data-ds="fillOpacity" min="0" max="0.4" step="0.01" value="' + st.fillOpacity + '">');
+                if (T === 'fib_fan') h += dsRow('Yelpaze', dsCheck('fanTime', st.fanTime !== false, 'Zaman ışınları') + dsCheck('grid', st.grid !== false, 'Izgara'));
+                if (T === 'fib_channel') h += dsRow('Uzat', dsCheck('extendLeft', st.extendLeft, 'Sola') + dsCheck('extendRight', st.extendRight, 'Sağa'));
+                if (T === 'gann_box' || T === 'gann_square') h += dsRow('Köşegenler', dsCheck('diagonals', st.diagonals !== false, 'Göster'));
+                h += dsRow('Etiket', dsCheck('showPercent', st.showPercent, 'Oran') +
+                    ((T === 'fib_channel' || T === 'gann_box') ? dsCheck('showPrice', st.showPrice, '₺') : ''));
             }
         } else {
             h += dsRow('Renk', '<input type="color" data-ds="color" value="' + (st.color || '#D4AF37') + '">');
             h += dsRow('Dolgu saydamlığı',
                 '<input type="range" data-ds="fillOpacity" min="0" max="0.5" step="0.01" value="' +
                 (st.fillOpacity != null ? st.fillOpacity : 0.1) + '">');
+            if (shape.type === 'channel') h += dsRow('Orta çizgi', dsCheck('midLine', st.midLine !== false, 'Göster'));
+            if (shape.type === 'abcd') {
+                h += dsRow('Oranlar', dsCheck('showRatios', st.showRatios !== false, 'BC/AB · CD/BC'));
+                h += dsRow('Hedef', dsCheck('showProjection', st.showProjection !== false, 'AB=CD noktası'));
+            }
         }
         h += dsRow('Kalınlık', dsSelect('width', DS_WIDTHS, st.width));
         h += dsRow('Çizgi stili', dsSelect('dash', DS_DASHES, st.dash));
@@ -7188,12 +7860,12 @@ const TradingChart = (() => {
         function addFibLevelFromInput(shape) {
             const input = body.querySelector('.tv-ds-lvl-new');
             const r = input ? parseFloat(String(input.value).replace(',', '.')) : NaN;
-            if (!Number.isFinite(r) || r < -10 || r > 10) { if (input) input.focus(); return; }
+            if (!Number.isFinite(r) || r < -100 || r > 1000) { if (input) input.focus(); return; }
             const st = getShapeStyle(shape);
             const rr = Math.round(r * 10000) / 10000;
             if ((st.levels || []).some(l => Math.abs(l.r - rr) < 1e-9)) { chartToast('Bu seviye zaten var.'); return; }
             const pal = FIB_PALETTES[st.palette] ? st.palette : 'tv';
-            st.levels.push({ r: rr, on: true, color: fibColorForRatio(pal, rr, st.levels.length) });
+            st.levels.push({ r: rr, on: true, color: fibColorForRatio(pal, rr, st.levels.length, shape.type) });
             st.levels.sort((a, b) => a.r - b.r);
             body.innerHTML = renderDrawSettingsBody(shape);
             redrawDrawings();
@@ -7286,18 +7958,19 @@ const TradingChart = (() => {
         drawSettingsIndex = index;
         selectDrawing(index);
 
-        const TITLES = {
-            fib: 'Fibonacci Geri Çekilme', fib_ext: 'Fibonacci Uzantı',
-            fib_fan: 'Fibonacci Yelpazesi', fib_time: 'Fibonacci Zaman Bölgesi'
-        };
-        panel.querySelector('.tv-ds-title').textContent = TITLES[shape.type] || 'Çizim Ayarları';
+        panel.querySelector('.tv-ds-title').textContent = toolLabelFor(shape.type) || 'Çizim Ayarları';
         panel.querySelector('.tv-ds-body').innerHTML = renderDrawSettingsBody(shape);
         panel.classList.add('open');
 
-        // Konum: tıklanan noktanın yanına, ekran dışına taşmayacak şekilde.
+        // Konum (30 Eylül 2026): çizimin ÜSTÜNE değil, grafiğin sağ üst köşesine açılır
+        // (telefonda alta ortalı) — ayar yaparken çizim görünür kalsın.
         const w = panel.offsetWidth || 268, h = panel.offsetHeight || 320;
-        const x = (clientX != null ? clientX + 12 : window.innerWidth / 2 - w / 2);
-        const y = (clientY != null ? clientY : window.innerHeight / 2 - h / 2);
+        let x, y;
+        const pr = chartContainer ? chartContainer.getBoundingClientRect() : null;
+        if (window.innerWidth < 700) { x = (window.innerWidth - w) / 2; y = window.innerHeight - h - 10; }
+        else if (pr && window.innerWidth - pr.right >= w + 8) { x = pr.right + 6; y = pr.top + 8; }
+        else if (pr && pr.width > w + 40) { x = pr.right - w - 70; y = pr.top + 44; }
+        else { x = (clientX != null ? clientX + 12 : window.innerWidth / 2 - w / 2); y = (clientY != null ? clientY : window.innerHeight / 2 - h / 2); }
         panel.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px';
         panel.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y)) + 'px';
     }
@@ -7455,6 +8128,8 @@ const TradingChart = (() => {
         // caller in the app itself relies on this.
         debugGetDrawings: () => JSON.parse(JSON.stringify(state.drawings)),
         debugGetSelectedIndex: () => state.selectedDrawingIndex,
+        debugHitHandle: (x, y) => hitTestHandle(state.drawings[state.selectedDrawingIndex], x, y),
+        debugHandlePx: (i) => { const sh = state.drawings[i]; return sh && (sh.type === 'channel' || sh.type === 'fib_channel') ? offHandlePx(sh) : null; },
         debugSelectDrawing: (index) => selectDrawing(index),
         debugCopySelected: () => copySelectedDrawing(),
         debugPaste: () => pasteDrawing(),
