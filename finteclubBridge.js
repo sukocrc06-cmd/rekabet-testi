@@ -534,6 +534,15 @@
             // (Admin bakiye/iptal komut kanalları artık senkron hazır olunca
             // startPortfolioSyncForCurrentUser() içinden dinlenmeye başlıyor.)
             startPortfolioSyncForCurrentUser();
+        } else if (!futureWeek && ftcAuth && currentAuthUser) {
+            var stNow = applicationStatusFor(currentAuthUser.email);
+            setBadgeVisible(false);
+            verifiedApp = null;
+            stopPortfolioSync();
+            denyAfterSignOut = denyMessage(stNow === 'approved' ? 'none' : stNow);
+            setVerifyStatus(denyAfterSignOut, 'error');
+            showLoginModal();
+            ftcAuth.signOut().catch(function () {});
         } else {
             setBadgeVisible(false);
             setVerifyStatus(futureWeek
@@ -560,9 +569,33 @@
         }
     }
 
+    // (29 Eylül 2026) OPLab'a yalnızca ONAYLI FinTeLig yarışmacıları giriş yapar. Başvuru
+    // listesi herkese açık paylaşılan belgede olduğu için e-posta, şifre sorulmadan önce
+    // kontrol edilir; kaydı olmayan e-postayla oturum hiç açılmaz, ziyaretçi misafir kalır.
+    var REGISTER_URL = 'https://finteclub.com.tr/fintelig/';
+    var denyAfterSignOut = null;
+    function applicationStatusFor(email) {
+        if (!lastSharedData) return 'unknown';
+        var em = String(email || '').trim().toLowerCase();
+        var mine = (lastSharedData.applications || []).filter(function (a) { return (a.email || '').toLowerCase() === em; });
+        if (!mine.length) return 'none';
+        if (mine.some(function (a) { return a.status === 'onayli' && !a.pastCompetitor; })) return 'approved';
+        if (mine.some(function (a) { return a.status === 'onayli' && a.pastCompetitor; })) return 'past';
+        if (mine.some(function (a) { return a.status === 'bekliyor' || a.status === 'incelemede'; })) return 'pending';
+        return 'rejected';
+    }
+    function denyMessage(st) {
+        if (st === 'pending') return 'Başvurun henüz onaylanmadı — onaylanınca e-postayla haber vereceğiz. Şimdilik misafir olarak gezinebilirsin.';
+        if (st === 'past') return 'Bu hesabın yarışma haftası sona erdi. Misafir olarak gezinebilirsin; yeni haftaya katılmak için ' + REGISTER_URL + ' adresinden başvur.';
+        if (st === 'rejected') return 'Bu e-postayla onaylı bir FinTeLig başvurusu yok. Misafir olarak gezinebilirsin.';
+        return 'Bu e-posta ile FinTeLig kaydı bulunamadı. Misafir olarak gezinebilirsin; yarışmaya katılmak için ' + REGISTER_URL + ' adresinden kayıt ol.';
+    }
+
     function attemptLogin(email, password) {
         if (!ftcAuth) { setVerifyStatus('Giriş şu anda kullanılamıyor (bağlantı yok).', 'pending'); return; }
         if (!email || !password) { setVerifyStatus('E-posta ve şifreni gir.', 'error'); return; }
+        var st = applicationStatusFor(email);
+        if (st !== 'approved' && st !== 'unknown') { setVerifyStatus(denyMessage(st), 'error'); return; }
         setVerifyStatus('Giriş yapılıyor...', 'pending');
         ftcAuth.signInWithEmailAndPassword(email, password).catch(function (err) {
             setVerifyStatus(loginErrorMessage(err), 'error');
@@ -1961,7 +1994,9 @@
                     checkApplicationStatus();
                 } else {
                     setBadgeVisible(false);
-                    setVerifyStatus('', null);
+                    // kayıtsız e-posta yüzünden kapatılan oturumun mesajı ekranda kalsın
+                    if (denyAfterSignOut) { setVerifyStatus(denyAfterSignOut, 'error'); denyAfterSignOut = null; }
+                    else setVerifyStatus('', null);
                     verifiedApp = null;
                     stopPortfolioSync();
                 }

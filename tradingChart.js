@@ -218,17 +218,35 @@ const TradingChart = (() => {
         return { base: s.slice(0, idx), period: Number.isFinite(period) ? period : null };
     }
 
+    // (29 Eylül 2026 — mobil sade başlangıç) Telefonda ilk açılışta yalnızca mum grafiği:
+    // alt grafik (RSI) ve üst göstergeler (SMA20, Bollinger) kapalı. Kullanıcının kendi
+    // seçimi o cihazda hatırlanır. Masaüstü varsayılanı değişmedi.
+    const IS_PHONE = !!(window.matchMedia && window.matchMedia('(max-width: 640px), (pointer: coarse) and (max-width: 950px), (pointer: coarse) and (max-height: 500px)').matches);
+    const MOBILE_DEFAULTS_KEY = 'optipulselab_mobile_defaults_v1';
+    const MOBILE_OVERLAYS_KEY = 'optipulselab_mobile_overlays_v1';
+    let mobileFirstRun = false;
+    if (IS_PHONE) {
+        try {
+            if (!localStorage.getItem(MOBILE_DEFAULTS_KEY)) {
+                mobileFirstRun = true;
+                localStorage.setItem(MOBILE_DEFAULTS_KEY, '1');
+                localStorage.setItem(ACTIVE_OSC_STORAGE_KEY, '[]');
+                localStorage.setItem(MOBILE_OVERLAYS_KEY, '[]');
+            }
+        } catch (e) { mobileFirstRun = true; }
+    }
     function loadActiveOscillators() {
+        const def = IS_PHONE ? [] : ['rsi'];
         try {
             const raw = localStorage.getItem(ACTIVE_OSC_STORAGE_KEY);
-            if (!raw) return ['rsi'];
+            if (!raw) return def;
             const arr = JSON.parse(raw);
-            if (Array.isArray(arr) && arr.length) {
-                const filtered = arr.filter(id => OSCILLATOR_META[parseOscType(id).base]);
-                return filtered.length ? filtered : ['rsi'];
+            if (Array.isArray(arr)) {
+                // (29 Eylül 2026) Kullanıcı tüm alt grafikleri kapattıysa boş liste de geçerli.
+                return arr.filter(id => OSCILLATOR_META[parseOscType(id).base]);
             }
-            return ['rsi'];
-        } catch (e) { return ['rsi']; }
+            return def;
+        } catch (e) { return def; }
     }
 
     function saveActiveOscillators() {
@@ -3380,9 +3398,21 @@ const TradingChart = (() => {
     }
 
     function setupOverlayCheckboxes() {
-        ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap', 'chk-ichimoku', 'chk-psar', 'chk-pivot', 'chk-supertrend', 'chk-keltner', 'chk-donchian'].forEach(id => {
+        const ids = ['chk-sma20', 'chk-sma50', 'chk-sma200', 'chk-ema9', 'chk-ema21', 'chk-wma20', 'chk-bollinger', 'chk-vwap', 'chk-ichimoku', 'chk-psar', 'chk-pivot', 'chk-supertrend', 'chk-keltner', 'chk-donchian'];
+        // (29 Eylül 2026) Telefonda üst göstergeler kayıtlı seçimden gelir (ilk açılışta hiçbiri).
+        if (IS_PHONE) {
+            let saved = [];
+            try { saved = JSON.parse(localStorage.getItem(MOBILE_OVERLAYS_KEY) || '[]') || []; } catch (e) { saved = []; }
+            ids.forEach(id => { const el = byId(id); if (el) el.checked = saved.indexOf(id) >= 0; });
+        }
+        ids.forEach(id => {
             const el = byId(id);
-            if (el) el.addEventListener('change', renderOverlays);
+            if (el) el.addEventListener('change', () => {
+                if (IS_PHONE) {
+                    try { localStorage.setItem(MOBILE_OVERLAYS_KEY, JSON.stringify(ids.filter(x => { const e = byId(x); return e && e.checked; }))); } catch (e) {}
+                }
+                renderOverlays();
+            });
         });
     }
 
@@ -5201,6 +5231,13 @@ const TradingChart = (() => {
                 }
             }
             flyout.classList.add('open');
+            // (29 Eylül 2026 — mobil) Menü ekranın dışına taşmasın.
+            const fr = flyout.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+            if (fr.right > vw - 6) flyout.style.left = Math.max(6, vw - fr.width - 6) + 'px';
+            if (fr.bottom > vh - 6 && anchorBtn) {
+                const ar = anchorBtn.getBoundingClientRect();
+                flyout.style.top = Math.max(6, Math.min(vh - fr.height - 6, ar.top - fr.height - 6)) + 'px';
+            }
         }
     }
 
@@ -5215,6 +5252,7 @@ const TradingChart = (() => {
         updateToolbarActiveState();
         syncDrawCanvasCursor();
         updateMagnetChip();
+        maybeShowTouchDrawHint(tool);
     }
 
     function updateToolbarActiveState() {
@@ -5236,6 +5274,19 @@ const TradingChart = (() => {
         const isCursor = state.activeTool === 'cursor';
         drawCanvas.style.pointerEvents = isCursor ? 'none' : 'auto';
         drawCanvas.style.cursor = isCursor ? 'default' : 'crosshair';
+        // (29 Eylül 2026 — dokunmatik çizim) Araç seçiliyken parmak hareketi sayfayı/grafiği
+        // kaydırmasın, doğrudan çizime gitsin (iOS Safari touch-action'a uyar).
+        drawCanvas.style.touchAction = isCursor ? 'auto' : 'none';
+        document.body.classList.toggle('drawing-tool-active', !isCursor);
+    }
+    let touchDrawHintShown = false;
+    function maybeShowTouchDrawHint(tool) {
+        if (tool === 'cursor' || touchDrawHintShown) return;
+        const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        if (!coarse && !IS_PHONE) return;
+        touchDrawHintShown = true;
+        const msg = tool === 'text' ? 'Not eklemek için grafikte bir noktaya dokun.' : 'Çizmek için grafikte parmağını basılı tutup sürükle. Bitince araç imlece döner.';
+        if (window.TradingEngine && typeof window.TradingEngine.showToast === 'function') window.TradingEngine.showToast(msg);
     }
 
     function updateToggleButtonState(action, on) {

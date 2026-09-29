@@ -6091,3 +6091,46 @@ body.compact-mode .status-item {
         width: calc(100vw - 32px);
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   (29 Eylül 2026) MOBİL YERLEŞİM — dikeyde kompakt üst kısım, yatayda grafik
+   öncelikli; dokunmatik çizim araç menüleri parmakla rahat seçilebilir.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 950px) and (pointer: coarse), (max-width: 640px) {
+    .tv-tool-flyout { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .tv-tool-flyout-item { min-height: 42px; font-size: 13.5px; padding: 8px 12px; }
+    #chart-toolbar .tv-tool-btn { min-width: 34px; min-height: 34px; }
+    body.drawing-tool-active .tv-main-chart { touch-action: none; }
+}
+@media (max-width: 640px) and (orientation: portrait) {
+    .tv-chart-tabs-bar { padding-top: 4px; padding-bottom: 4px; }
+    .tv-toolbar { padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
+    .tv-mtf-bar::-webkit-scrollbar, .tv-resolution-bar::-webkit-scrollbar { display: none; }
+    .tv-mtf-bar, .tv-resolution-bar { flex-wrap: nowrap !important; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+    .tv-mtf-bar > *, .tv-resolution-bar > * { flex: 0 0 auto; }
+    .trading-chart-section { min-height: 58vh; }
+    .dashboard-footer .footer-center, .dashboard-footer .footer-right { display: none; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+    .dashboard-container { grid-template-rows: 46px 1fr 0; }
+    .dashboard-header { padding: 0 8px; }
+    .header-status { display: none !important; }
+    .dashboard-footer, .market-ticker-strip { display: none !important; }
+    .sidebar-panel, .competition-panel.trading-panel, .mobile-drawer-backdrop.visible { top: 46px !important; }
+    .tv-chart-tabs-bar, .tv-mtf-bar, .tv-overlay-legend, .tv-fundamentals-bar { display: none !important; }
+    .tv-toolbar {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-top: 3px !important;
+        padding-bottom: 3px !important;
+        min-height: 0 !important;
+    }
+    .tv-toolbar::-webkit-scrollbar, .tv-resolution-bar::-webkit-scrollbar { display: none; }
+    .tv-toolbar > * { flex: 0 0 auto; }
+    .tv-resolution-bar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; padding-top: 2px !important; padding-bottom: 2px !important; min-height: 0 !important; }
+    .tv-res-btn { padding-top: 2px; padding-bottom: 2px; }
+    .trading-chart-section { flex: 1 1 auto; min-height: 0 !important; }
+}
