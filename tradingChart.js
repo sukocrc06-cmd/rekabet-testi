@@ -2552,11 +2552,56 @@ const TradingChart = (() => {
         }
     }
 
+    // (30 Eylül 2026) Telefonda tam ekran: önceden masaüstü ızgara kuralı (0 1fr 0) telefonda grafiği
+    // 0 genişlikli sütuna düşürüp BOŞ SİYAH ekran gösteriyordu. Artık CSS ile grafik tüm ekranı
+    // kaplıyor (bkz. styles.css "Telefon tam ekran"); Android'de ek olarak tarayıcı çubukları da
+    // gizleniyor (Fullscreen API). iPhone Safari bu API'yi sayfa öğeleri için desteklemiyor —
+    // orada CSS tam ekranı yeterli.
+    let nativeFsRequested = false;
+    function isSmallScreen() {
+        return !!(window.matchMedia && window.matchMedia('(max-width: 980px)').matches);
+    }
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement && nativeFsRequested) {
+            nativeFsRequested = false;
+            if (fullscreenActive) toggleFullscreen(false);
+        }
+    });
+
     function toggleFullscreen(forceState) {
         fullscreenActive = typeof forceState === 'boolean' ? forceState : !fullscreenActive;
         const container = document.querySelector('.dashboard-container');
         if (container) container.classList.toggle('tv-fullscreen-mode', fullscreenActive);
+        document.body.classList.toggle('tv-fs-lock', fullscreenActive);
         setFullscreenIcon(fullscreenActive);
+        if (isSmallScreen()) {
+            const de = document.documentElement;
+            try {
+                if (fullscreenActive && !document.fullscreenElement && de.requestFullscreen) {
+                    const pr = de.requestFullscreen({ navigationUI: 'hide' });
+                    nativeFsRequested = true;
+                    if (pr && pr.catch) pr.catch(() => { nativeFsRequested = false; });
+                } else if (!fullscreenActive && document.fullscreenElement && document.exitFullscreen) {
+                    nativeFsRequested = false;
+                    const pr = document.exitFullscreen();
+                    if (pr && pr.catch) pr.catch(() => {});
+                }
+            } catch (e) { nativeFsRequested = false; }
+            try { window.scrollTo(0, 0); } catch (e) {}
+        }
+        // Yatay telefonda sekme çubuğu (⛶ düğmesiyle birlikte) gizli — her zaman görünen bir çıkış düğmesi
+        let fsExit = byId('tv-fs-exit');
+        if (!fsExit) {
+            fsExit = document.createElement('button');
+            fsExit.id = 'tv-fs-exit';
+            fsExit.type = 'button';
+            fsExit.title = 'Tam ekrandan çık';
+            fsExit.setAttribute('aria-label', 'Tam ekrandan çık');
+            fsExit.textContent = '✕';
+            fsExit.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(false); });
+            document.body.appendChild(fsExit);
+        }
+        fsExit.classList.toggle('show', fullscreenActive && isSmallScreen());
         // Header/sidebar/trade-panel visibility flips instantly via CSS; the
         // chart containers' actual pixel size only settles after that reflow,
         // so resize on the next tick (ResizeObserver also catches this, but
@@ -3621,11 +3666,19 @@ const TradingChart = (() => {
         resizeOscillatorPanes();
     }
 
+    let mainTimeAxisVisible = null;
     function resizeOscillatorPanes() {
         Object.values(oscillatorPanes).forEach(p => {
             const mount = p.el.querySelector('.tv-osc-chart-mount');
             if (mount) p.chart.applyOptions({ width: mount.clientWidth, height: mount.clientHeight });
         });
+        // (30 Eylül 2026) Tarih ekseni normalde alttaki gösterge panelinde gösteriliyor; hiç gösterge
+        // paneli yokken (telefonun sade başlangıcı, tam ekran) ana grafikte gösterilir.
+        const wantAxis = Object.keys(oscillatorPanes).length === 0;
+        if (chart && wantAxis !== mainTimeAxisVisible) {
+            mainTimeAxisVisible = wantAxis;
+            try { chart.applyOptions({ timeScale: { visible: wantAxis } }); } catch (e) { /* yok say */ }
+        }
     }
 
     /* ────────── Indicator picker modal (open/close + search) ────────── */
