@@ -68,7 +68,7 @@ import threading
 # (30 Eylül 2026 — bellek) glibc her iş parçacığı için ayrı bellek alanı (arena) açar;
 # yf.download'ın toplu indirme iş parçacıklarıyla bu alanlar çoğalıp boşalan belleği işletim
 # sistemine geri vermiyordu (RSS sürekli artıyordu). Alan sayısı 2 ile sınırlanır.
-_YF_THREADS = 6
+_YF_THREADS = 4
 try:
     import ctypes as _ctypes
     _libc = _ctypes.CDLL("libc.so.6")
@@ -238,11 +238,32 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 # tekrar denemek sadece aynı sonucu geç vermek olurdu; zaten çağıran taraf
 # bu durumlarda kendi (fallback simülasyon / dostane hata mesajı) mantığını
 # hemen devreye sokuyor.
+# (12 Ekim 2026 — yarışma günü "motor durdu" KÖK NEDENİ) Render olay geçmişi:
+# 7-12 Ekim arasında art arda "Ran out of memory (used over 512MB)" ve
+# "i/o timeout" (sağlık kontrolüne cevap veremedi) hataları. Ücretsiz
+# instance yalnızca 0.15 CPU + 512 MB. Yarışmada 15 kişi aynı anda sembol
+# değiştirip izleme listesini ön-ısıtınca onlarca yfinance+pandas işi AYNI
+# ANDA çalışıyordu (iş parçacığı havuzu 40) — bellek tavan yapıp süreç
+# öldürülüyor ya da CPU açlığından donuyordu. Artık Yahoo'ya giden ağır
+# işler bir "kapı"dan geçiyor: aynı anda en fazla YF_MAX_PARALLEL (vars. 3)
+# iş çalışır, diğerleri sırada bekler (en fazla _YF_GATE_WAIT_SEC). Sırada
+# çok bekleyen istek hata döner — frontend bunu zaten sessizce yeniden
+# deniyor. Bellek ani sıçramaları bu sayede sınırlı kalıyor.
+_YF_MAX_PARALLEL = max(1, int(os.environ.get("YF_MAX_PARALLEL", "3")))
+_YF_GATE = threading.BoundedSemaphore(_YF_MAX_PARALLEL)
+_YF_GATE_WAIT_SEC = float(os.environ.get("YF_GATE_WAIT_SEC", "30"))
+
+
 def _yf_call_with_backoff(fn, retries: int = 1, base_delay: float = 1.5, label: str = ""):
     attempt = 0
     while True:
         try:
-            return fn()
+            if not _YF_GATE.acquire(timeout=_YF_GATE_WAIT_SEC):
+                raise TimeoutError(f"sunucu meşgul ({label or 'yfinance'} sırası doldu)")
+            try:
+                return fn()
+            finally:
+                _YF_GATE.release()
         except Exception as e:
             if attempt >= retries or not _is_rate_limit_error(e):
                 raise
@@ -683,17 +704,54 @@ def _mem_sweep_once():
             pass
 
 
-async def _mem_sweep_loop():
-    while True:
-        await asyncio.sleep(_MEM_SWEEP_INTERVAL_SEC)
+# (12 Ekim 2026) Bellek emniyet freni: RSS bu eşiği aşarsa tüm önbellekler
+# boşaltılıp bellek işletim sistemine iade ediliyor — Render'ın 512 MB'ta
+# süreci öldürmesinden ÖNCE. Daha büyük bir plana geçilirse Render
+# Environment'tan MEM_SOFT_LIMIT_MB yükseltilebilir (2 GB için ör. 1500).
+_MEM_SOFT_LIMIT_MB = float(os.environ.get("MEM_SOFT_LIMIT_MB", "380"))
+_MEM_GUARD_INTERVAL_SEC = 15
+
+
+def _mem_emergency_release():
+    with _history_cache_lock:
+        _history_cache.clear()
+    _ref_cache.clear()
+    _fundamentals_cache.clear()
+    _gc.collect()
+    if _libc is not None:
         try:
-            await asyncio.to_thread(_mem_sweep_once)
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
+async def _mem_sweep_loop():
+    elapsed = 0
+    while True:
+        await asyncio.sleep(_MEM_GUARD_INTERVAL_SEC)
+        elapsed += _MEM_GUARD_INTERVAL_SEC
+        try:
+            rss = _rss_mb()
+            if rss is not None and rss > _MEM_SOFT_LIMIT_MB:
+                await asyncio.to_thread(_mem_emergency_release)
+                print(f"[mem] RSS {rss} MB > {_MEM_SOFT_LIMIT_MB} MB — önbellekler boşaltıldı, şimdi {_rss_mb()} MB")
+            elif elapsed >= _MEM_SWEEP_INTERVAL_SEC:
+                elapsed = 0
+                await asyncio.to_thread(_mem_sweep_once)
         except Exception as e:
             print(f"[mem] temizlik hatası: {e}")
 
 
 @app.on_event("startup")
 async def _start_mem_sweep():
+    # (12 Ekim 2026) Senkron uç noktaların (ohlcv/quotes/fundamentals) çalıştığı
+    # iş parçacığı havuzu varsayılan 40'tan küçültülüyor — 0.15 CPU / 512 MB'lık
+    # instance'ta 40 paralel pandas işi belleği ve CPU'yu tüketiyordu.
+    try:
+        import anyio.to_thread as _anyio_thread
+        _anyio_thread.current_default_thread_limiter().total_tokens = max(4, int(os.environ.get("THREADPOOL_SIZE", "12")))
+    except Exception as e:
+        print(f"[startup] iş parçacığı sınırı ayarlanamadı: {e}")
     asyncio.create_task(_mem_sweep_loop())
 
 
