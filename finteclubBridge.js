@@ -969,6 +969,9 @@
             positions: snap.positions,
             pendingOrders: snap.pendingOrders,
             recentTrades: snap.recentTrades,
+            // (13 Ekim 2026) Yarışma kuralı düzeltmesi bu cihazda uygulandı mı
+            // (oplabRules.js) — admin, uygulanmamış olanları kendisi hesaplar.
+            rf: (function () { var lp = readLocalPortfolio(); return lp && lp.ruleFix && lp.ruleFix.v ? String(lp.ruleFix.v) : null; })(),
             updatedAt: new Date().toISOString()
         };
         var sentEq = snap.equity;
@@ -2076,6 +2079,9 @@
         // (22 Eylül 2026 — Madde 6) tradingEngine.js'in dışa aktarma
         // öncesinde çağırdığı tazelik kontrolü — bkz. checkForNewerCloudRecordSync
         // yorumu. Her zaman bir Promise<{hasNewer:boolean}> döner, asla reddetmez.
-        checkForNewerCloudRecordSync: function () { return checkForNewerCloudRecordSync(); }
+        checkForNewerCloudRecordSync: function () { return checkForNewerCloudRecordSync(); },
+        // (13 Ekim 2026) Kural düzeltmesi/fiyat netleştirme yalnızca bulut
+        // portföyü bu cihaza indirildikten SONRA çalışsın (bkz. tradingEngine.js runTrueUps).
+        isSyncReady: function () { return !!(syncReady && verifiedApp && localPortfolioBelongsToCurrentUser()); }
     };
 })();

@@ -34,7 +34,7 @@
          devam eder, canlıya yansıyan düzeltme hiç görünmez.
     -->
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.min.css?v=20260930a">
+    <link rel="stylesheet" href="styles.min.css?v=20261013a">
 </head>
 <body>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -849,8 +849,8 @@
                         <div class="leverage-selector" role="group" aria-label="Kaldıraç seçimi">
                             <button type="button" class="leverage-btn active" data-leverage="1">1x</button>
                             <button type="button" class="leverage-btn" data-leverage="2">2x</button>
+                            <button type="button" class="leverage-btn" data-leverage="3">3x</button>
                             <button type="button" class="leverage-btn" data-leverage="5">5x</button>
-                            <button type="button" class="leverage-btn" data-leverage="10">10x</button>
                         </div>
                         <!-- (18 Temmuz 2026, onuncu oturum) Manuel kaldıraç: hazır butonlar
                              1/2/5/10x ile sınırlıyken, bu alan 1-20x arası herhangi bir tam
@@ -859,7 +859,7 @@
                              setupLeverageSelector()). -->
                         <div class="leverage-custom-row">
                             <label for="leverage-custom-input">Manuel</label>
-                            <input type="number" id="leverage-custom-input" class="form-input leverage-custom-input" min="1" max="20" step="1" placeholder="ör. 7">
+                            <input type="number" id="leverage-custom-input" class="form-input leverage-custom-input" min="1" max="5" step="1" placeholder="ör. 4">
                             <span class="leverage-custom-suffix">x</span>
                             <button type="button" class="btn-chip-action" id="btn-leverage-custom-apply">Uygula</button>
                         </div>
@@ -867,12 +867,8 @@
                              hızlı-seçim chip'leri — hazır 1/2/5/10x'in kapsamadığı ara
                              değerlere tek tıkla ulaşmak için (bkz. tradingEngine.js
                              setupLeverageSelector()). -->
-                        <div class="leverage-quick-chip-row" role="group" aria-label="Hızlı kaldıraç seçimi">
-                            <button type="button" class="leverage-quick-chip" data-leverage-chip="3">3x</button>
-                            <button type="button" class="leverage-quick-chip" data-leverage-chip="7">7x</button>
-                            <button type="button" class="leverage-quick-chip" data-leverage-chip="15">15x</button>
-                            <button type="button" class="leverage-quick-chip" data-leverage-chip="20">20x</button>
-                        </div>
+                        <!-- (13 Ekim 2026) Yarışma kuralı: VİOP kaldıracı en fazla 5x —
+                             3x/7x/15x/20x hızlı çipleri kaldırıldı. -->
                     </div>
 
                     <div class="form-group" id="qt-limit-row" style="display:none;">
@@ -1015,6 +1011,13 @@
                     <div class="qt-ticket-alert qt-alert-info" id="qt-trading-status-notice" style="display:none;" role="status"></div>
 
                     <button type="button" id="qt-submit" class="btn-trade-submit btn-buy">AL (BUY)</button>
+                    <!-- (13 Ekim 2026) Yarışma kuralları özeti + günlük emir sayacı
+                         (tradingEngine.js renderRulesNote). -->
+                    <div class="qt-rules-note" id="qt-rules-note">
+                        <div><strong>Yarışma kuralları:</strong> günde en fazla 20 emir · tek hisseye portföyün en fazla %30'u · VİOP'ta en fazla 5x kaldıraç.</div>
+                        <div>Emirler anında gerçekleşir; veriler 15 dk gecikmeli olduğundan işlem fiyatı yaklaşık 15 dk içinde emir saatindeki gerçek fiyata göre netleşir (≈).</div>
+                        <div class="qt-rules-count" id="qt-rules-count"></div>
+                    </div>
                 </div>
 
                 <!-- Portfolio performance analytics -->
@@ -1651,7 +1654,7 @@
                         Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı
                         (sol dikey araç rayında — Çizgiler, Fibonacci, Gann, Elliott, Şekiller, Pozisyon),
                         özelleştirilebilir teknik göstergeler, fiyat alarmları, Stop-Loss/Take-Profit ve OCO/Trailing
-                        Stop emirleri, hazır ve <strong>manuel (1-20x) kaldıraç/marj sistemi</strong>, sektörel
+                        Stop emirleri, VİOP'ta <strong>en fazla 5x kaldıraç/marj sistemi</strong>, sektörel
                         BIST100 ısı haritası, aynı sembolü karşılaştırmalı gösteren <strong>Dual-Chart</strong>,
                         2x2 çoklu grafik ızgarası, <strong>tam ekran grafik modu</strong> ve portföy performans
                         takibi.
@@ -1728,7 +1731,7 @@
     <!-- (7 Ekim 2026) Türkçe / İngilizce dil desteği — üst bardaki TR | EN düğmesi. Grafik
          kütüphanesinden SONRA, uygulama dosyalarından ÖNCE yüklenir (grafik tarih ekseni
          dili + ekrandaki metinlerin çevirisi). -->
-    <script defer src="i18n.js?v=20261007a"></script>
+    <script defer src="i18n.js?v=20261013a"></script>
     <script defer src="config.js?v=20260828"></script>
     <!-- (27 Ağustos 2026, dördüncü hız turu — "minify") Aşağıdaki 7 script
          artık kaynak (.js) yerine küçültülmüş (.min.js) kopyalarını
@@ -1751,12 +1754,14 @@
          çağrılmıyor, script etiketi kaldırıldı. -->
     <!-- TradingView-style Chart + Drawing Tools -->
     <script defer src="tradingChart.min.js?v=20260930b"></script>
+    <!-- (13 Ekim 2026) Yarışma kuralları — ortak hesap modülü (admin paneli de kullanır) -->
+    <script defer src="oplabRules.js?v=20261013a"></script>
     <!-- Demo Trading Engine (watchlist + paper trading) -->
-    <script defer src="tradingEngine.min.js?v=20260929b"></script>
+    <script defer src="tradingEngine.min.js?v=20261013a"></script>
     <!-- Çoklu Grafik / 2x2 Izgara Düzeni (sade, salt-okunur genel bakış) -->
     <script defer src="multiChartGrid.min.js?v=20260928c"></script>
     <!-- Feature Tour / Demo Wizard (opt-in guided walkthrough) -->
-    <script defer src="tourGuide.min.js?v=20260831a"></script>
+    <script defer src="tourGuide.min.js?v=20261013a"></script>
     <!-- Application Controller -->
     <script defer src="app.min.js?v=20260828c"></script>
     <!-- (20 Ağustos 2026 — FinTeClub bağlantısı kullanıcı isteğiyle geri
@@ -1765,7 +1770,7 @@
          Durumu, Tema/Kurumsal Mavi) ve FinteLig giriş/doğrulama akışı bu
          dosya sayesinde tekrar çalışıyor. Firebase SDK script'leri yukarıda
          (config.js'ten önce) yüklü olmalı. -->
-    <script defer src="finteclubBridge.min.js?v=20260929b"></script>
+    <script defer src="finteclubBridge.min.js?v=20261013a"></script>
 
 
     <script>

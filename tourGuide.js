@@ -315,7 +315,7 @@ const TourGuide = (() => {
                 mobilePanel: 'trade',
                 selector: () => document.querySelector('.leverage-selector')?.closest('.form-group') || document.querySelector('.leverage-selector'),
                 title: 'Kaldıraç / Marj Sistemi',
-                desc: 'Emir panelinde hazır 1x/2x/5x/10x düğmeleri, 1-20x arası serbest manuel giriş ve 3x/7x/15x/20x hızlı-seçim çipleriyle kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
+                desc: 'VİOP modunda hazır 1x/2x/3x/5x düğmeleri ya da 1-5x arası manuel girişle kaldıraç seçebilirsiniz (yarışma kuralı: en fazla 5x) — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).'
             },
             {
                 setup: async () => {

@@ -920,6 +920,86 @@ _FUNDAMENTALS_CACHE_TTL_SEC = 6 * 3600
 _fundamentals_cache = {}  # formatted_ticker -> (timestamp, dict)
 
 
+# (13 Ekim 2026 — yarışma kuralı "fiyat netleştirme") Borsa İstanbul verisi
+# Yahoo'da 15 dk gecikmeli; canlı fiyatı başka yerde gören biri bizde eski
+# fiyattan işlem yapıp avantaj sağlıyordu. OPLab emirleri anında
+# gerçekleştirir, ~17 dk sonra bu uçtan emrin verildiği DAKİKANIN gerçek
+# fiyatını (1 dk'lık mumun kapanışı) alıp işlem fiyatını düzeltir
+# (bkz. oplabRules.js). Admin paneli de final sıralama doğrulamasında kullanır.
+# Girdi: {"items":[{"symbol":"THYAO","ts":1760000000000}, ...]} (ts: ms)
+# Çıktı: {"prices":{"THYAO|1760000000000": 286.25, ...}} — veri henüz
+# yetişmediyse o anahtar hiç dönmez (istemci sonra tekrar dener).
+class PriceAtItem(BaseModel):
+    symbol: str
+    ts: float
+
+class PricesAtRequest(BaseModel):
+    items: List[PriceAtItem]
+
+_PRICES_AT_MAX_ITEMS = 200
+_PRICES_AT_MAX_SYMBOLS = 30
+
+
+def _price_at_from_minutes(hist, ts_ms: float, now_s: float):
+    if hist is None or hist.empty or "Close" not in hist.columns:
+        return None
+    idx = hist.index
+    try:
+        idx = idx.tz_convert("UTC") if idx.tz is not None else idx.tz_localize("UTC")
+    except Exception:
+        return None
+    secs = [int(x.timestamp()) for x in idx]
+    closes = hist["Close"].tolist()
+    opens = hist["Open"].tolist() if "Open" in hist.columns else closes
+    t = float(ts_ms) / 1000.0
+    last_start = secs[-1]
+    if t >= last_start + 60 and (now_s - t) < 40 * 60:
+        return None  # veri bu dakikaya henüz yetişmedi
+    import bisect
+    pos = bisect.bisect_right(secs, t) - 1
+    def _day(x):
+        return time.strftime("%Y-%m-%d", time.gmtime(x + 3 * 3600))
+    if pos >= 0 and (t - secs[pos]) < 30 * 60 and _day(secs[pos]) == _day(t):
+        v = closes[pos]
+    elif pos + 1 < len(secs) and (secs[pos + 1] - t) < 16 * 3600:
+        v = opens[pos + 1]  # seans öncesi sıraya alınmış emir → açılıştaki ilk fiyat
+    else:
+        return None
+    try:
+        v = float(v)
+    except Exception:
+        return None
+    if v != v or v <= 0:
+        return None
+    return round(v, 4)
+
+
+@app.post("/api/v1/prices-at")
+def prices_at(request: PricesAtRequest):
+    items = (request.items or [])[:_PRICES_AT_MAX_ITEMS]
+    by_symbol = {}
+    for it in items:
+        sym = str(it.symbol or "").strip().upper()
+        if not _is_valid_ticker_format(sym):
+            continue
+        by_symbol.setdefault(sym, []).append(it.ts)
+    out = {}
+    now_s = time.time()
+    for sym in list(by_symbol.keys())[:_PRICES_AT_MAX_SYMBOLS]:
+        try:
+            formatted = format_ticker(sym)
+            stock = yf.Ticker(formatted, session=session)
+            hist = _cached_history(stock, formatted, "7d", "1m", timeout=15)
+        except Exception as e:
+            print(f"[prices-at] {sym} 1dk verisi alınamadı: {e}")
+            continue
+        for ts in by_symbol[sym]:
+            v = _price_at_from_minutes(hist, ts, now_s)
+            if v is not None:
+                out[f"{sym}|{int(ts)}"] = v
+    return {"prices": out}
+
+
 @app.get("/api/v1/fundamentals/{ticker}")
 def get_fundamentals(ticker: str):
     if not _is_valid_ticker_format(ticker):
@@ -1583,4 +1663,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-# EOF
+# EOF

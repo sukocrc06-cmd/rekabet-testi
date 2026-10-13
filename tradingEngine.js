@@ -311,12 +311,16 @@ const TradingEngine = (() => {
         { maxNotional: 20000000, maxLeverage: 3 },
         { maxNotional: Infinity, maxLeverage: 2 }
     ];
+    // (13 Ekim 2026 — yarışma kuralı) VİOP kaldıracı en fazla 5x — kademeler
+    // bu tavanın üstüne çıkamaz (bkz. oplabRules.js RULES.viopMaxLeverage).
+    const RULES_API = window.OPLabRules || null;
+    const VIOP_RULE_MAX_LEVERAGE = RULES_API ? RULES_API.RULES.viopMaxLeverage : 5;
     function tieredMaxLeverage(notional) {
         const n = Math.max(0, Number(notional) || 0);
         for (let i = 0; i < VIOP_LEVERAGE_TIERS.length; i++) {
-            if (n <= VIOP_LEVERAGE_TIERS[i].maxNotional) return VIOP_LEVERAGE_TIERS[i].maxLeverage;
+            if (n <= VIOP_LEVERAGE_TIERS[i].maxNotional) return Math.min(VIOP_LEVERAGE_TIERS[i].maxLeverage, VIOP_RULE_MAX_LEVERAGE);
         }
-        return VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage;
+        return Math.min(VIOP_LEVERAGE_TIERS[VIOP_LEVERAGE_TIERS.length - 1].maxLeverage, VIOP_RULE_MAX_LEVERAGE);
     }
     const MIN_POSITION_HOLD_MS = 30000; // Bir pozisyon manuel (veya TP ile) kapatılmadan önce açık kalması gereken asgari süre (30 saniye) — hem Normal hem VİOP defteri için geçerli
     const MIN_TRAILING_PCT = 0.5; // Trailing Stop için izin verilen asgari yüzde — daha küçüğü fiyat gürültüsüyle anında tetiklenip asgari tutma süresini dolanmanın bir yolu olurdu
@@ -2990,7 +2994,7 @@ const TradingEngine = (() => {
     }
 
     const LEVERAGE_MIN = 1;
-    const LEVERAGE_MAX = 20;
+    const LEVERAGE_MAX = VIOP_RULE_MAX_LEVERAGE; // (13 Ekim 2026) eskiden 20
 
     function applyLeverage(value) {
         state.leverage = Math.min(LEVERAGE_MAX, Math.max(LEVERAGE_MIN, Math.round(Number(value) || 1)));
@@ -4606,6 +4610,37 @@ const TradingEngine = (() => {
         const pos = b.positions[symbol];
         let leverageClampedTo = null; // (10 Ağustos 2026) kademeli kaldıraç devreye girdiyse çağırana bildirmek için
 
+        // (13 Ekim 2026 — yarışma kuralları, bkz. oplabRules.js) Spot 1x,
+        // VİOP en fazla 5x. Bekleyen (eski) emirlerde daha yüksek kaldıraç
+        // kayıtlı olsa bile burada tavana çekilir.
+        const ruleCap = market === 'VIOP' ? VIOP_RULE_MAX_LEVERAGE : 1;
+        if ((Number(leverage) || 1) > ruleCap) {
+            if (market === 'VIOP') leverageClampedTo = ruleCap;
+            leverage = ruleCap;
+        }
+        // Sadece mevcut pozisyonu azaltan/kapatan emirler kısıtlara takılmaz —
+        // kimse pozisyonunda kilitli kalmamalı.
+        const reducingOnly = !!(pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG')) && qty <= pos.qty);
+        if (!reducingOnly && RULES_API) {
+            const R = RULES_API.RULES;
+            if (RULES_API.ordersToday(portfolio) >= R.maxOrdersPerDay) {
+                return { ok: false, msg: 'Günlük işlem limitine ulaştın (' + R.maxOrdersPerDay + ' emir). Yarın tekrar işlem açabilirsin; açık pozisyonlarını kapatabilirsin.' };
+            }
+            const closingQty = pos && pos.side !== (side === 'BUY' ? 'LONG' : 'SHORT') ? Math.min(qty, pos.qty) : 0;
+            const openingQty = qty - closingQty;
+            const lev = market === 'VIOP' ? Math.min(Math.max(1, Number(leverage) || 1), tieredMaxLeverage(price * openingQty)) : 1;
+            const addExposure = market === 'VIOP' ? (price * openingQty) / lev : price * openingQty;
+            const markNow = getMarkPrice(symbol) || price;
+            let currentExposure = RULES_API.symbolExposure(portfolio, symbol, markNow);
+            if (closingQty > 0) currentExposure = Math.max(0, currentExposure - (market === 'VIOP' ? ((pos.lockedMargin || 0) * closingQty / pos.qty) : markNow * closingQty));
+            const equityNow = computeAccountSnapshot().equity;
+            const limitTl = equityNow * R.maxSymbolExposurePct / 100;
+            if (equityNow > 0 && currentExposure + addExposure > limitTl + 0.01) {
+                const room = Math.max(0, limitTl - currentExposure);
+                return { ok: false, msg: 'Tek bir hisseye portföyünün en fazla %' + R.maxSymbolExposurePct + '\'unu ayırabilirsin (' + fmtTRY(limitTl) + '). ' + symbol + ' için kalan hakkın: ' + fmtTRY(room) + (market === 'VIOP' ? ' teminat.' : '.') };
+            }
+        }
+
         // 1. Close/reduce an opposite-direction position first.
         if (pos && ((side === 'BUY' && pos.side === 'SHORT') || (side === 'SELL' && pos.side === 'LONG'))) {
             const closeQty = Math.min(remainingQty, pos.qty);
@@ -4773,6 +4808,7 @@ const TradingEngine = (() => {
         // açıyordu). `.length` ile yerinde kırpma, b.history'nin (portfolio
         // üzerindeki gerçek diziye) referansını bozmadan çalışır.
         if (b.history.length > 50) b.history.length = 50;
+        if (RULES_API) RULES_API.bumpOrderCount(portfolio);
         savePortfolio();
         // (29 Temmuz 2026 — Madde 18) Grafikte o an bu sembol gösteriliyorsa
         // yeni işlemin ok işaretinin sembol değiştirmeden hemen görünmesi
@@ -5159,6 +5195,15 @@ const TradingEngine = (() => {
         renderPositionsInto('qt-positions-body-viop', portfolio.viopPositions, 'VIOP');
     }
 
+    // (13 Ekim 2026) Fiyatı henüz gerçek saatteki fiyata göre netleşmemiş
+    // dolumlar "≈" ile gösterilir (bkz. runTrueUps).
+    function isProvisionalFill(h) {
+        return !!(RULES_API && h && (h.type === 'OPEN' || h.type === 'CLOSE') && !h.tp && h.ts >= RULES_API.RULES.effectiveFromMs && (Date.now() - h.ts) < RULES_API.RULES.trueUpMaxAgeMs);
+    }
+    function provisionalMark(h) { return isProvisionalFill(h) ? ' <span class="provisional-mark">≈</span>' : ''; }
+    function provisionalTitle(h) { return isProvisionalFill(h) ? ' title="Kesin fiyat, veri yetişince (yaklaşık 15 dk) emir saatindeki gerçek fiyata göre netleşir."' : ''; }
+    function fmtQty(q) { return Number.isInteger(q) ? String(q) : Number(q).toLocaleString('tr-TR', { maximumFractionDigits: 2 }); }
+
     function renderOrdersInto(containerId, history) {
         const body = byId(containerId);
         if (!body) return;
@@ -5180,7 +5225,7 @@ const TradingEngine = (() => {
                         <span class="badge ${sideClass}">${h.side}</span>
                     </div>
                     <div class="order-card-bottom">
-                        <span class="font-mono">${h.qty}@₺${fmtPrice(h.price)}</span>
+                        <span class="font-mono"${provisionalTitle(h)}>${fmtQty(h.qty)}@₺${fmtPrice(h.price)}${provisionalMark(h)}</span>
                         ${pnlStr}
                     </div>
                 </div>
@@ -5189,7 +5234,17 @@ const TradingEngine = (() => {
         body.innerHTML = html;
     }
 
+    function renderRulesNote() {
+        const el = byId('qt-rules-count');
+        if (!el || !RULES_API || !portfolio) return;
+        const n = RULES_API.ordersToday(portfolio);
+        const max = RULES_API.RULES.maxOrdersPerDay;
+        el.textContent = `Bugünkü emir hakkın: ${Math.max(0, max - n)}/${max}`;
+        el.classList.toggle('is-exhausted', n >= max);
+    }
+
     function renderOrders() {
+        renderRulesNote();
         const csvBtn = byId('btn-export-history-csv');
         // (29 Temmuz 2026 — Madde 11) CSV butonu, Spot + VİOP'un ikisini de
         // dışa aktardığı için ikisinden herhangi biri boş değilse aktif.
@@ -5715,6 +5770,63 @@ const TradingEngine = (() => {
     // pozisyonlar. Önceden yalnızca portfolio.positions (Spot) taranıyordu;
     // bir VİOP pozisyonu açıkken header'daki Toplam Varlık/Kullanılan Marj
     // ve portföy risk uyarısı o pozisyonu hiç görmüyordu.
+    /* ────────── (13 Ekim 2026) Fiyat netleştirme + kural düzeltmesi ──────────
+     * Emirler anında gerçekleşir; Yahoo verisi 15 dk gecikmeli olduğu için
+     * ~17 dk sonra emrin verildiği dakikanın GERÇEK fiyatı backend'den alınır
+     * ve işlem fiyatı ona göre düzeltilir (bkz. oplabRules.js applyTrueUp).
+     * Aynı döngü, kurallar yürürlüğe girmeden önce yapılmış işlemlere bir
+     * kerelik kaldıraç düzeltmesini de uygular (applyRuleFix). */
+    const TRUEUP_INTERVAL_MS = 60000;
+    let trueUpBusy = false;
+    function ruleFixReady() {
+        if (!RULES_API || !portfolio || !isFtcLoggedIn()) return false;
+        if (isFtcGateActive() && !(window.FinteClubBridge && typeof window.FinteClubBridge.isSyncReady === 'function' && window.FinteClubBridge.isSyncReady())) return false;
+        return true;
+    }
+    async function runTrueUps() {
+        if (trueUpBusy || !ruleFixReady()) return;
+        const needsLeverageFix = !portfolio.ruleFix || portfolio.ruleFix.v !== RULES_API.RULES.version;
+        const need = RULES_API.pendingTrueUps(portfolio);
+        if (!needsLeverageFix && !need.length) return;
+        trueUpBusy = true;
+        try {
+            let prices = {};
+            if (need.length) {
+                try {
+                    const res = await fetch(`${window.OPTIPULSE_CONFIG.BACKEND_HTTP}/api/v1/prices-at`, window.optipulseFetchOpts({
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: need.slice(0, 150).map(n => ({ symbol: n.symbol, ts: n.ts })) }),
+                        signal: AbortSignal.timeout(30000)
+                    }));
+                    if (res.ok) prices = ((await res.json()) || {}).prices || {};
+                } catch (e) { /* sonraki turda tekrar */ }
+            }
+            const beforeEq = computeAccountSnapshot().equity;
+            const out = RULES_API.applyRuleFix(portfolio, prices);
+            if (!out.leverage && !out.trueUps) return;
+            savePortfolio();
+            renderPositions();
+            renderOrders();
+            renderAccountSummary();
+            renderPerformanceTab();
+            sampleEquity();
+            const diff = computeAccountSnapshot().equity - beforeEq;
+            const sign = diff >= 0 ? '+' : '−';
+            if (out.leverage && out.leverage.scaled > 0) {
+                const msg = `Yarışma kuralları güncellendi: VİOP kaldıracı en fazla ${VIOP_RULE_MAX_LEVERAGE}x. Önceki işlemlerin ${VIOP_RULE_MAX_LEVERAGE}x'e göre yeniden hesaplandı (özkaynak etkisi ${sign}${fmtTRY(Math.abs(diff))}).`;
+                showToast(msg);
+                showTicketAlert(msg, 'info');
+            } else if (out.trueUps > 0 && Math.abs(diff) >= 0.01) {
+                showToast(`${out.trueUps} işlemin fiyatı gerçek saatteki fiyata göre netleşti (özkaynak etkisi ${sign}${fmtTRY(Math.abs(diff))}).`);
+            }
+        } catch (e) {
+            console.warn('[Kurallar] Fiyat netleştirme başarısız, tekrar denenecek:', e);
+        } finally {
+            trueUpBusy = false;
+        }
+    }
+
     function computeAccountSnapshot() {
         let usedMargin = 0, openPnl = 0, totalRisk = 0, positionsWithoutStopCount = 0, positionsCount = 0;
         ['NORMAL', 'VIOP'].forEach(market => {
@@ -6109,6 +6221,9 @@ const TradingEngine = (() => {
         setTimeout(syncWatchlistPrices, 3000);
         setInterval(saveLastRealPrices, 10000);
         window.addEventListener('pagehide', saveLastRealPrices);
+        // (13 Ekim 2026) Fiyat netleştirme / kural düzeltmesi
+        setInterval(runTrueUps, TRUEUP_INTERVAL_MS);
+        setTimeout(runTrueUps, 15000);
 
         // (29 Temmuz 2026 — Madde 3) Kayan piyasa şeridi — bağımsız, döviz/
         // emtia/BIST100 endeksi verisi watchlist senkronizasyonundan ayrı

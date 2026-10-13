@@ -72,7 +72,7 @@
 "Fiyat EMA(20)'ye dokunma": "Price touches EMA(20)",
 "Fiyat üst tetiği yukarı kırarsa AL, alt tetiği aşağı kırarsa açığa SAT emri gerçekleşir — hangisi önce olursa diğeri otomatik iptal edilir.": "If price breaks above the upper trigger a BUY fills; if it breaks below the lower trigger a short SELL fills — whichever happens first, the other is cancelled automatically.",
 "Genel": "General",
-"Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı (sol dikey araç rayında — Çizgiler, Fibonacci, Gann, Elliott, Şekiller, Pozisyon), özelleştirilebilir teknik göstergeler, fiyat alarmları, Stop-Loss/Take-Profit ve OCO/Trailing Stop emirleri, hazır ve": "Near-real-time price stream (WebSocket), 8 chart types and 20+ drawing tools (in the left tool rail — Lines, Fibonacci, Gann, Elliott, Shapes, Position), customizable technical indicators, price alerts, Stop-Loss/Take-Profit and OCO/Trailing Stop orders, preset and",
+"Gerçek zamanlıya yakın fiyat akışı (WebSocket), 8 grafik tipi ve 20'den fazla çizim aracı (sol dikey araç rayında — Çizgiler, Fibonacci, Gann, Elliott, Şekiller, Pozisyon), özelleştirilebilir teknik göstergeler, fiyat alarmları, Stop-Loss/Take-Profit ve OCO/Trailing Stop emirleri, VİOP'ta": "Near-real-time price stream (WebSocket), 8 chart types and 20+ drawing tools (in the left tool rail — Lines, Fibonacci, Gann, Elliott, Shapes, Position), customizable technical indicators, price alerts, Stop-Loss/Take-Profit and OCO/Trailing Stop orders, in VİOP a",
 "Gereken Teminat (Marj)": "Required Margin",
 "Geri Al": "Undo",
 "Giriş Yap": "Log In",
@@ -107,7 +107,7 @@
 "Limit Fiyat (₺)": "Limit Price (₺)",
 "Maks. Drawdown": "Max Drawdown",
 "Manuel": "Manual",
-"manuel (1-20x) kaldıraç/marj sistemi": "manual (1-20x) leverage/margin system",
+"en fazla 5x kaldıraç/marj sistemi": "leverage/margin system of up to 5x",
 "Marj Seviyesi": "Margin Level",
 "Miktar (Adet)": "Quantity (Shares)",
 "Mumlar": "Candles",
@@ -222,7 +222,7 @@
 "Hedef fiyat (₺)": "Target price (₺)",
 "İsminizi girin...": "Enter your name...",
 "Kayıtlı e-postan...": "Your registered e-mail...",
-"ör. 7": "e.g. 7",
+"ör. 4": "e.g. 4",
 "Örn: Direnç bölgesi": "e.g. Resistance zone",
 "örn. 1": "e.g. 1",
 "örn. 2.5": "e.g. 2.5",
@@ -747,7 +747,7 @@
 "Çoklu Zaman Dilimi Uyum Paneli": "Multi-Timeframe Alignment Panel",
 "Dual-Chart: Aynı Sembol, İki Grafik": "Dual-Chart: Same Symbol, Two Charts",
 "Eklenen 26 yeniliğe hızlı bir bakış atalım — sunum yaparken kullanabileceğiniz canlı bir tur. Her adımda ilgili panel gerçekten açılacak. Devam etmek için \"İleri\"ye basın, istediğiniz an \"Turu Kapat\" ile çıkabilirsiniz.": "Let's take a quick look at the 26 new features — a live tour you can use when presenting. At each step the related panel really opens. Press \"Next\" to continue; you can exit any time with \"Close Tour\".",
-"Emir panelinde hazır 1x/2x/5x/10x düğmeleri, 1-20x arası serbest manuel giriş ve 3x/7x/15x/20x hızlı-seçim çipleriyle kaldıraç seçebilirsiniz — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).": "In the order panel you can choose leverage with preset 1x/2x/5x/10x buttons, free manual entry from 1-20x and 3x/7x/15x/20x quick chips — only the required margin is locked from your balance when you open a position. At high leverage, if the loss exceeds a set share of the margin, the position closes automatically (margin call simulation).",
+"VİOP modunda hazır 1x/2x/3x/5x düğmeleri ya da 1-5x arası manuel girişle kaldıraç seçebilirsiniz (yarışma kuralı: en fazla 5x) — pozisyon açarken bakiyenizden sadece gereken marj (teminat) kilitlenir. Yüksek kaldıraçta zarar marjın belirli bir oranını aşarsa pozisyon otomatik kapanır (marj çağrısı simülasyonu).": "In VİOP mode you can choose leverage with preset 1x/2x/3x/5x buttons or manual entry from 1-5x (competition rule: at most 5x) — only the required margin is locked from your balance when you open a position. At high leverage, if the loss exceeds a set share of the margin, the position closes automatically (margin call simulation).",
 "Gelişmiş Emirler: OCO / Trailing Stop": "Advanced Orders: OCO / Trailing Stop",
 "Genişletilmiş Zaman Dilimi Seçenekleri": "Extended Timeframe Options",
 "Geri": "Back",
@@ -830,7 +830,17 @@
 "{0} için SL/TP güncellendi.": "SL/TP updated for {0}.",
 "{0} için SL/TP temizlendi.": "SL/TP cleared for {0}.",
 "Alarm oluşturuldu: {0} {1} ₺{2}": "Alert created: {0} {1} ₺{2}",
-"Gösterge alarmı oluşturuldu: {0} — {1}": "Indicator alert created: {0} — {1}"
+"Gösterge alarmı oluşturuldu: {0} — {1}": "Indicator alert created: {0} — {1}",
+"Yarışma kuralları:": "Competition rules:",
+"günde en fazla 20 emir · tek hisseye portföyün en fazla %30'u · VİOP'ta en fazla 5x kaldıraç.": "at most 20 orders per day · at most 30% of the portfolio in a single stock · at most 5x leverage in VİOP.",
+"Emirler anında gerçekleşir; veriler 15 dk gecikmeli olduğundan işlem fiyatı yaklaşık 15 dk içinde emir saatindeki gerçek fiyata göre netleşir (≈).": "Orders fill instantly; because data is delayed 15 min, the fill price is settled to the real price at the order time within about 15 min (≈).",
+"Bugünkü emir hakkın: {0}/{1}": "Orders left today: {0}/{1}",
+"Günlük işlem limitine ulaştın ({0} emir). Yarın tekrar işlem açabilirsin; açık pozisyonlarını kapatabilirsin.": "You have reached the daily trading limit ({0} orders). You can open new trades tomorrow; you can still close your open positions.",
+"Tek bir hisseye portföyünün en fazla %{0}'unu ayırabilirsin ({1}). {2} için kalan hakkın: {3}": "You can allocate at most {0}% of your portfolio to a single stock ({1}). Remaining allowance for {2}: {3}",
+"Kesin fiyat, veri yetişince (yaklaşık 15 dk) emir saatindeki gerçek fiyata göre netleşir.": "The final price is settled to the real price at the order time once data catches up (about 15 min).",
+"Yarışma kuralları güncellendi: VİOP kaldıracı en fazla {0}x. Önceki işlemlerin {1}x'e göre yeniden hesaplandı (özkaynak etkisi {2}).": "Competition rules updated: VİOP leverage is at most {0}x. Your previous trades were recalculated at {1}x (equity effect {2}).",
+"{0} işlemin fiyatı gerçek saatteki fiyata göre netleşti (özkaynak etkisi {1}).": "The price of {0} trade(s) was settled to the real price at the time (equity effect {1}).",
+"{0} teminat.": "{0} margin."
 };
     var KEEP = ["Agesa Hayat ve Emeklilik", "Akbank", "Akfen GYO", "Aksa Enerji", "Akçansa Çimento", "Alarko Holding", "Albaraka Türk", "Alfa Solar Enerji", "Anadolu Efes", "Arçelik", "Aselsan", "Astor Enerji", "BIST Stock", "Bera Holding", "Borusan Mannesmann", "Borusan Yatırım Pazarlama", "Bursa Çimento", "BİM Mağazalar", "Coca-Cola İçecek", "Cw Enerji Mühendislik", "Doğan Şirketler Grubu", "Doğuş Otomotiv Servis", "Eczacıbaşı Yatırım", "Eczacıbaşı İlaç", "Ege Endüstri", "Emlak Konut GYO", "Enerjisa Enerji", "Enka İnşaat", "Ereğli Demir Çelik", "Europap Tezol Kağıt", "Europower Enerji", "Ford Otomotiv Sanayi", "GSD Holding", "Galata Wind Enerji", "Garanti Bankası", "Gen İlaç ve Sağlık", "Girişim Elektrik Sanayi", "Global Yatırım Holding", "Gübre Fabrikaları", "Halk Bankası", "Hektaş", "Kardemir (D)", "Kardemir Karabük", "Kimteks Poliüretan", "Kocaer Çelik", "Kontrolmatik Teknoloji", "Konya Çimento", "Kordsa Teknik Tekstil", "Koza Altın İşletmeleri", "Koza Anadolu Metal", "Koç Holding", "Mavi Giyim", "Mia Teknoloji", "Migros Ticaret", "Odaş Elektrik", "Otokar Otomotiv", "Oyak Çimento", "Pasifik GYO", "Pegasus Hava Taşımacılığı", "Penta Teknoloji", "Petkim Petrokimya", "Qua Granite Hayal Yapı", "SDT Uzay ve Savunma", "Sabancı Holding", "Sasa Polyester", "Say Yenilenebilir Enerji", "Smart Güneş Enerjisi", "TAV Havalimanları", "Tab Gıda Sanayi", "Tekfen Holding", "Tofaş Türk Otomobil Fabrikası", "Turkcell", "Tüpraş", "Türk Hava Yolları", "Türk Telekom", "Türk Traktör", "Türkiye Sigorta", "Vakıflar Bankası", "Vestel Beyaz Eşya", "Vestel Elektronik", "Yapı ve Kredi Bankası", "Yayla Agro Gıda", "Yeo Teknoloji", "Zorlu Enerji", "Çan2 Termik", "Çemtaş Çelik Makina", "Çimsa Çimento", "Ülker Bisküvi", "İpek Doğal Enerji", "İskenderun Demir Çelik", "İzmir Demir Çelik", "İş Bankası (C)", "İş GYO", "İş Yatırım Menkul Değerler", "Şekerbank", "Şişecam", "Şok Marketler"];
 
@@ -920,7 +930,7 @@
             if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEXTAREA' || t === 'CODE') return true;
             if (e.isContentEditable || e.getAttribute('translate') === 'no' || (e.classList && e.classList.contains('notranslate'))) return true;
             // hisse logosu baş harfleri (ör. ALARK → "AL") "AL/BUY" diye çevrilmesin
-            if (typeof e.className === 'string' && /logo|avatar/i.test(e.className)) return true;
+            if (typeof e.className === 'string' && /(^|\s)([\w-]*-logo(-[\w-]+)?|[\w-]*avatar[\w-]*)(\s|$)/i.test(e.className)) return true;
         }
         return false;
     }
