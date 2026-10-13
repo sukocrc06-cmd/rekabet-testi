@@ -972,6 +972,13 @@
             // (13 Ekim 2026) Yarışma kuralı düzeltmesi bu cihazda uygulandı mı
             // (oplabRules.js) — admin, uygulanmamış olanları kendisi hesaplar.
             rf: (function () { var lp = readLocalPortfolio(); return lp && lp.ruleFix && lp.ruleFix.v ? String(lp.ruleFix.v) : null; })(),
+            // (13 Ekim 2026) Bildirim okundu damgaları { bildirimId: zaman }.
+            // Admin paneli bu belgeyi zaten dinliyor, bu yüzden "okundu"
+            // bilgisi buradan taşınıyor. shared_state'e YAZMIYORUZ: orası tek
+            // parça bir belge ve admin de aynı anda yazıyor — oradan yazmak
+            // admin'in değişikliğini ezebilirdi. Burası ise yarışmacının KENDİ
+            // id'si altına merge ile yazıyor, çakışma yok.
+            noticeAcks: noticeAcks(),
             updatedAt: new Date().toISOString()
         };
         var sentEq = snap.equity;
@@ -1961,6 +1968,9 @@
 
         ok.addEventListener('click', function () {
             markNoticeAck(n.id);
+            // Okundu damgası admin paneline ulaşsın diye anında gönder;
+            // normalde yazım yalnızca portföy verisi değişince tetikleniyor.
+            try { pushLiveSnapshot(true); } catch (e) { /* bağlantı yoksa bir sonraki turda gider */ }
             document.removeEventListener('keydown', block, true);
             back.remove();
             noticeOpen = false;
