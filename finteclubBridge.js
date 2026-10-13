@@ -1745,6 +1745,7 @@
         window.FTC_MARKET_HOLIDAYS = season && Array.isArray(season.holidays) ? season.holidays.slice() : [];
         window.FTC_MARKET_HALFDAYS = season && season.halfDays ? season.halfDays : {};
         renderAnnouncement();
+        renderNotices();
         refreshLiveChip();
     }
 
@@ -1791,6 +1792,25 @@
                 : 'FinteLig yarışması sürüyor: işlem yapmak için sağ üstten yarışmacı hesabınla (başvurduğun e-posta + şifre) GİRİŞ YAP. Giriş yapmadan yapılan işlemler sıralamaya ve yayına yansımaz.';
             return out;
         }
+        /* ── (13 Ekim 2026) KİŞİSEL YAPTIRIMLAR SEZON PLANINDAN BAĞIMSIZ ──
+           Bu dört kontrol daha önce `if (!seasonOn()) return out;` satırının
+           ALTINDAYDI. Admin 27 Eylül'de sezon planını kapatınca
+           (season.enabled = false) seasonOn() false döndü ve diskalifiye,
+           inceleme (12.3), 15 dk kuralı (15.3) ve ihlal kısıtlaması (21.2)
+           OPLab'de HİÇ uygulanmaz oldu — diskalifiye edilen biri işlem
+           yapmaya devam edebiliyordu. Yaptırımlar kişiye özeldir ve sezon
+           planıyla ilgisi yoktur; artık plan kapalıyken de geçerli. */
+        var myApp = myAppRecord();
+        if (myApp) {
+            var sRaw = d.season || {};
+            if (myApp.disqualified) { out.halted = true; out.message = 'Yarışmadan diskalifiye edildin' + (myApp.dqReason ? ' (' + myApp.dqReason + ')' : '') + '. İşlem yapamazsın (kural 21).'; return out; }
+            if (myApp.reviewHalt) { out.halted = true; out.message = 'Hesabın yarışma yönetimi incelemesi nedeniyle geçici olarak işleme kapatıldı (kural 12.3). İnceleme bitince otomatik açılır.'; return out; }
+            // lockOverride: admin "İstisna tanı" dediyse kilit uygulanmaz.
+            // (Eski kod bu alanı yok sayıyordu; admin paneli ise hep dikkate
+            // alıyordu — istisna tanınan yarışmacı yine de bloke kalıyordu.)
+            if (myApp.lockedOut && !myApp.lockOverride) { out.halted = true; out.message = 'Yarışma başladıktan sonraki ' + (sRaw.lateMinutes || 15) + ' dakika içinde katılmadığın için bu haftanın yarışmasına alınmadın (kural 15.3). Bir hata olduğunu düşünüyorsan görevliye başvur.'; return out; }
+            if (myApp.tradeLockUntil && now < myApp.tradeLockUntil) { out.halted = true; out.message = 'Kural ihlali nedeniyle ' + fmtHm(myApp.tradeLockUntil) + '\'e kadar işlem kısıtlaması uygulanıyor (kural 21.2).'; return out; }
+        }
         if (!seasonOn()) return out;
         var s = d.season;
         var app = myAppRecord();
@@ -1802,10 +1822,6 @@
         }
         var week = seasonWeek(d.currentCohortId);
         out.viopDisabled = !!(week && week.viop === false);
-        if (app.disqualified) { out.halted = true; out.message = 'Yarışmadan diskalifiye edildin' + (app.dqReason ? ' (' + app.dqReason + ')' : '') + '. İşlem yapamazsın (kural 21).'; return out; }
-        if (app.reviewHalt) { out.halted = true; out.message = 'Hesabın yarışma yönetimi incelemesi nedeniyle geçici olarak işleme kapatıldı (kural 12.3). İnceleme bitince otomatik açılır.'; return out; }
-        if (app.lockedOut) { out.halted = true; out.message = 'Yarışma başladıktan sonraki ' + (s.lateMinutes || 15) + ' dakika içinde katılmadığın için bu haftanın yarışmasına alınmadın (kural 15.3). Bir hata olduğunu düşünüyorsan görevliye başvur.'; return out; }
-        if (app.tradeLockUntil && now < app.tradeLockUntil) { out.halted = true; out.message = 'Kural ihlali nedeniyle ' + fmtHm(app.tradeLockUntil) + '\'e kadar işlem kısıtlaması uygulanıyor (kural 21.2).'; return out; }
         var tb = d.tieBreak;
         if (tb && !tb.done && now < tb.endsAt) {
             if ((tb.appIds || []).indexOf(String(app.id)) !== -1) return out; // eşitlik ek süresi — yalnızca eşitler işlem yapar
@@ -1824,6 +1840,135 @@
     }
     // Duyuru bandı (admin → Yarışma Günü → OPLab Duyurusu)
     var ANNOUNCE_DISMISS_KEY = 'ftc_announce_dismissed_v1';
+
+    /* ──────── (13 Ekim 2026) KİŞİYE ÖZEL BİLDİRİM POP-UP'I ────────
+       Admin paneli shared_state.applications[i].notices[] dizisine yazar
+       (ihlal uygulanınca kendiliğinden, ya da elle). Burada yarışmacı
+       giriş yaptığında okunmamış olanlar tam ekran bir pencerede gösterilir
+       ve "OKUDUM" demeden kapatılamaz — yaptırımın görülmeden geçilmemesi
+       için (ESC ve dışarı tıklama kapatmaz).
+
+       Okundu bilgisi bu cihazın localStorage'ına yazılır. shared_state'e
+       YAZMIYORUZ: o belge tek parça ve admin de aynı anda yazıyor; buradan
+       yazmak admin'in değişikliğini ezebilirdi. Sonuç: başka bir cihazda
+       bildirim bir kez daha çıkar — güvenli taraf budur.
+
+       Kural bağlantısı: her bildirimin ruleNo alanı varsa, FinteLig
+       sitesindeki kurallar sayfasının ilgili maddesine giden bir düğme
+       çıkar (ör. .../#kural-10). Yarışmacı kuralın tam metnini okuyabilir. */
+    var NOTICE_ACK_KEY = 'ftc_notice_ack_v1';
+    var NOTICE_RULES_URL = 'https://finteclub.com.tr/fintelig/';
+    var noticeOpen = false;
+
+    function noticeAcks() {
+        try { return JSON.parse(localStorage.getItem(NOTICE_ACK_KEY) || '{}') || {}; }
+        catch (e) { return {}; }
+    }
+    function markNoticeAck(id) {
+        try {
+            var m = noticeAcks();
+            m[id] = Date.now();
+            // sınırsız büyümesin: en yeni 50 kayıt yeter
+            var ks = Object.keys(m);
+            if (ks.length > 50) {
+                ks.sort(function (a, b) { return m[a] - m[b]; });
+                for (var i = 0; i < ks.length - 50; i++) delete m[ks[i]];
+            }
+            localStorage.setItem(NOTICE_ACK_KEY, JSON.stringify(m));
+        } catch (e) { /* private mode */ }
+    }
+    function pendingNotices() {
+        var app = myAppRecord();
+        if (!app || !Array.isArray(app.notices)) return [];
+        var acked = noticeAcks();
+        return app.notices
+            .filter(function (n) { return n && n.id && !n.ackAt && !acked[n.id]; })
+            .sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+    }
+    function noticeColors(level) {
+        if (level === 'danger') return { bg: '#2a1113', bd: '#7f1d1d', fg: '#fca5a5', btn: '#b91c1c' };
+        if (level === 'info') return { bg: '#0f1a2b', bd: '#1e3a5f', fg: '#8fb0ff', btn: '#2563eb' };
+        return { bg: '#2a2211', bd: '#7c5e10', fg: '#fde68a', btn: '#b45309' };
+    }
+    function noticeLevelWord(level) {
+        return level === 'danger' ? 'ÖNEMLİ' : (level === 'info' ? 'BİLGİ' : 'UYARI');
+    }
+
+    function renderNotices() {
+        if (noticeOpen) return;
+        var list = pendingNotices();
+        if (!list.length) return;
+        var n = list[0];
+        var c = noticeColors(n.level);
+        noticeOpen = true;
+
+        var back = document.createElement('div');
+        back.id = 'ftc-notice-back';
+        back.setAttribute('role', 'alertdialog');
+        back.setAttribute('aria-modal', 'true');
+        back.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(3,6,14,.82);display:flex;align-items:center;justify-content:center;padding:16px;font:14px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;';
+
+        var box = document.createElement('div');
+        box.style.cssText = 'max-width:560px;width:100%;max-height:88vh;overflow:auto;background:' + c.bg + ';border:1px solid ' + c.bd + ';border-radius:14px;padding:22px 24px;color:#e5e7eb;box-shadow:0 24px 60px rgba(0,0,0,.6);';
+
+        var tag = document.createElement('div');
+        tag.style.cssText = 'font:700 11px/1 system-ui;letter-spacing:.14em;color:' + c.fg + ';margin-bottom:10px;';
+        tag.textContent = noticeLevelWord(n.level) + (list.length > 1 ? '  ·  1 / ' + list.length : '');
+
+        var h = document.createElement('h2');
+        h.style.cssText = 'margin:0 0 14px;font:700 19px/1.35 system-ui;color:#fff;';
+        h.textContent = n.title || 'Yarışma yönetiminden bildirim';
+
+        // DÜZ METİN olarak basılıyor (innerHTML değil) — admin tarafı kaçış
+        // uyguluyor ama burası da kendi başına güvenli olmalı.
+        var body = document.createElement('div');
+        body.style.cssText = 'white-space:pre-wrap;font-size:14px;line-height:1.75;color:#d1d5db;';
+        body.textContent = n.body || '';
+
+        var meta = document.createElement('div');
+        meta.style.cssText = 'margin-top:14px;font-size:11.5px;color:#9ca3af;';
+        meta.textContent = n.at ? new Date(n.at).toLocaleString('tr-TR') : '';
+
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-top:20px;';
+
+        if (n.ruleNo) {
+            var a = document.createElement('a');
+            a.href = NOTICE_RULES_URL + '#kural-' + encodeURIComponent(String(n.ruleNo));
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = '📖 Kural ' + n.ruleNo + '’u oku';
+            a.style.cssText = 'padding:11px 18px;border-radius:9px;border:1px solid ' + c.bd + ';color:' + c.fg + ';text-decoration:none;font-weight:600;';
+            row.appendChild(a);
+        }
+
+        var ok = document.createElement('button');
+        ok.type = 'button';
+        ok.textContent = 'OKUDUM';
+        ok.style.cssText = 'padding:11px 26px;border-radius:9px;border:none;background:' + c.btn + ';color:#fff;font-weight:700;font-size:14px;cursor:pointer;';
+        row.appendChild(ok);
+
+        box.appendChild(tag); box.appendChild(h); box.appendChild(body);
+        if (meta.textContent) box.appendChild(meta);
+        box.appendChild(row);
+        back.appendChild(box);
+        document.body.appendChild(back);
+        setTimeout(function () { try { ok.focus(); } catch (e) { /* yok say */ } }, 40);
+
+        // ESC ve dışarı tıklama KAPATMAZ — yaptırım bildirimi görülmeden geçilmesin.
+        function block(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); } }
+        document.addEventListener('keydown', block, true);
+
+        ok.addEventListener('click', function () {
+            markNoticeAck(n.id);
+            document.removeEventListener('keydown', block, true);
+            back.remove();
+            noticeOpen = false;
+            // Sırada başka okunmamış bildirim varsa onu göster.
+            setTimeout(renderNotices, 120);
+        });
+    }
+
     function renderAnnouncement() {
         var a = lastSharedData && lastSharedData.oplabAnnouncement;
         var bar = byId('ftc-announce');
