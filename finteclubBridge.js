@@ -2031,6 +2031,28 @@
         // olarak AÇIK kabul edilir — asla gerçek kullanıcıları yanlışlıkla
         // kilitlemeyiz.
         var enabled = !lastSharedData || lastSharedData.oplabEnabled !== false;
+        // (14 Ekim 2026) KİŞİYE ÖZEL ERİŞİM KAPAMA (applications[i].accessBlocked)
+        // Admin panelindeki "Erişim: kapat" düğmesi. Alım-satım bloğundan AYRI:
+        // tradingBlocked'da yarışmacı girip gezebilir, burada hiç giremez.
+        // Yalnızca GİRİŞ YAPMIŞ ve doğrulanmış yarışmacıya uygulanır — kimliği
+        // bilinmeyen bir ziyaretçiyi kapatacak bir kayıt zaten yok.
+        var me = enabled ? myAppRecord() : null;
+        var kisiselBlok = !!(me && me.accessBlocked);
+        if (kisiselBlok) enabled = false;
+        var baslik = gate.querySelector('.ftc-oplab-gate-title');
+        var metin = gate.querySelector('p');
+        // Varsayılan metinler HER ŞEYDEN ÖNCE saklanır — ilk çağrı zaten
+        // kişisel blokluysa, sonradan blok kalkınca özel metni "varsayılan"
+        // sanıp kalıcılaştırmayalım.
+        if (baslik && !baslik.dataset.ftcDefTitle) baslik.dataset.ftcDefTitle = baslik.textContent;
+        if (metin && !metin.dataset.ftcDefText) metin.dataset.ftcDefText = metin.textContent;
+        if (kisiselBlok) {
+            if (baslik) baslik.textContent = 'Hesabın yarışma yönetimi tarafından kapatıldı';
+            if (metin) metin.textContent = 'OPLab erişimin yarışma yönetimi tarafından kapatıldı. Bir hata olduğunu düşünüyorsan yarışma görevlisine başvur. Portföyün ve kayıtların korunuyor.';
+        } else {
+            if (baslik) baslik.textContent = baslik.dataset.ftcDefTitle;
+            if (metin) metin.textContent = metin.dataset.ftcDefText;
+        }
         gate.classList.toggle('hidden', enabled);
     }
 
