@@ -611,6 +611,165 @@
         if (logoutBtn) logoutBtn.classList.toggle('hidden', !loggedIn);
         if (emailInput) emailInput.classList.toggle('hidden', loggedIn);
         if (pwInput) pwInput.classList.toggle('hidden', loggedIn);
+        // (16 Ekim 2026) Giriş yokken "Şifremi unuttum", giriş varken "Şifremi değiştir".
+        var forgotToggle = byId('ftc-forgot-toggle'), forgotBox = byId('ftc-forgot'), pwWrap = byId('ftc-pwchange-wrap');
+        if (forgotToggle) forgotToggle.classList.toggle('hidden', loggedIn);
+        if (forgotBox && loggedIn) forgotBox.classList.add('hidden');
+        if (pwWrap) pwWrap.classList.toggle('hidden', !loggedIn);
+        if (!loggedIn) resetPasswordChangeForm(true);
+    }
+
+    /* ── (16 Ekim 2026) Şifre yenileme ──
+       1) "Şifremi unuttum" (giriş penceresi + giriş yapılmamış profil paneli): e-posta
+          girilir, FinteLig sunucusu (finteclub.com.tr/fintelig/api/send-email,
+          şablon 'password_reset_self') Firebase Admin SDK ile sıfırlama bağlantısı
+          üretip Resend ile gönderir. Başvuru listesi zaten herkese açık belgede
+          olduğundan kayıtsız e-posta burada nazikçe söylenir (yeni bir bilgi sızmaz).
+          Sunucu bu şablonu tanımıyorsa (eski sürüm) Firebase'in kendi e-postasına düşülür.
+       2) "Şifremi değiştir" (giriş yapılmış profil paneli): önce MEVCUT şifre
+          reauthenticateWithCredential ile doğrulanır; doğruysa yeni şifre alanları açılır
+          ve updatePassword ile kaydedilir. */
+    var PW_RESET_API = 'https://finteclub.com.tr/fintelig/api/send-email';
+    function setStatusEl(id, text, kind) {
+        var el = byId(id);
+        if (!el) return;
+        el.textContent = text || '';
+        el.className = 'ftc-verify-status' + (kind ? ' ftc-status-' + kind : '');
+    }
+    function requestPasswordReset(rawEmail, statusId, btn) {
+        var email = String(rawEmail || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatusEl(statusId, 'Geçerli bir e-posta adresi yaz.', 'error'); return; }
+        if (applicationStatusFor(email) === 'none') {
+            setStatusEl(statusId, 'Bu e-posta ile FinteLig kaydı bulunamadı. Başvururken kullandığın e-postayı yaz.', 'error');
+            return;
+        }
+        if (btn) btn.disabled = true;
+        setStatusEl(statusId, 'Gönderiliyor...', 'pending');
+        function done() { if (btn) btn.disabled = false; }
+        function okMsg() { setStatusEl(statusId, '✓ Şifre sıfırlama bağlantısı ' + email + ' adresine gönderildi. Gelen kutunu (ve spam klasörünü) kontrol et.', 'ok'); }
+        function firebaseFallback() {
+            if (!ftcAuth) return Promise.reject(new Error('auth yok'));
+            try { ftcAuth.languageCode = 'tr'; } catch (e) { /* yok say */ }
+            return ftcAuth.sendPasswordResetEmail(email);
+        }
+        fetch(PW_RESET_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template: 'password_reset_self', email: email })
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (d) {
+                if (r.ok) { okMsg(); return; }
+                if (r.status === 429) {
+                    setStatusEl(statusId, d.error === 'resend_limit_reached'
+                        ? 'Bu e-posta için bugün yeterince bağlantı gönderildi. Gelen kutundaki (veya spam klasöründeki) son bağlantıyı kullan ya da yarın tekrar dene.'
+                        : 'Şu anda çok fazla istek var — birkaç dakika sonra tekrar dene.', 'error');
+                    return;
+                }
+                if (r.status === 400 && d.error === 'unknown_template') return firebaseFallback().then(okMsg);
+                throw new Error('sunucu ' + r.status + ' ' + (d.error || ''));
+            });
+        }).catch(function (e) {
+            console.warn('[Şifre sıfırlama] gönderilemedi:', e);
+            setStatusEl(statusId, 'Bağlantı gönderilemedi. Biraz sonra tekrar dene; sorun sürerse yarışma görevlisine başvur.', 'error');
+        }).then(done, done);
+    }
+    function passwordErrorMessage(err, stage) {
+        switch (err && err.code) {
+            case 'auth/wrong-password':
+            case 'auth/invalid-credential':
+            case 'auth/invalid-login-credentials': return 'Mevcut şifren yanlış.';
+            case 'auth/weak-password': return 'Yeni şifre çok zayıf — en az 6 karakter kullan.';
+            case 'auth/too-many-requests': return 'Çok fazla deneme yapıldı. Biraz sonra tekrar dene.';
+            case 'auth/requires-recent-login': return 'Güvenlik için mevcut şifreni yeniden doğrula.';
+            case 'auth/network-request-failed': return 'Ağ bağlantısı hatası. İnternet bağlantını kontrol et.';
+            default: return stage === 'verify' ? 'Şifren doğrulanamadı. Tekrar dene.' : 'Şifre güncellenemedi. Tekrar dene.';
+        }
+    }
+    function resetPasswordChangeForm(collapse) {
+        ['ftc-pw-current', 'ftc-pw-new', 'ftc-pw-new2'].forEach(function (id) { var el = byId(id); if (el) el.value = ''; });
+        var s1 = byId('ftc-pw-step1'), s2 = byId('ftc-pw-step2'), form = byId('ftc-pwchange-form');
+        if (s1) s1.classList.remove('hidden');
+        if (s2) s2.classList.add('hidden');
+        if (collapse && form) form.classList.add('hidden');
+        if (collapse) setStatusEl('ftc-pw-status', '', '');
+    }
+    function verifyCurrentPassword() {
+        var cur = byId('ftc-pw-current'), btn = byId('ftc-pw-verify-btn');
+        var pw = cur ? cur.value : '';
+        if (!currentAuthUser || !currentAuthUser.email) { setStatusEl('ftc-pw-status', 'Önce giriş yapmalısın.', 'error'); return; }
+        if (!pw) { setStatusEl('ftc-pw-status', 'Mevcut şifreni gir.', 'error'); return; }
+        if (typeof firebase === 'undefined' || !firebase.auth || !firebase.auth.EmailAuthProvider) { setStatusEl('ftc-pw-status', 'Şifre değiştirme şu anda kullanılamıyor.', 'error'); return; }
+        if (btn) btn.disabled = true;
+        setStatusEl('ftc-pw-status', 'Şifren doğrulanıyor...', 'pending');
+        var cred = firebase.auth.EmailAuthProvider.credential(currentAuthUser.email, pw);
+        currentAuthUser.reauthenticateWithCredential(cred).then(function () {
+            var s1 = byId('ftc-pw-step1'), s2 = byId('ftc-pw-step2');
+            if (s1) s1.classList.add('hidden');
+            if (s2) s2.classList.remove('hidden');
+            setStatusEl('ftc-pw-status', '✓ Şifren doğrulandı. Şimdi yeni şifreni belirle.', 'ok');
+            var n1 = byId('ftc-pw-new'); if (n1) n1.focus();
+        }).catch(function (err) {
+            setStatusEl('ftc-pw-status', passwordErrorMessage(err, 'verify'), 'error');
+        }).then(function () { if (btn) btn.disabled = false; });
+    }
+    function saveNewPassword() {
+        var n1 = byId('ftc-pw-new'), n2 = byId('ftc-pw-new2'), cur = byId('ftc-pw-current'), btn = byId('ftc-pw-save-btn');
+        var a = n1 ? n1.value : '', b = n2 ? n2.value : '';
+        if (!currentAuthUser) { setStatusEl('ftc-pw-status', 'Önce giriş yapmalısın.', 'error'); return; }
+        if (a.length < 6) { setStatusEl('ftc-pw-status', 'Yeni şifre en az 6 karakter olmalı.', 'error'); return; }
+        if (a !== b) { setStatusEl('ftc-pw-status', 'Yeni şifreler birbiriyle aynı değil.', 'error'); return; }
+        if (cur && a === cur.value) { setStatusEl('ftc-pw-status', 'Yeni şifre mevcut şifrenle aynı olamaz.', 'error'); return; }
+        if (btn) btn.disabled = true;
+        setStatusEl('ftc-pw-status', 'Şifren güncelleniyor...', 'pending');
+        currentAuthUser.updatePassword(a).then(function () {
+            resetPasswordChangeForm(false);
+            var form = byId('ftc-pwchange-form'); if (form) form.classList.add('hidden');
+            setStatusEl('ftc-pw-status', '✓ Şifren güncellendi. Bir sonraki girişte yeni şifreni kullan.', 'ok');
+        }).catch(function (err) {
+            if (err && err.code === 'auth/requires-recent-login') resetPasswordChangeForm(false);
+            setStatusEl('ftc-pw-status', passwordErrorMessage(err, 'save'), 'error');
+        }).then(function () { if (btn) btn.disabled = false; });
+    }
+    function onEnter(id, fn) {
+        var el = byId(id);
+        if (el) el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); fn(); } });
+    }
+    function setupPasswordFeatures() {
+        // Giriş penceresi
+        var mToggle = byId('ftc-modal-forgot-toggle'), mBox = byId('ftc-modal-forgot'), mEmail = byId('ftc-modal-forgot-email'), mBtn = byId('ftc-modal-forgot-btn');
+        if (mToggle && mBox) mToggle.addEventListener('click', function () {
+            var opening = mBox.classList.contains('hidden');
+            mBox.classList.toggle('hidden');
+            var src = byId('ftc-modal-login-email');
+            if (opening && mEmail && !mEmail.value && src && src.value) mEmail.value = src.value.trim();
+            if (opening && mEmail) mEmail.focus();
+        });
+        if (mBtn) mBtn.addEventListener('click', function () { requestPasswordReset(mEmail ? mEmail.value : '', 'ftc-modal-forgot-status', mBtn); });
+        onEnter('ftc-modal-forgot-email', function () { if (mBtn) mBtn.click(); });
+        // Profil paneli — giriş yapılmamışken
+        var pToggle = byId('ftc-forgot-toggle'), pBox = byId('ftc-forgot'), pEmail = byId('ftc-forgot-email'), pBtn = byId('ftc-forgot-btn');
+        if (pToggle && pBox) pToggle.addEventListener('click', function () {
+            var opening = pBox.classList.contains('hidden');
+            pBox.classList.toggle('hidden');
+            var src = byId('ftc-login-email');
+            if (opening && pEmail && !pEmail.value && src && src.value) pEmail.value = src.value.trim();
+            if (opening && pEmail) pEmail.focus();
+        });
+        if (pBtn) pBtn.addEventListener('click', function () { requestPasswordReset(pEmail ? pEmail.value : '', 'ftc-forgot-status', pBtn); });
+        onEnter('ftc-forgot-email', function () { if (pBtn) pBtn.click(); });
+        // Profil paneli — giriş yapılmışken: şifre değiştir
+        var cToggle = byId('ftc-pwchange-toggle'), cForm = byId('ftc-pwchange-form');
+        if (cToggle && cForm) cToggle.addEventListener('click', function () {
+            var opening = cForm.classList.contains('hidden');
+            resetPasswordChangeForm(!opening);
+            if (opening) { cForm.classList.remove('hidden'); setStatusEl('ftc-pw-status', '', ''); var c = byId('ftc-pw-current'); if (c) c.focus(); }
+        });
+        var vBtn = byId('ftc-pw-verify-btn'), sBtn = byId('ftc-pw-save-btn'), xBtn = byId('ftc-pw-cancel');
+        if (vBtn) vBtn.addEventListener('click', verifyCurrentPassword);
+        if (sBtn) sBtn.addEventListener('click', saveNewPassword);
+        if (xBtn) xBtn.addEventListener('click', function () { resetPasswordChangeForm(true); });
+        onEnter('ftc-pw-current', verifyCurrentPassword);
+        onEnter('ftc-pw-new2', saveNewPassword);
     }
 
     /* ── Admin panel "Canlı İzleme" / "Kullanıcı Portföyleri" için hafif
@@ -2093,6 +2252,7 @@
                 if (e.key === 'Enter') { e.preventDefault(); if (modalLoginBtn) modalLoginBtn.click(); }
             });
         }
+        try { setupPasswordFeatures(); } catch (e) { console.warn('[Şifre] arayüz kurulamadı:', e); }
         if (modalSkipBtn) {
             modalSkipBtn.addEventListener('click', function () {
                 // Kalıcı bir "bir daha gösterme" bayrağı YOK — bu sadece o anki
