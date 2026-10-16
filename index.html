@@ -58,6 +58,14 @@
                 <input type="password" id="ftc-modal-login-password" class="form-input" placeholder="Şifren..." autocomplete="current-password">
                 <button type="button" class="btn btn-primary" style="width:100%;margin-top:6px;" id="ftc-modal-login-btn">Giriş Yap</button>
                 <div class="ftc-verify-status" id="ftc-modal-login-status"></div>
+                <!-- (16 Ekim 2026) Şifremi unuttum — e-postaya sıfırlama bağlantısı (finteclubBridge.js setupPasswordFeatures) -->
+                <button type="button" class="ftc-login-modal-skip" id="ftc-modal-forgot-toggle" style="margin-top:6px;">Şifremi unuttum</button>
+                <div id="ftc-modal-forgot" class="hidden" style="margin-top:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);">
+                    <p class="ftc-login-modal-desc" style="margin:0 0 8px;">Başvururken kullandığın e-postayı yaz; şifreni yenilemen için sana bir bağlantı gönderelim.</p>
+                    <input type="email" id="ftc-modal-forgot-email" class="form-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                    <button type="button" class="btn btn-secondary" style="width:100%;margin-top:6px;" id="ftc-modal-forgot-btn">Sıfırlama Bağlantısı Gönder</button>
+                    <div class="ftc-verify-status" id="ftc-modal-forgot-status"></div>
+                </div>
             </div>
             <div id="ftc-login-modal-welcome" class="ftc-login-modal-welcome hidden"></div>
             <button type="button" class="ftc-login-modal-skip" id="ftc-login-modal-skip">Giriş yapmadan devam et →</button>
@@ -261,6 +269,30 @@
                             <button type="button" id="ftc-login-btn" class="btn btn-primary" style="width:100%;margin-top:10px;">Giriş Yap</button>
                             <button type="button" id="ftc-logout-btn" class="btn btn-secondary hidden" style="width:100%;margin-top:8px;">Çıkış Yap</button>
                             <div class="ftc-verify-status" id="ftc-verify-status"></div>
+                            <!-- (16 Ekim 2026) Giriş yapılmamışken: şifremi unuttum -->
+                            <button type="button" class="ftc-login-modal-skip" id="ftc-forgot-toggle" style="margin-top:6px;">Şifremi unuttum</button>
+                            <div id="ftc-forgot" class="hidden" style="margin-top:8px;">
+                                <input type="email" id="ftc-forgot-email" class="form-input profile-name-input" placeholder="Kayıtlı e-postan..." autocomplete="username">
+                                <button type="button" id="ftc-forgot-btn" class="btn btn-secondary" style="width:100%;margin-top:8px;">Sıfırlama Bağlantısı Gönder</button>
+                                <div class="ftc-verify-status" id="ftc-forgot-status"></div>
+                            </div>
+                            <!-- (16 Ekim 2026) Giriş yapılmışken: önce mevcut şifre doğrulanır, sonra yeni şifre belirlenir -->
+                            <div id="ftc-pwchange-wrap" class="hidden">
+                                <button type="button" id="ftc-pwchange-toggle" class="btn btn-secondary" style="width:100%;margin-top:8px;">🔑 Şifremi Değiştir</button>
+                                <div id="ftc-pwchange-form" class="hidden" style="margin-top:8px;">
+                                    <div id="ftc-pw-step1">
+                                        <input type="password" id="ftc-pw-current" class="form-input profile-name-input" placeholder="Mevcut şifren..." autocomplete="current-password">
+                                        <button type="button" id="ftc-pw-verify-btn" class="btn btn-primary" style="width:100%;margin-top:8px;">Şifremi Doğrula</button>
+                                    </div>
+                                    <div id="ftc-pw-step2" class="hidden">
+                                        <input type="password" id="ftc-pw-new" class="form-input profile-name-input" placeholder="Yeni şifre (en az 6 karakter)" autocomplete="new-password">
+                                        <input type="password" id="ftc-pw-new2" class="form-input profile-name-input" placeholder="Yeni şifre (tekrar)" autocomplete="new-password" style="margin-top:8px;">
+                                        <button type="button" id="ftc-pw-save-btn" class="btn btn-primary" style="width:100%;margin-top:8px;">Şifreyi Güncelle</button>
+                                    </div>
+                                    <button type="button" class="ftc-login-modal-skip" id="ftc-pw-cancel" style="margin-top:6px;">Vazgeç</button>
+                                    <div class="ftc-verify-status" id="ftc-pw-status"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1770,7 +1802,7 @@
          Durumu, Tema/Kurumsal Mavi) ve FinteLig giriş/doğrulama akışı bu
          dosya sayesinde tekrar çalışıyor. Firebase SDK script'leri yukarıda
          (config.js'ten önce) yüklü olmalı. -->
-    <script defer src="finteclubBridge.min.js?v=20261014a"></script>
+    <script defer src="finteclubBridge.min.js?v=20261016a"></script>
 
 
     <script>
