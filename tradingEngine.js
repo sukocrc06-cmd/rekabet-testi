@@ -2684,6 +2684,7 @@ const TradingEngine = (() => {
         }
 
         state.activeSymbol = symbol;
+        refreshSideLabels();
         try { localStorage.setItem(LAST_SYMBOL_STORAGE_KEY, symbol); } catch (e) { /* private mode / quota */ }
         openSymbolTab(symbol);
         renderChartTabs();
@@ -2930,6 +2931,22 @@ const TradingEngine = (() => {
         setOrderType('MARKET');
     }
 
+    // (21 Ekim 2026) VİOP'ta SAT ile açığa satış (short) açıldığı yarışmacılarca
+    // anlaşılmıyordu: VİOP modunda sekme "SAT / SHORT", düğme — elde LONG
+    // pozisyon yoksa — "SAT / SHORT (açığa sat)" yazar. LONG varsa SAT önce onu
+    // kapattığı için düğme "SAT (SELL)" kalır.
+    function sellSubmitLabel() {
+        if (state.market !== 'VIOP') return 'SAT (SELL)';
+        const pos = state.activeSymbol ? book('VIOP').positions[state.activeSymbol] : null;
+        return pos && pos.side === 'LONG' ? 'SAT (SELL)' : 'SAT / SHORT (açığa sat)';
+    }
+    function refreshSideLabels() {
+        const sellTab = byId('qt-tab-sell');
+        if (sellTab) sellTab.textContent = state.market === 'VIOP' ? 'SAT / SHORT' : 'SAT';
+        const submitBtn = byId('qt-submit');
+        if (submitBtn && state.orderType !== 'OCO') submitBtn.textContent = state.side === 'BUY' ? 'AL (BUY)' : sellSubmitLabel();
+    }
+
     function setSide(side) {
         state.side = side;
         const buyTab = byId('qt-tab-buy');
@@ -2938,7 +2955,7 @@ const TradingEngine = (() => {
         if (buyTab) buyTab.classList.toggle('active', side === 'BUY');
         if (sellTab) sellTab.classList.toggle('active', side === 'SELL');
         if (submitBtn) {
-            submitBtn.textContent = side === 'BUY' ? 'AL (BUY)' : 'SAT (SELL)';
+            submitBtn.textContent = side === 'BUY' ? 'AL (BUY)' : sellSubmitLabel();
             submitBtn.className = 'btn-trade-submit ' + (side === 'BUY' ? 'btn-buy' : 'btn-sell');
         }
         updateEstimate();
@@ -2982,7 +2999,7 @@ const TradingEngine = (() => {
         // pozisyon SL/TP'si bu modda anlamsız; gizleniyor.
         if (sideTabs) sideTabs.style.display = type === 'OCO' ? 'none' : 'flex';
         if (sltpGroup) sltpGroup.style.display = type === 'OCO' ? 'none' : 'block';
-        if (submitBtn) submitBtn.textContent = type === 'OCO' ? 'OCO EMRİ OLUŞTUR' : (state.side === 'BUY' ? 'AL (BUY)' : 'SAT (SELL)');
+        if (submitBtn) submitBtn.textContent = type === 'OCO' ? 'OCO EMRİ OLUŞTUR' : (state.side === 'BUY' ? 'AL (BUY)' : sellSubmitLabel());
 
         // OCO'da SL/TP kutusu (ve içindeki risk hesaplayıcı) tamamen
         // gizleniyor — adet alanı OCO'nun kendi kullanımı için serbest
@@ -3097,6 +3114,7 @@ const TradingEngine = (() => {
             }
 
             try { localStorage.setItem(MARKET_MODE_STORAGE_KEY, state.market); } catch (e) { /* private mode */ }
+            refreshSideLabels();
             updateEstimate();
         }
 
@@ -5191,6 +5209,7 @@ const TradingEngine = (() => {
     }
 
     function renderPositions() {
+        refreshSideLabels();
         renderPositionsInto('qt-positions-body', portfolio.positions, 'NORMAL');
         renderPositionsInto('qt-positions-body-viop', portfolio.viopPositions, 'VIOP');
     }
