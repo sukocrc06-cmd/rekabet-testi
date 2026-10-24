@@ -761,6 +761,45 @@ async def _start_self_ping():
         asyncio.create_task(_self_ping_loop())
 
 
+# (24 Ekim 2026 — kural 6.13 "fiyat netleştirme" sunucuda) Sayfası kapalı
+# yarışmacıların bekleyen işlemleri, FinteLig'in Vercel ucu
+# /api/settle-trades tarafından Firebase Admin SDK ile netleştiriliyor (bkz.
+# ADM-N/api/settle-trades.js). Vercel Hobby'de sık cron olmadığı için
+# zamanlayıcı burada: seans günlerinde 10:05–19:30 (TRT) arası 5 dakikada bir
+# o ucu çağırır. Uç kendi içinde de 4 dk'dan sık çalışmayı reddeder; burada
+# bir hata olursa sessizce yutulur, bir sonraki turda tekrar denenir.
+_SETTLE_URL = os.environ.get("SETTLE_URL", "https://fintelig-finteclub.vercel.app/api/settle-trades")
+_SETTLE_ENABLED = os.environ.get("SETTLE_ENABLED", "true").strip().lower() != "false"
+_SETTLE_INTERVAL_SEC = 300
+
+
+def _settle_window_now() -> bool:
+    t = time.gmtime(time.time() + 3 * 3600)  # TRT (UTC+3, yaz saati yok)
+    if t.tm_wday >= 5:
+        return False
+    minutes = t.tm_hour * 60 + t.tm_min
+    return 10 * 60 + 5 <= minutes <= 19 * 60 + 30
+
+
+async def _settle_loop():
+    while True:
+        await asyncio.sleep(_SETTLE_INTERVAL_SEC)
+        if not _settle_window_now():
+            continue
+        try:
+            r = await asyncio.to_thread(session.post, _SETTLE_URL, json={}, timeout=70)
+            if r.status_code not in (200, 204):
+                print(f"[settle] {r.status_code} {r.text[:200]}")
+        except Exception as e:
+            print(f"[settle] çağrı başarısız: {e}")
+
+
+@app.on_event("startup")
+async def _start_settle_loop():
+    if os.environ.get("RENDER") and _SETTLE_ENABLED:
+        asyncio.create_task(_settle_loop())
+
+
 @app.get("/api/v1/list-stocks")
 async def list_stocks():
     try:
@@ -1663,4 +1702,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-# EOF
+# EOF
